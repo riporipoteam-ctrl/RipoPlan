@@ -1,0 +1,155 @@
+openapi: 3.0.1
+info:
+  title: RipoPlan API
+  description: |
+    The RipoPlan API provides endpoints for managing a simple to‑do list. You can
+    create tasks, list existing tasks, update their details, delete them, upload
+    images to tasks, and fetch task suggestions.  This specification is used
+    by ChatGPT to understand how to call the API when interacting with the
+    RipoPlan plugin.
+  version: "1.0.0"
+servers:
+  - url: https://{{HOST}}/
+paths:
+  /tasks:
+    get:
+      summary: List tasks
+      operationId: listTasks
+      responses:
+        '200':
+          description: A JSON array of tasks
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Task'
+    post:
+      summary: Create a new task
+      operationId: createTask
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                title:
+                  type: string
+                  description: The title of the task
+                description:
+                  type: string
+                  description: Optional task description
+                due_date:
+                  type: string
+                  format: date
+                  description: Optional due date in YYYY-MM-DD format
+                status:
+                  type: string
+                  description: The initial status for the task
+      responses:
+        '200':
+          description: The created task
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Task'
+  /tasks/{task_id}:
+    put:
+      summary: Update a task
+      operationId: updateTask
+      parameters:
+        - in: path
+          name: task_id
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                title:
+                  type: string
+                  description: New title
+                description:
+                  type: string
+                  description: New description
+                due_date:
+                  type: string
+                  format: date
+                  description: New due date
+                status:
+                  type: string
+                  description: New status
+                image:
+                  type: string
+                  format: binary
+                  description: An image file to attach to the task
+      responses:
+        '200':
+          description: The updated task
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Task'
+    delete:
+      summary: Delete a task
+      operationId: deleteTask
+      parameters:
+        - in: path
+          name: task_id
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Confirmation of deletion
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Task'
+  /suggestions:
+    get:
+      summary: Get task suggestions
+      operationId: getSuggestions
+      responses:
+        '200':
+          description: Suggested tasks
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Task'
+components:
+  schemas:
+    Task:
+      type: object
+      properties:
+        id:
+          type: string
+        title:
+          type: string
+        description:
+          type: string
+          nullable: true
+        status:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        due_date:
+          type: string
+          format: date
+          nullable: true
+        image:
+          type: string
+          nullable: true

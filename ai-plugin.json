@@ -1,0 +1,17 @@
+{
+  "schema_version": "v1",
+  "name_for_human": "RipoPlan",
+  "name_for_model": "ripoplan",
+  "description_for_human": "Manage your tasks: create, list, update, delete, upload images and get suggestions.",
+  "description_for_model": "A plugin for managing tasks. You can create tasks, list all tasks, update tasks (title, description, due date, status, image), delete tasks, upload images to tasks, and retrieve simple suggestions based on pending tasks.",
+  "auth": {
+    "type": "none"
+  },
+  "api": {
+    "type": "openapi",
+    "url": "https://{{HOST}}/openapi.yaml"
+  },
+  "logo_url": "https://{{HOST}}/logo.png",
+  "contact_email": "support@ripoplan.example.com",
+  "legal_info_url": "https://ripoplan.example.com/legal"
+}

@@ -1,0 +1,201 @@
+/*
+ * RipoPlan Front‑End Styles
+ *
+ * These styles define a clean, modern interface for the RipoPlan
+ * application. The design uses soft shadows, rounded corners, and a
+ * neutral color palette. Simple animations are used to fade
+ * components into view.
+ */
+
+/* CSS Variables for easy theming */
+:root {
+  --primary: #0066ff;
+  --primary-dark: #0047b3;
+  --background: #f4f6fa;
+  --card-bg: #ffffff;
+  --text: #333333;
+  --border: #e0e6ed;
+  --radius: 8px;
+  --shadow: 0 2px 6px rgba(0, 0, 0, 0.1);
+}
+
+body {
+  margin: 0;
+  padding: 0;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen,
+    Ubuntu, Cantarell, "Open Sans", "Helvetica Neue", sans-serif;
+  background: var(--background);
+  color: var(--text);
+}
+
+h1,
+h2 {
+  margin-top: 0;
+  font-weight: 600;
+}
+
+a {
+  color: var(--primary);
+  text-decoration: none;
+}
+a:hover {
+  text-decoration: underline;
+}
+
+/* Container for auth forms */
+.container {
+  max-width: 400px;
+  margin: 80px auto;
+  padding: 20px;
+  background: var(--card-bg);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  animation: fadeIn 0.6s ease-out;
+}
+
+.logo {
+  margin-bottom: 16px;
+  font-size: 2rem;
+  color: var(--primary-dark);
+}
+
+.auth-form {
+  display: block;
+}
+.auth-form.hidden {
+  display: none;
+}
+
+.auth-form h2 {
+  margin-bottom: 12px;
+  color: var(--primary-dark);
+}
+.auth-form form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.auth-form input {
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  font-size: 1rem;
+}
+.auth-form button {
+  padding: 10px;
+  background: var(--primary);
+  color: #fff;
+  border: none;
+  border-radius: var(--radius);
+  cursor: pointer;
+  transition: background 0.2s;
+  font-size: 1rem;
+}
+.auth-form button:hover {
+  background: var(--primary-dark);
+}
+.auth-form .switch {
+  margin-top: 8px;
+  font-size: 0.9rem;
+}
+
+/* Main app layout */
+#app {
+  max-width: 800px;
+  margin: 40px auto;
+  padding: 0 20px;
+  animation: fadeIn 0.7s ease-out;
+}
+#app.hidden {
+  display: none;
+}
+
+header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: var(--primary);
+  color: #fff;
+  padding: 16px 20px;
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+}
+header h1 {
+  margin: 0;
+  font-size: 1.5rem;
+}
+header button {
+  padding: 8px 12px;
+  background: #fff;
+  color: var(--primary-dark);
+  border: none;
+  border-radius: var(--radius);
+  cursor: pointer;
+  transition: background 0.2s;
+}
+header button:hover {
+  background: #f0f0f0;
+}
+
+/* Cards */
+.card {
+  background: var(--card-bg);
+  padding: 20px;
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  margin-top: 20px;
+  animation: slideUp 0.5s ease-out;
+}
+
+/* New task form */
+#new-task-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+#new-task-form input,
+#new-task-form textarea {
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  font-size: 1rem;
+}
+#new-task-form button {
+  align-self: flex-start;
+  padding: 10px 16px;
+  background: var(--primary);
+  color: #fff;
+  border: none;
+  border-radius: var(--radius);
+  cursor: pointer;
+  transition: background 0.2s;
+}
+#new-task-form button:hover {
+  background: var(--primary-dark);
+}
+
+/* Tasks list */
+#tasks-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+.task-item {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px;
+  margin-bottom: 12px;
+  position: relative;
+  animation: fadeIn 0.4s ease-out;
+}
+.task-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.task-title {
+  font-weight: 600;
+}
