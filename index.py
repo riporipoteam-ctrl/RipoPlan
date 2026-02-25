@@ -27,13 +27,18 @@ import json
 import os
 import uuid
 from datetime import datetime
-from typing import Optional
+from typing import Any, Dict, List, Optional
 
 from fastapi import (Depends, FastAPI, File, Form, HTTPException, Request,
                      UploadFile)
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel, Field
+
+from prompts.automotive import (DIAGNOSIS_PROMPT, FOLLOW_UP_PROMPT,
+                                REPAIR_TUTORIAL_PROMPT)
+from services.ai import GeminiService
 
 # ----------------------------------------------------------------------------
 # Configuration
@@ -53,6 +58,7 @@ os.makedirs(UPLOAD_DIR, exist_ok=True)
 # In‑memory token store.  In a production system this should be persisted in a
 # database and use JWT or another secure mechanism.
 TOKENS = {}
+AI_SESSIONS: Dict[str, Dict[str, Any]] = {}
 
 # Create the FastAPI application
 app = FastAPI(
@@ -280,3 +286,108 @@ async def get_suggestions():
 async def health_check():
     """Return a simple health status."""
     return {"status": "ok"}
+
+
+class VehicleContext(BaseModel):
+    vehicle: str
+    engine: Optional[str] = "unknown"
+    mileage: Optional[str] = "unknown"
+    dashboard_lights: List[str] = Field(default_factory=list)
+    obd_codes: List[str] = Field(default_factory=list)
+    symptoms: List[str] = Field(default_factory=list)
+    recent_repairs: List[str] = Field(default_factory=list)
+
+
+class DiagnosisRequest(BaseModel):
+    session_id: Optional[str] = None
+    context: VehicleContext
+
+
+class RepairTutorialRequest(BaseModel):
+    session_id: Optional[str] = None
+    context: VehicleContext
+    repair_goal: str
+    confirmed_issue: str = "Not yet confirmed"
+    skill_level: str = "intermediate"
+    available_tools: List[str] = Field(default_factory=list)
+
+
+class FollowUpRequest(BaseModel):
+    session_id: str
+    question: str
+
+
+def _upsert_session(session_id: str, context: Dict[str, Any], response: Dict[str, Any]):
+    current = AI_SESSIONS.get(session_id, {})
+    AI_SESSIONS[session_id] = {
+        "context": context,
+        "last_response": response,
+        "updated_at": datetime.utcnow().isoformat(),
+        "history": [*current.get("history", []), response],
+    }
+
+
+@app.post("/ai/diagnosis", tags=["ai"])
+async def generate_vehicle_diagnosis(payload: DiagnosisRequest):
+    session_id = payload.session_id or uuid.uuid4().hex
+    service = GeminiService()
+    prompt = DIAGNOSIS_PROMPT.format(
+        vehicle=payload.context.vehicle,
+        engine=payload.context.engine,
+        mileage=payload.context.mileage,
+        dashboard_lights=", ".join(payload.context.dashboard_lights) or "none provided",
+        obd_codes=", ".join(payload.context.obd_codes) or "none provided",
+        symptoms=", ".join(payload.context.symptoms) or "none provided",
+        recent_repairs=", ".join(payload.context.recent_repairs) or "none provided",
+    )
+    structured = service.generate_structured(prompt)
+    _upsert_session(session_id, payload.context.model_dump(), structured)
+
+    return {
+        "session_id": session_id,
+        "type": "diagnosis",
+        "content": structured,
+    }
+
+
+@app.post("/ai/repair-tutorial", tags=["ai"])
+async def generate_repair_tutorial(payload: RepairTutorialRequest):
+    session_id = payload.session_id or uuid.uuid4().hex
+    service = GeminiService()
+    prompt = REPAIR_TUTORIAL_PROMPT.format(
+        vehicle=payload.context.vehicle,
+        engine=payload.context.engine,
+        repair_goal=payload.repair_goal,
+        confirmed_issue=payload.confirmed_issue,
+        skill_level=payload.skill_level,
+        available_tools=", ".join(payload.available_tools) or "not specified",
+    )
+    structured = service.generate_structured(prompt)
+    _upsert_session(session_id, payload.context.model_dump(), structured)
+
+    return {
+        "session_id": session_id,
+        "type": "repair_tutorial",
+        "content": structured,
+    }
+
+
+@app.post("/ai/follow-up", tags=["ai"])
+async def generate_follow_up(payload: FollowUpRequest):
+    session = AI_SESSIONS.get(payload.session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Unknown session_id")
+
+    service = GeminiService()
+    prompt = FOLLOW_UP_PROMPT.format(
+        session_context=json.dumps(session, indent=2),
+        question=payload.question,
+    )
+    structured = service.generate_structured(prompt)
+    _upsert_session(payload.session_id, session.get("context", {}), structured)
+
+    return {
+        "session_id": payload.session_id,
+        "type": "follow_up",
+        "content": structured,
+    }
