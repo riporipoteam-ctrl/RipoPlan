@@ -4,10 +4,8 @@ RipoPlan Backend API for Vercel
 
 This module contains a FastAPI application that exposes endpoints for
 managing to‑do tasks and basic user authentication. It also serves
-static assets for the front‑end from the ``public`` directory and
-provides access to uploaded images. The application is designed to
-work on Vercel's serverless platform where the ``public`` directory
-is automatically served as static files.
+static assets for the front‑end from the repository root and
+provides access to uploaded images.
 
 The data for tasks and users are stored in JSON files within the same
 directory as this module. Authentication tokens are kept in memory.
@@ -24,6 +22,7 @@ exposes an ``app`` object.
 
 import hashlib
 import json
+import logging
 import os
 import uuid
 from datetime import datetime
@@ -45,8 +44,8 @@ DATA_FILE = os.path.join(BASE_DIR, "tasks.json")
 USERS_FILE = os.path.join(BASE_DIR, "users.json")
 UPLOAD_DIR = os.path.join(BASE_DIR, "uploads")
 
-# The ``public`` directory sits alongside ``api`` in the repo root.
-FRONTEND_DIR = os.path.join(os.path.dirname(BASE_DIR), "public")
+# Frontend files are stored in the repository root alongside this module.
+FRONTEND_DIR = BASE_DIR
 
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
@@ -74,10 +73,22 @@ app.add_middleware(
 # Serve uploaded images at /uploads
 app.mount("/uploads", StaticFiles(directory=UPLOAD_DIR), name="uploads")
 
-# Serve the static front‑end files from the public directory.  The html=True
-# option ensures that index.html is returned for the root path.
-if os.path.isdir(FRONTEND_DIR):
-    app.mount("/", StaticFiles(directory=FRONTEND_DIR, html=True), name="static")
+logger = logging.getLogger("ripoplan")
+
+
+@app.on_event("startup")
+async def check_frontend_directory() -> None:
+    """Log startup diagnostics for static frontend files."""
+    if not os.path.isdir(FRONTEND_DIR):
+        logger.warning(
+            "Frontend directory missing: %s. The `/` route cannot serve index.html.",
+            FRONTEND_DIR,
+        )
+    elif not os.path.isfile(os.path.join(FRONTEND_DIR, "index.html")):
+        logger.warning(
+            "Frontend index file missing: %s.",
+            os.path.join(FRONTEND_DIR, "index.html"),
+        )
 
 # ----------------------------------------------------------------------------
 # Utility functions for loading and saving JSON data
@@ -280,3 +291,8 @@ async def get_suggestions():
 async def health_check():
     """Return a simple health status."""
     return {"status": "ok"}
+
+
+# Mount static frontend files after API routes so API endpoints keep priority.
+if os.path.isdir(FRONTEND_DIR):
+    app.mount("/", StaticFiles(directory=FRONTEND_DIR, html=True), name="frontend")
