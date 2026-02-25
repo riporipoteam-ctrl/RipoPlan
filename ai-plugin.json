@@ -1,9 +1,9 @@
 {
   "schema_version": "v1",
-  "name_for_human": "RipoPlan",
-  "name_for_model": "ripoplan",
-  "description_for_human": "Manage your tasks: create, list, update, delete, upload images and get suggestions.",
-  "description_for_model": "A plugin for managing tasks. You can create tasks, list all tasks, update tasks (title, description, due date, status, image), delete tasks, upload images to tasks, and retrieve simple suggestions based on pending tasks.",
+  "name_for_human": "RipoPlan Vehicle Intelligence",
+  "name_for_model": "ripoplan_vehicle",
+  "description_for_human": "Decode VINs, view vehicle profiles, run diagnostics, create repair plans, and ask follow-up repair questions.",
+  "description_for_model": "A vehicle-service plugin. Decode VIN data from manual entry or image upload, retrieve a vehicle profile, run diagnostics, generate a repair plan, and chat about next repair actions.",
   "auth": {
     "type": "none"
   },

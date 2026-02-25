@@ -1,32 +1,17 @@
 openapi: 3.0.1
 info:
-  title: RipoPlan API
+  title: RipoPlan Vehicle Intelligence API
   description: |
-    The RipoPlan API provides endpoints for managing a simple to‑do list. You can
-    create tasks, list existing tasks, update their details, delete them, upload
-    images to tasks, and fetch task suggestions.  This specification is used
-    by ChatGPT to understand how to call the API when interacting with the
-    RipoPlan plugin.
-  version: "1.0.0"
+    API for VIN decoding, vehicle profile retrieval, diagnostics scanning,
+    repair plan generation, and follow-up repair chat.
+  version: "2.0.0"
 servers:
   - url: https://{{HOST}}/
 paths:
-  /tasks:
-    get:
-      summary: List tasks
-      operationId: listTasks
-      responses:
-        '200':
-          description: A JSON array of tasks
-          content:
-            application/json:
-              schema:
-                type: array
-                items:
-                  $ref: '#/components/schemas/Task'
+  /vin/decode:
     post:
-      summary: Create a new task
-      operationId: createTask
+      summary: Decode VIN from manual value or uploaded image
+      operationId: decodeVin
       requestBody:
         required: true
         content:
@@ -34,122 +19,182 @@ paths:
             schema:
               type: object
               properties:
-                title:
+                vin:
                   type: string
-                  description: The title of the task
-                description:
-                  type: string
-                  description: Optional task description
-                due_date:
-                  type: string
-                  format: date
-                  description: Optional due date in YYYY-MM-DD format
-                status:
-                  type: string
-                  description: The initial status for the task
-      responses:
-        '200':
-          description: The created task
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Task'
-  /tasks/{task_id}:
-    put:
-      summary: Update a task
-      operationId: updateTask
-      parameters:
-        - in: path
-          name: task_id
-          required: true
-          schema:
-            type: string
-      requestBody:
-        required: true
-        content:
-          multipart/form-data:
-            schema:
-              type: object
-              properties:
-                title:
-                  type: string
-                  description: New title
-                description:
-                  type: string
-                  description: New description
-                due_date:
-                  type: string
-                  format: date
-                  description: New due date
-                status:
-                  type: string
-                  description: New status
+                  description: VIN provided manually.
                 image:
                   type: string
                   format: binary
-                  description: An image file to attach to the task
+                  description: Image containing a VIN plate/barcode.
       responses:
         '200':
-          description: The updated task
+          description: Decoded VIN details
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Task'
-    delete:
-      summary: Delete a task
-      operationId: deleteTask
+                $ref: '#/components/schemas/VinDecodeResponse'
+  /vehicle/{vin}:
+    get:
+      summary: Load enriched vehicle profile
+      operationId: getVehicleProfile
       parameters:
         - in: path
-          name: task_id
+          name: vin
           required: true
           schema:
             type: string
       responses:
         '200':
-          description: Confirmation of deletion
+          description: Vehicle profile
           content:
             application/json:
               schema:
-                type: array
-                items:
-                  $ref: '#/components/schemas/Task'
-  /suggestions:
-    get:
-      summary: Get task suggestions
-      operationId: getSuggestions
+                $ref: '#/components/schemas/VehicleProfile'
+  /diagnostics/run:
+    post:
+      summary: Run diagnostics for a VIN
+      operationId: runDiagnostics
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [vin]
+              properties:
+                vin:
+                  type: string
       responses:
         '200':
-          description: Suggested tasks
+          description: Diagnostics result with issues
           content:
             application/json:
               schema:
-                type: array
-                items:
-                  $ref: '#/components/schemas/Task'
+                $ref: '#/components/schemas/DiagnosticsResponse'
+  /repair/plan:
+    post:
+      summary: Build repair plan from diagnostics
+      operationId: buildRepairPlan
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [vin, issues]
+              properties:
+                vin:
+                  type: string
+                issues:
+                  type: array
+                  items:
+                    $ref: '#/components/schemas/DiagnosticIssue'
+      responses:
+        '200':
+          description: Ordered repair steps
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RepairPlanResponse'
+  /chat:
+    post:
+      summary: Ask a follow-up repair question
+      operationId: vehicleChat
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [vin, message]
+              properties:
+                vin:
+                  type: string
+                message:
+                  type: string
+                diagnostics:
+                  type: array
+                  items:
+                    $ref: '#/components/schemas/DiagnosticIssue'
+      responses:
+        '200':
+          description: Assistant response
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  vin:
+                    type: string
+                  reply:
+                    type: string
 components:
   schemas:
-    Task:
+    VinDecodeResponse:
       type: object
       properties:
-        id:
+        vin:
           type: string
-        title:
+        wmi:
           type: string
-        description:
+        manufacturer:
           type: string
-          nullable: true
-        status:
+        country:
           type: string
-        created_at:
+        model_year_code:
           type: string
-          format: date-time
-        updated_at:
+    VehicleProfile:
+      type: object
+      properties:
+        vin:
           type: string
-          format: date-time
-        due_date:
+        brand:
           type: string
-          format: date
-          nullable: true
-        image:
+        model:
           type: string
-          nullable: true
+        year:
+          type: integer
+        hero_image:
+          type: string
+        specs:
+          type: object
+          additionalProperties:
+            type: string
+    DiagnosticIssue:
+      type: object
+      properties:
+        code:
+          type: string
+        summary:
+          type: string
+        severity:
+          type: string
+    DiagnosticsResponse:
+      type: object
+      properties:
+        vin:
+          type: string
+        summary:
+          type: string
+        issues:
+          type: array
+          items:
+            $ref: '#/components/schemas/DiagnosticIssue'
+    RepairPlanResponse:
+      type: object
+      properties:
+        vin:
+          type: string
+        estimated_total:
+          type: string
+        steps:
+          type: array
+          items:
+            type: object
+            properties:
+              issue_code:
+                type: string
+              action:
+                type: string
+              eta:
+                type: string

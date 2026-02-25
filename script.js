@@ -1,14 +1,3 @@
-/*
- * RipoPlan Front‑End Logic
- *
- * This script implements all client‑side functionality for the RipoPlan
- * application. It handles user signup/login, task CRUD operations, image
- * uploads, and rendering suggestions from the backend. All API calls are
- * relative to the current origin, making the application portable when
- * deployed alongside the FastAPI backend.
- */
-
-// Retrieve references to DOM elements
 const authSection = document.getElementById('auth-section');
 const signupForm = document.getElementById('signup-form');
 const loginForm = document.getElementById('login-form');
@@ -18,315 +7,251 @@ const showLoginLink = document.getElementById('show-login');
 const showSignupLink = document.getElementById('show-signup');
 const appDiv = document.getElementById('app');
 const logoutBtn = document.getElementById('logout');
-const newTaskForm = document.getElementById('new-task-form');
-const tasksList = document.getElementById('tasks-list');
-const suggestionsList = document.getElementById('suggestions-list');
 
-// Helper: perform a fetch request including the auth token if present
+const vinForm = document.getElementById('vin-form');
+const manualVinInput = document.getElementById('manual-vin');
+const vinStatus = document.getElementById('vin-status');
+const scanVinBtn = document.getElementById('scan-vin');
+const vinImageInput = document.getElementById('vin-image');
+const vehicleTitle = document.getElementById('vehicle-title');
+const vehicleImage = document.getElementById('vehicle-image');
+const vehicleSpecs = document.getElementById('vehicle-specs');
+const runDiagnosticsBtn = document.getElementById('run-diagnostics');
+const diagnosticsList = document.getElementById('diagnostics-list');
+const repairSteps = document.getElementById('repair-steps');
+const chatLauncher = document.getElementById('chat-launcher');
+const chatLog = document.getElementById('chat-log');
+
+let activeVin = null;
+let latestDiagnostics = [];
+
 function fetchWithAuth(url, options = {}) {
   const token = localStorage.getItem('token');
   const opts = { ...options };
   opts.headers = opts.headers || {};
   if (token) {
-    opts.headers['Authorization'] = `Bearer ${token}`;
+    opts.headers.Authorization = `Bearer ${token}`;
   }
   return fetch(url, opts);
 }
 
-// Show the application interface
 function showApp() {
   authSection.style.display = 'none';
   appDiv.classList.remove('hidden');
-  loadTasks();
-  loadSuggestions();
 }
 
-// Show the authentication interface
 function showAuth() {
   appDiv.classList.add('hidden');
   authSection.style.display = 'block';
-  // Default to showing signup form
   signupDiv.classList.remove('hidden');
   loginDiv.classList.add('hidden');
 }
 
-// Switch between signup and login forms
-if (showLoginLink) {
-  showLoginLink.addEventListener('click', (e) => {
-    e.preventDefault();
-    signupDiv.classList.add('hidden');
-    loginDiv.classList.remove('hidden');
-  });
-}
-if (showSignupLink) {
-  showSignupLink.addEventListener('click', (e) => {
-    e.preventDefault();
-    loginDiv.classList.add('hidden');
-    signupDiv.classList.remove('hidden');
-  });
-}
+showLoginLink?.addEventListener('click', (e) => {
+  e.preventDefault();
+  signupDiv.classList.add('hidden');
+  loginDiv.classList.remove('hidden');
+});
 
-// Handle signup
-if (signupForm) {
-  signupForm.addEventListener('submit', async (e) => {
-    e.preventDefault();
-    const email = document.getElementById('signup-email').value.trim();
-    const password = document.getElementById('signup-password').value.trim();
-    const formData = new FormData();
-    formData.append('email', email);
-    formData.append('password', password);
-    try {
-      const res = await fetch('/signup', { method: 'POST', body: formData });
-      if (!res.ok) {
-        const err = await res.json();
-        alert(err.detail || 'Signup failed');
-        return;
-      }
-      // Automatically log in after successful signup
-      await handleLogin(email, password);
-    } catch (err) {
-      console.error(err);
-      alert('Signup failed');
-    }
-  });
-}
+showSignupLink?.addEventListener('click', (e) => {
+  e.preventDefault();
+  loginDiv.classList.add('hidden');
+  signupDiv.classList.remove('hidden');
+});
 
-// Handle login
-if (loginForm) {
-  loginForm.addEventListener('submit', async (e) => {
-    e.preventDefault();
-    const email = document.getElementById('login-email').value.trim();
-    const password = document.getElementById('login-password').value.trim();
-    await handleLogin(email, password);
-  });
-}
+signupForm?.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const email = document.getElementById('signup-email').value.trim();
+  const password = document.getElementById('signup-password').value.trim();
+  const formData = new FormData();
+  formData.append('email', email);
+  formData.append('password', password);
+
+  const res = await fetch('/signup', { method: 'POST', body: formData });
+  if (!res.ok) {
+    const err = await res.json();
+    alert(err.detail || 'Signup failed');
+    return;
+  }
+  await handleLogin(email, password);
+});
+
+loginForm?.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const email = document.getElementById('login-email').value.trim();
+  const password = document.getElementById('login-password').value.trim();
+  await handleLogin(email, password);
+});
 
 async function handleLogin(email, password) {
   const formData = new FormData();
   formData.append('email', email);
   formData.append('password', password);
-  try {
-    const res = await fetch('/login', { method: 'POST', body: formData });
-    if (!res.ok) {
-      const err = await res.json();
-      alert(err.detail || 'Login failed');
-      return;
-    }
-    const data = await res.json();
-    localStorage.setItem('token', data.token);
-    showApp();
-  } catch (err) {
-    console.error(err);
-    alert('Login failed');
-  }
-}
-
-// Handle logout
-if (logoutBtn) {
-  logoutBtn.addEventListener('click', () => {
-    localStorage.removeItem('token');
-    showAuth();
-  });
-}
-
-// Load tasks from the server and render them
-async function loadTasks() {
-  try {
-    const res = await fetchWithAuth('/tasks');
-    const tasks = await res.json();
-    renderTasks(tasks);
-  } catch (err) {
-    console.error(err);
-  }
-}
-
-// Render task list
-function renderTasks(tasks) {
-  tasksList.innerHTML = '';
-  tasks.forEach((task) => {
-    const li = document.createElement('li');
-    li.className = 'task-item';
-
-    // Header with title and status/due date
-    const header = document.createElement('div');
-    header.className = 'task-header';
-    const title = document.createElement('p');
-    title.className = 'task-title';
-    title.textContent = task.title;
-    header.appendChild(title);
-    const meta = document.createElement('p');
-    meta.className = 'task-meta';
-    let metaText = '';
-    if (task.due_date) metaText += `Due: ${task.due_date}`;
-    if (task.status) metaText += `${metaText ? ' · ' : ''}${task.status}`;
-    meta.textContent = metaText;
-    header.appendChild(meta);
-    li.appendChild(header);
-
-    // Description
-    if (task.description) {
-      const desc = document.createElement('p');
-      desc.textContent = task.description;
-      li.appendChild(desc);
-    }
-
-    // Image preview
-    if (task.image) {
-      const img = document.createElement('img');
-      img.src = task.image;
-      img.alt = task.title;
-      img.style.maxWidth = '100%';
-      img.style.borderRadius = '4px';
-      li.appendChild(img);
-    }
-
-    // Buttons container
-    const btns = document.createElement('div');
-    btns.className = 'task-buttons';
-
-    // Complete button if pending
-    if (task.status !== 'completed') {
-      const completeBtn = document.createElement('button');
-      completeBtn.className = 'complete';
-      completeBtn.textContent = 'Complete';
-      completeBtn.addEventListener('click', () => completeTask(task.id));
-      btns.appendChild(completeBtn);
-    }
-
-    // Delete button
-    const deleteBtn = document.createElement('button');
-    deleteBtn.className = 'delete';
-    deleteBtn.textContent = 'Delete';
-    deleteBtn.addEventListener('click', () => deleteTask(task.id));
-    btns.appendChild(deleteBtn);
-
-    // Image upload button
-    const uploadBtn = document.createElement('button');
-    uploadBtn.className = 'upload';
-    uploadBtn.textContent = 'Upload Image';
-    const fileInput = document.createElement('input');
-    fileInput.type = 'file';
-    fileInput.accept = 'image/*';
-    fileInput.style.display = 'none';
-    uploadBtn.addEventListener('click', () => fileInput.click());
-    fileInput.addEventListener('change', () => handleImageUpload(task.id, fileInput.files[0]));
-    btns.appendChild(uploadBtn);
-    btns.appendChild(fileInput);
-
-    li.appendChild(btns);
-    tasksList.appendChild(li);
-  });
-}
-
-// Load suggestions from the server
-async function loadSuggestions() {
-  try {
-    const res = await fetchWithAuth('/suggestions');
-    const suggestions = await res.json();
-    renderSuggestions(suggestions);
-  } catch (err) {
-    console.error(err);
-  }
-}
-
-// Render suggestions list
-function renderSuggestions(suggestions) {
-  suggestionsList.innerHTML = '';
-  if (suggestions.length === 0) {
-    suggestionsList.textContent = 'No suggestions at the moment.';
+  const res = await fetch('/login', { method: 'POST', body: formData });
+  if (!res.ok) {
+    const err = await res.json();
+    alert(err.detail || 'Login failed');
     return;
   }
-  suggestions.forEach((task) => {
-    const li = document.createElement('li');
-    li.textContent = `${task.title} (Due: ${task.due_date || 'N/A'})`;
-    suggestionsList.appendChild(li);
-  });
+  const data = await res.json();
+  localStorage.setItem('token', data.token);
+  showApp();
 }
 
-// Handle new task submission
-if (newTaskForm) {
-  newTaskForm.addEventListener('submit', async (e) => {
-    e.preventDefault();
-    const title = document.getElementById('new-title').value.trim();
-    const description = document.getElementById('new-desc').value.trim();
-    const dueDate = document.getElementById('new-due').value || null;
-    const formData = new FormData();
-    formData.append('title', title);
-    formData.append('description', description);
-    formData.append('due_date', dueDate);
-    try {
-      const res = await fetchWithAuth('/tasks', { method: 'POST', body: formData });
-      if (res.ok) {
-        const task = await res.json();
-        loadTasks();
-        loadSuggestions();
-        newTaskForm.reset();
-      } else {
-        const err = await res.json();
-        alert(err.detail || 'Failed to create task');
-      }
-    } catch (err) {
-      console.error(err);
-      alert('Failed to create task');
-    }
-  });
-}
+logoutBtn?.addEventListener('click', () => {
+  localStorage.removeItem('token');
+  showAuth();
+});
 
-// Complete a task
-async function completeTask(taskId) {
+async function decodeVin(vin) {
   const formData = new FormData();
-  formData.append('status', 'completed');
-  try {
-    const res = await fetchWithAuth(`/tasks/${taskId}`, { method: 'PUT', body: formData });
-    if (res.ok) {
-      loadTasks();
-      loadSuggestions();
-    } else {
-      const err = await res.json();
-      alert(err.detail || 'Failed to update task');
-    }
-  } catch (err) {
-    console.error(err);
-    alert('Failed to update task');
+  formData.append('vin', vin);
+  const res = await fetchWithAuth('/vin/decode', { method: 'POST', body: formData });
+  if (!res.ok) {
+    throw new Error('Unable to decode VIN');
   }
+  return res.json();
 }
 
-// Delete a task
-async function deleteTask(taskId) {
-  try {
-    const res = await fetchWithAuth(`/tasks/${taskId}`, { method: 'DELETE' });
-    if (res.ok) {
-      loadTasks();
-      loadSuggestions();
-    } else {
-      const err = await res.json();
-      alert(err.detail || 'Failed to delete task');
-    }
-  } catch (err) {
-    console.error(err);
-    alert('Failed to delete task');
-  }
+async function scanVinFromCamera() {
+  const vin = window.prompt('Camera scan simulator: paste scanned VIN');
+  if (!vin) return;
+  await processVin(vin.trim().toUpperCase());
 }
 
-// Upload an image for a task
-async function handleImageUpload(taskId, file) {
+async function uploadVinImage() {
+  const file = vinImageInput.files?.[0];
+  if (!file) return;
   const formData = new FormData();
   formData.append('image', file);
-  try {
-    const res = await fetchWithAuth(`/tasks/${taskId}`, { method: 'PUT', body: formData });
-    if (res.ok) {
-      loadTasks();
-    } else {
-      const err = await res.json();
-      alert(err.detail || 'Failed to upload image');
-    }
-  } catch (err) {
-    console.error(err);
-    alert('Failed to upload image');
+  const res = await fetchWithAuth('/vin/decode', { method: 'POST', body: formData });
+  if (!res.ok) {
+    throw new Error('Image VIN extraction failed');
   }
+  const data = await res.json();
+  await processVin(data.vin);
 }
 
-// Initial check: if a token exists, show the app; otherwise show auth
+async function loadVehicleProfile(vin) {
+  const res = await fetchWithAuth(`/vehicle/${encodeURIComponent(vin)}`);
+  if (!res.ok) {
+    throw new Error('Unable to load vehicle profile');
+  }
+  const profile = await res.json();
+
+  vehicleTitle.textContent = `${profile.brand} ${profile.model} (${profile.year})`;
+  if (profile.hero_image) {
+    vehicleImage.src = profile.hero_image;
+    vehicleImage.style.display = 'block';
+  }
+
+  vehicleSpecs.innerHTML = '';
+  Object.entries(profile.specs).forEach(([key, value]) => {
+    const p = document.createElement('p');
+    p.textContent = `${key}: ${value}`;
+    vehicleSpecs.appendChild(p);
+  });
+}
+
+async function startDiagnostics() {
+  if (!activeVin) {
+    alert('Decode a VIN first.');
+    return;
+  }
+
+  const diagRes = await fetchWithAuth('/diagnostics/run', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ vin: activeVin }),
+  });
+  if (!diagRes.ok) {
+    throw new Error('Diagnostics failed');
+  }
+  const diagData = await diagRes.json();
+  latestDiagnostics = diagData.issues;
+
+  diagnosticsList.innerHTML = '';
+  diagData.issues.forEach((issue) => {
+    const li = document.createElement('li');
+    li.textContent = `${issue.code}: ${issue.summary} (${issue.severity})`;
+    diagnosticsList.appendChild(li);
+  });
+
+  const planRes = await fetchWithAuth('/repair/plan', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ vin: activeVin, issues: latestDiagnostics }),
+  });
+  const planData = await planRes.json();
+
+  repairSteps.innerHTML = '';
+  planData.steps.forEach((step) => {
+    const li = document.createElement('li');
+    li.textContent = `${step.action} — ${step.eta}`;
+    repairSteps.appendChild(li);
+  });
+}
+
+async function processVin(vin) {
+  vinStatus.textContent = 'Decoding VIN...';
+  const decoded = await decodeVin(vin);
+  activeVin = decoded.vin;
+  manualVinInput.value = decoded.vin;
+  vinStatus.textContent = `Decoded: ${decoded.vin} (${decoded.country}, ${decoded.manufacturer})`;
+  await loadVehicleProfile(decoded.vin);
+}
+
+vinForm?.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  try {
+    await processVin(manualVinInput.value.trim().toUpperCase());
+  } catch (err) {
+    console.error(err);
+    vinStatus.textContent = 'VIN decode failed.';
+  }
+});
+
+scanVinBtn?.addEventListener('click', async () => {
+  try {
+    await scanVinFromCamera();
+  } catch (err) {
+    console.error(err);
+    vinStatus.textContent = 'VIN camera scan failed.';
+  }
+});
+
+vinImageInput?.addEventListener('change', async () => {
+  try {
+    await uploadVinImage();
+  } catch (err) {
+    console.error(err);
+    vinStatus.textContent = 'VIN image upload failed.';
+  }
+});
+
+runDiagnosticsBtn?.addEventListener('click', async () => {
+  try {
+    await startDiagnostics();
+  } catch (err) {
+    console.error(err);
+    alert('Diagnostics could not be completed.');
+  }
+});
+
+chatLauncher?.addEventListener('click', async () => {
+  const message = window.prompt('Ask a follow-up question about this vehicle or diagnosis:');
+  if (!message || !activeVin) return;
+  const res = await fetchWithAuth('/chat', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ vin: activeVin, message, diagnostics: latestDiagnostics }),
+  });
+  const data = await res.json();
+  const p = document.createElement('p');
+  p.textContent = `You: ${message} | Assistant: ${data.reply}`;
+  chatLog.prepend(p);
+});
+
 if (localStorage.getItem('token')) {
   showApp();
 } else {

@@ -7,88 +7,75 @@
     <link rel="stylesheet" href="style.css" />
   </head>
   <body>
-    <!-- Authentication section (signup / login) -->
     <div id="auth-section" class="container">
       <h1 class="logo">RipoPlan</h1>
       <div id="signup" class="auth-form">
         <h2>Create Account</h2>
         <form id="signup-form">
-          <input
-            type="email"
-            id="signup-email"
-            placeholder="Email"
-            required
-          />
-          <input
-            type="password"
-            id="signup-password"
-            placeholder="Password"
-            required
-          />
+          <input type="email" id="signup-email" placeholder="Email" required />
+          <input type="password" id="signup-password" placeholder="Password" required />
           <button type="submit">Sign Up</button>
         </form>
-        <p class="switch">
-          Already have an account?
-          <a href="#" id="show-login">Log in</a>
-        </p>
+        <p class="switch">Already have an account? <a href="#" id="show-login">Log in</a></p>
       </div>
       <div id="login" class="auth-form hidden">
         <h2>Log In</h2>
         <form id="login-form">
-          <input
-            type="email"
-            id="login-email"
-            placeholder="Email"
-            required
-          />
-          <input
-            type="password"
-            id="login-password"
-            placeholder="Password"
-            required
-          />
+          <input type="email" id="login-email" placeholder="Email" required />
+          <input type="password" id="login-password" placeholder="Password" required />
           <button type="submit">Log In</button>
         </form>
-        <p class="switch">
-          Don't have an account?
-          <a href="#" id="show-signup">Sign up</a>
-        </p>
+        <p class="switch">Don't have an account? <a href="#" id="show-signup">Sign up</a></p>
       </div>
     </div>
 
-    <!-- Main app section -->
     <div id="app" class="hidden">
       <header>
-        <h1>RipoPlan Tasks</h1>
+        <h1>RipoPlan Vehicle Diagnostics</h1>
         <button id="logout">Log out</button>
       </header>
-      <section id="new-task" class="card">
-        <h2>Create a New Task</h2>
-        <form id="new-task-form">
-          <input
-            type="text"
-            id="new-title"
-            placeholder="Task title"
-            required
-          />
-          <textarea
-            id="new-desc"
-            placeholder="Description (optional)"
-            rows="3"
-          ></textarea>
-          <input type="date" id="new-due" />
-          <button type="submit">Add Task</button>
+
+      <section id="vin-tools" class="card">
+        <h2>VIN Scan / Upload / Manual Entry</h2>
+        <div class="task-buttons">
+          <button id="scan-vin">Scan VIN from Camera</button>
+          <label for="vin-image" class="upload">Upload VIN Image</label>
+          <input id="vin-image" type="file" accept="image/*" style="display: none" />
+        </div>
+        <form id="vin-form">
+          <input type="text" id="manual-vin" placeholder="Enter 17-character VIN" minlength="11" maxlength="17" required />
+          <button type="submit">Decode VIN</button>
         </form>
+        <p id="vin-status"></p>
       </section>
-      <section id="suggestions" class="card">
-        <h2>Suggestions</h2>
-        <ul id="suggestions-list"></ul>
+
+      <section id="vehicle-profile" class="card">
+        <h2>Vehicle Details</h2>
+        <div id="vehicle-hero">
+          <h3 id="vehicle-title">No vehicle loaded</h3>
+          <img id="vehicle-image" alt="Vehicle hero" style="max-width: 100%; border-radius: 8px; display: none" />
+        </div>
+        <div id="vehicle-specs"></div>
       </section>
-      <section id="tasks" class="card">
-        <h2>Your Tasks</h2>
-        <ul id="tasks-list"></ul>
+
+      <section id="diagnostics" class="card">
+        <h2>Diagnostics Summary</h2>
+        <button id="run-diagnostics">Run Diagnostics</button>
+        <ul id="diagnostics-list"></ul>
+      </section>
+
+      <section id="repair-plan" class="card">
+        <h2>Repair Plan</h2>
+        <ol id="repair-steps"></ol>
+      </section>
+
+      <section id="chat-assistant" class="card">
+        <h2>Need a Follow-up?</h2>
+        <button id="chat-launcher">Ask RipoPlan Assistant</button>
+        <div id="chat-log"></div>
       </section>
     </div>
+
     <script src="script.js"></script>
   </body>
 </html>
