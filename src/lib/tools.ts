@@ -52,6 +52,97 @@ export function schemasForTools(tools: string[]) {
     .map(([, v]) => v);
 }
 
+// ---- Connector tools (enabled when the matching integration is connected) ----
+export const CONNECTOR_TOOL_SCHEMAS: Record<string, any> = {
+  github: {
+    type: "function",
+    function: {
+      name: "github",
+      description:
+        "Act on the connected GitHub account. actions: 'list_repos' (recent repos), 'search_repos' (needs query), 'create_issue' (needs repo as 'owner/name', title, optional body).",
+      parameters: {
+        type: "object",
+        properties: {
+          action: { type: "string", enum: ["list_repos", "search_repos", "create_issue"] },
+          query: { type: "string" },
+          repo: { type: "string", description: "owner/name" },
+          title: { type: "string" },
+          body: { type: "string" },
+        },
+        required: ["action"],
+      },
+    },
+  },
+  slack: {
+    type: "function",
+    function: {
+      name: "slack",
+      description: "Post a message to the connected Slack channel (via incoming webhook).",
+      parameters: {
+        type: "object",
+        properties: { text: { type: "string", description: "Message to post" } },
+        required: ["text"],
+      },
+    },
+  },
+};
+
+/** Tool schemas for providers the workspace has connected. */
+export function connectorSchemas(connectors: Record<string, string>) {
+  return Object.keys(connectors)
+    .filter((p) => CONNECTOR_TOOL_SCHEMAS[p])
+    .map((p) => CONNECTOR_TOOL_SCHEMAS[p]);
+}
+
+async function githubTool(args: any, token: string): Promise<ToolResult> {
+  const headers = {
+    Authorization: `Bearer ${token}`,
+    Accept: "application/vnd.github+json",
+    "X-GitHub-Api-Version": "2022-11-28",
+  };
+  try {
+    if (args.action === "create_issue") {
+      if (!args.repo || !args.title) return { ok: false, output: "repo and title are required" };
+      const res = await fetch(`https://api.github.com/repos/${args.repo}/issues`, {
+        method: "POST",
+        headers: { ...headers, "Content-Type": "application/json" },
+        body: JSON.stringify({ title: args.title, body: args.body || "" }),
+      });
+      const d = await res.json();
+      if (!res.ok) return { ok: false, output: `GitHub error: ${d.message || res.status}` };
+      return { ok: true, output: `Created issue #${d.number}: ${d.html_url}` };
+    }
+    if (args.action === "search_repos") {
+      const res = await fetch(`https://api.github.com/search/repositories?per_page=8&q=${encodeURIComponent(args.query || "")}`, { headers });
+      const d = await res.json();
+      const items = (d.items || []).map((r: any) => `- ${r.full_name} ⭐${r.stargazers_count}: ${r.description || ""}\n  ${r.html_url}`);
+      return { ok: true, output: items.join("\n") || "No repositories found." };
+    }
+    // list_repos
+    const res = await fetch("https://api.github.com/user/repos?per_page=20&sort=updated", { headers });
+    const d = await res.json();
+    if (!res.ok) return { ok: false, output: `GitHub error: ${d.message || res.status}` };
+    const items = (d || []).map((r: any) => `- ${r.full_name}${r.private ? " (private)" : ""}: ${r.description || ""}`);
+    return { ok: true, output: items.join("\n") || "No repositories." };
+  } catch (e: any) {
+    return { ok: false, output: `GitHub request failed: ${e.message}` };
+  }
+}
+
+async function slackTool(args: any, webhook: string): Promise<ToolResult> {
+  try {
+    await fetch(webhook, {
+      method: "POST",
+      mode: "no-cors",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text: String(args.text || "") }),
+    });
+    return { ok: true, output: "Posted to Slack." };
+  } catch (e: any) {
+    return { ok: false, output: `Slack post failed: ${e.message}` };
+  }
+}
+
 // ------- Web search (all CORS-friendly so it works from the browser) -------
 async function wikipediaSearch(query: string): Promise<ToolResult> {
   try {
@@ -149,7 +240,11 @@ export async function runCode(source: string): Promise<ToolResult> {
   }
 }
 
-export async function executeTool(name: string, args: any): Promise<ToolResult> {
+export async function executeTool(
+  name: string,
+  args: any,
+  connectors: Record<string, string> = {}
+): Promise<ToolResult> {
   switch (name) {
     case "web_search":
       return webSearch(String(args.query || ""));
@@ -157,6 +252,14 @@ export async function executeTool(name: string, args: any): Promise<ToolResult> 
       return browse(String(args.url || ""));
     case "code":
       return runCode(String(args.source || ""));
+    case "github":
+      return connectors.github
+        ? githubTool(args, connectors.github)
+        : { ok: false, output: "GitHub is not connected." };
+    case "slack":
+      return connectors.slack
+        ? slackTool(args, connectors.slack)
+        : { ok: false, output: "Slack is not connected." };
     default:
       return { ok: false, output: `Unknown tool: ${name}` };
   }
@@ -170,6 +273,10 @@ export function toolLabel(name: string, args: any): string {
       return `Browsing ${args.url}`;
     case "code":
       return `Running code`;
+    case "github":
+      return `GitHub: ${args.action}${args.repo ? ` (${args.repo})` : ""}`;
+    case "slack":
+      return `Posting to Slack`;
     default:
       return name;
   }

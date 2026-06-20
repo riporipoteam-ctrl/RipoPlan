@@ -4,18 +4,24 @@ import Groq from "groq-sdk";
 // required for a serverless GitHub Pages deployment. Use a restricted/rotatable key.
 export const GROQ_MODEL = process.env.NEXT_PUBLIC_GROQ_MODEL || "qwen/qwen3.6-27b";
 
-// The Groq key is injected at build time from NEXT_PUBLIC_GROQ_API_KEY
-// (set as a GitHub repo secret for the Pages build). It is baked into the
-// public client bundle by design — use a key you can rotate.
-const GROQ_KEY = process.env.NEXT_PUBLIC_GROQ_API_KEY || "";
+export const GROQ_KEY_STORAGE = "agentnexus_groq_key";
 
-let _client: Groq | null = null;
+/** Resolve the Groq key: user-provided (localStorage) wins, then build-time env. */
+export function getGroqKey(): string {
+  if (typeof window !== "undefined") {
+    const k = window.localStorage.getItem(GROQ_KEY_STORAGE);
+    if (k) return k.trim();
+  }
+  return process.env.NEXT_PUBLIC_GROQ_API_KEY || "";
+}
+
+export function hasGroqKey(): boolean {
+  return !!getGroqKey();
+}
 
 export function groq() {
-  if (!_client) {
-    _client = new Groq({ apiKey: GROQ_KEY, dangerouslyAllowBrowser: true });
-  }
-  return _client;
+  // Re-create per call so a freshly-saved key takes effect immediately.
+  return new Groq({ apiKey: getGroqKey(), dangerouslyAllowBrowser: true });
 }
 
 export type ChatMessage = {

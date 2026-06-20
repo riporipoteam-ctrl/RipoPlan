@@ -2,6 +2,7 @@
 
 import { SessionProvider, useSession } from "@/lib/session";
 import { BottomNav } from "@/components/BottomNav";
+import { Onboarding } from "@/components/Onboarding";
 import { Loader2 } from "lucide-react";
 
 function Shell({ children }: { children: React.ReactNode }) {
@@ -33,6 +34,7 @@ function Shell({ children }: { children: React.ReactNode }) {
     <div className="mx-auto flex min-h-dvh max-w-2xl flex-col bg-[var(--bg)]">
       <main className="flex flex-1 flex-col">{children}</main>
       <BottomNav />
+      <Onboarding />
     </div>
   );
 }

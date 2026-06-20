@@ -1,7 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { runAgent } from "./agent-runner";
 import type { Agent, Message } from "./types";
-import type { ChatMessage } from "./groq";
+import { hasGroqKey, type ChatMessage } from "./groq";
 
 /** Find agents explicitly @mentioned in the text. */
 function parseMentions(content: string, agents: Agent[]): Agent[] {
@@ -87,12 +87,41 @@ export interface DispatchOpts {
   primaryAgentId?: string | null;
 }
 
+async function getConnectors(supabase: SupabaseClient, workspaceId: string): Promise<Record<string, string>> {
+  const { data } = await supabase
+    .from("integrations")
+    .select("provider,secret")
+    .eq("workspace_id", workspaceId)
+    .eq("status", "connected");
+  const out: Record<string, string> = {};
+  for (const i of (data as { provider: string; secret: string | null }[]) || []) {
+    if (i.secret) out[i.provider] = i.secret;
+  }
+  return out;
+}
+
 /** Run the selected agent(s) for a freshly-posted user message. Awaits completion. */
 export async function dispatch(opts: DispatchOpts): Promise<void> {
   const { supabase, workspaceId } = opts;
   const selected = selectAgents(opts.userContent, opts.agents, opts.primaryAgentId);
+  const connectors = await getConnectors(supabase, workspaceId);
 
   for (const agent of selected) {
+    // No API key yet → post a friendly nudge instead of a raw 401.
+    if (!hasGroqKey()) {
+      await supabase.from("messages").insert({
+        workspace_id: workspaceId,
+        thread_id: opts.threadId ?? null,
+        channel_id: opts.channelId ?? null,
+        sender_type: "agent",
+        agent_id: agent.id,
+        content:
+          "I'd love to help! I just need a **Groq API key** to think. Add one in **Settings → Groq API key** — it's free at console.groq.com/keys and stays on your device.",
+        status: "complete",
+      });
+      continue;
+    }
+
     // 1. Insert placeholder "thinking" message (realtime shows the typing bubble)
     const { data: placeholder } = await supabase
       .from("messages")
@@ -137,6 +166,7 @@ export async function dispatch(opts: DispatchOpts): Promise<void> {
         history,
         workspaceName: opts.workspaceName,
         memories,
+        connectors,
         onActivity: async (activities) => {
           if (msgId) await supabase.from("messages").update({ activities }).eq("id", msgId);
         },
