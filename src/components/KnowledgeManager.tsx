@@ -1,8 +1,10 @@
 "use client";
 
 import { useState } from "react";
-import { useRouter } from "next/navigation";
 import { Plus, Trash2, Loader2, BookOpen } from "lucide-react";
+import { createClient } from "@/lib/supabase/client";
+import { useSession } from "@/lib/session";
+import { addKnowledge, deleteKnowledge } from "@/lib/actions";
 
 interface Item {
   id: string;
@@ -11,7 +13,8 @@ interface Item {
 }
 
 export function KnowledgeManager({ initial }: { initial: Item[] }) {
-  const router = useRouter();
+  const supabase = createClient();
+  const { ctx } = useSession();
   const [items, setItems] = useState<Item[]>(initial);
   const [title, setTitle] = useState("");
   const [content, setContent] = useState("");
@@ -19,29 +22,20 @@ export function KnowledgeManager({ initial }: { initial: Item[] }) {
   const [busy, setBusy] = useState(false);
 
   async function add() {
-    if (!title.trim() || busy) return;
+    if (!title.trim() || busy || !ctx) return;
     setBusy(true);
-    const res = await fetch("/api/knowledge", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ title, content }),
-    });
-    const data = await res.json();
-    if (data.item) setItems((p) => [data.item, ...p]);
+    const item = await addKnowledge(supabase, ctx, title, content);
+    if (item) setItems((p) => [item as Item, ...p]);
     setTitle("");
     setContent("");
     setOpen(false);
     setBusy(false);
-    router.refresh();
   }
 
   async function remove(id: string) {
+    if (!ctx) return;
     setItems((p) => p.filter((i) => i.id !== id));
-    await fetch("/api/knowledge", {
-      method: "DELETE",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ id }),
-    });
+    await deleteKnowledge(supabase, ctx, id);
   }
 
   return (

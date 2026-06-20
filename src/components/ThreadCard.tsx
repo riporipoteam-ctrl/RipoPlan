@@ -18,7 +18,7 @@ export function ThreadCard({
 }) {
   return (
     <Link
-      href={`/threads/${thread.id}`}
+      href={`/thread?id=${thread.id}`}
       className="block rounded-2xl border border-[var(--border)] bg-[var(--card)] p-4 transition-colors hover:border-nebula-400/60"
     >
       <div className="mb-1.5 flex items-center justify-between">

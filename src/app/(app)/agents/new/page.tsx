@@ -4,6 +4,9 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { TopBar } from "@/components/TopBar";
 import { Sparkles, Loader2, ArrowUp } from "lucide-react";
+import { createClient } from "@/lib/supabase/client";
+import { useSession } from "@/lib/session";
+import { createAgent } from "@/lib/actions";
 
 const EXAMPLES = [
   "Create a Research Agent that every morning searches the top AI news, summarizes it, and posts to #news.",
@@ -14,27 +17,20 @@ const EXAMPLES = [
 
 export default function NewAgentPage() {
   const router = useRouter();
+  const supabase = createClient();
+  const { ctx } = useSession();
   const [text, setText] = useState("");
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
   async function create() {
-    if (!text.trim() || loading) return;
+    if (!text.trim() || loading || !ctx) return;
     setLoading(true);
     setErr(null);
     try {
-      const res = await fetch("/api/agents/create", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ description: text }),
-      });
-      const data = await res.json();
-      if (data.agentId) {
-        router.push(`/agents/${data.agentId}`);
-        router.refresh();
-      } else {
-        setErr(data.detail || data.error || "Failed to create agent");
-      }
+      const agentId = await createAgent(supabase, ctx, text);
+      if (agentId) router.push(`/agent?id=${agentId}`);
+      else setErr("Failed to create agent");
     } catch (e: any) {
       setErr(e.message);
     } finally {

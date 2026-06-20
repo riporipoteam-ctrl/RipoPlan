@@ -1,27 +1,32 @@
+"use client";
+
+import { useEffect, useState } from "react";
 import Link from "next/link";
-import { redirect } from "next/navigation";
-import { createClient } from "@/lib/supabase/server";
-import { getSessionContext } from "@/lib/data";
+import { BookOpen, Clock, LayoutGrid, Bot, Monitor, Boxes, ChevronRight } from "lucide-react";
+import { createClient } from "@/lib/supabase/client";
+import { useSession } from "@/lib/session";
 import { TopBar } from "@/components/TopBar";
 import { ProfileActions } from "@/components/ProfileActions";
-import { BookOpen, Clock, LayoutGrid, Bot, Monitor, Boxes, ChevronRight } from "lucide-react";
 
-export const dynamic = "force-dynamic";
+export default function SettingsPage() {
+  const supabase = createClient();
+  const { ctx } = useSession();
+  const [stats, setStats] = useState({ agents: 0, runs: 0, tokens: 0 });
 
-export default async function SettingsPage() {
-  const ctx = await getSessionContext();
-  if (!ctx?.workspace) redirect("/login");
+  useEffect(() => {
+    if (!ctx) return;
+    (async () => {
+      const [{ count }, { data: runs }] = await Promise.all([
+        supabase.from("agents").select("id", { count: "exact", head: true }).eq("workspace_id", ctx.workspace.id).neq("status", "archived"),
+        supabase.from("agent_runs").select("tokens_in,tokens_out").eq("workspace_id", ctx.workspace.id),
+      ]);
+      const tokens = (runs || []).reduce((s: number, r: any) => s + (r.tokens_in || 0) + (r.tokens_out || 0), 0);
+      setStats({ agents: count || 0, runs: runs?.length || 0, tokens });
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ctx?.workspace.id]);
 
-  const supabase = await createClient();
-  const [{ count: agentCount }, { data: runs }] = await Promise.all([
-    supabase.from("agents").select("id", { count: "exact", head: true }).eq("workspace_id", ctx.workspace.id).neq("status", "archived"),
-    supabase.from("agent_runs").select("tokens_in,tokens_out").eq("workspace_id", ctx.workspace.id),
-  ]);
-  const totalRuns = runs?.length || 0;
-  const totalTokens = (runs || []).reduce((s: number, r: any) => s + (r.tokens_in || 0) + (r.tokens_out || 0), 0);
-  // Groq qwen pricing: ~$0.6/M in, $3/M out — rough blended estimate
-  const estCost = ((totalTokens / 1_000_000) * 1.2).toFixed(4);
-
+  const estCost = ((stats.tokens / 1_000_000) * 1.2).toFixed(4);
   const links = [
     { href: "/knowledge", icon: BookOpen, label: "Knowledge", sub: "Shared context for agents" },
     { href: "/jobs", icon: Clock, label: "Jobs", sub: "Scheduled agent runs" },
@@ -33,13 +38,13 @@ export default async function SettingsPage() {
 
   return (
     <>
-      <TopBar title="Settings" subtitle={ctx.workspace.name} back="/home" />
+      <TopBar title="Settings" subtitle={ctx?.workspace.name} back="/home" />
       <div className="flex-1 space-y-4 px-4 py-4">
         <div className="grid grid-cols-3 gap-3">
           {[
-            { label: "Agents", value: agentCount ?? 0 },
-            { label: "Runs", value: totalRuns },
-            { label: "Tokens", value: totalTokens.toLocaleString() },
+            { label: "Agents", value: stats.agents },
+            { label: "Runs", value: stats.runs },
+            { label: "Tokens", value: stats.tokens.toLocaleString() },
           ].map((s) => (
             <div key={s.label} className="rounded-2xl border border-[var(--border)] bg-[var(--card)] p-3 text-center">
               <div className="text-lg font-bold">{s.value}</div>
@@ -53,7 +58,6 @@ export default async function SettingsPage() {
             <span className="font-semibold">${estCost}</span>
           </div>
         </div>
-
         <div className="overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--card)]">
           {links.map((it) => (
             <Link key={it.href} href={it.href} className="flex items-center gap-3 border-b border-[var(--border)] px-4 py-3 last:border-0 hover:bg-black/5">
@@ -66,7 +70,6 @@ export default async function SettingsPage() {
             </Link>
           ))}
         </div>
-
         <ProfileActions />
       </div>
     </>

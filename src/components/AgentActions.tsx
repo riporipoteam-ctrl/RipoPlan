@@ -4,39 +4,39 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { MessageSquare, Pause, Play, Trash2, Loader2 } from "lucide-react";
 import type { Agent } from "@/lib/types";
+import { createClient } from "@/lib/supabase/client";
+import { useSession } from "@/lib/session";
+import { openAgentDM, updateAgent, archiveAgent } from "@/lib/actions";
 
 export function AgentActions({ agent }: { agent: Agent }) {
   const router = useRouter();
+  const supabase = createClient();
+  const { ctx } = useSession();
   const [status, setStatus] = useState(agent.status);
   const [busy, setBusy] = useState<string | null>(null);
 
   async function openChat() {
+    if (!ctx) return;
     setBusy("chat");
-    const res = await fetch(`/api/agents/${agent.id}/dm`, { method: "POST" });
-    const data = await res.json();
-    if (data.threadId) router.push(`/threads/${data.threadId}`);
+    const id = await openAgentDM(supabase, ctx, agent.id);
+    if (id) router.push(`/thread?id=${id}`);
     setBusy(null);
   }
 
   async function toggle() {
+    if (!ctx) return;
     setBusy("toggle");
     const next = status === "active" ? "paused" : "active";
-    await fetch(`/api/agents/${agent.id}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ status: next }),
-    });
+    await updateAgent(supabase, ctx, agent.id, { status: next });
     setStatus(next);
     setBusy(null);
-    router.refresh();
   }
 
   async function remove() {
-    if (!confirm(`Archive ${agent.name}?`)) return;
+    if (!ctx || !confirm(`Archive ${agent.name}?`)) return;
     setBusy("delete");
-    await fetch(`/api/agents/${agent.id}`, { method: "DELETE" });
+    await archiveAgent(supabase, ctx, agent.id);
     router.push("/agents");
-    router.refresh();
   }
 
   return (

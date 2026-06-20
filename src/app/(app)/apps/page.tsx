@@ -1,10 +1,10 @@
-import { redirect } from "next/navigation";
-import { createClient } from "@/lib/supabase/server";
-import { getSessionContext } from "@/lib/data";
+"use client";
+
+import { useEffect, useState } from "react";
+import { createClient } from "@/lib/supabase/client";
+import { useSession } from "@/lib/session";
 import { TopBar } from "@/components/TopBar";
 import { IntegrationCard } from "@/components/IntegrationCard";
-
-export const dynamic = "force-dynamic";
 
 const CATALOG = [
   { provider: "gmail", label: "Gmail", description: "Read & send email on your behalf", glyph: "✉️", color: "#ea4335" },
@@ -17,31 +17,29 @@ const CATALOG = [
   { provider: "sheets", label: "Google Sheets", description: "Read & update spreadsheets", glyph: "📊", color: "#0f9d58" },
 ];
 
-export default async function AppsPage() {
-  const ctx = await getSessionContext();
-  if (!ctx?.workspace) redirect("/login");
+export default function AppsPage() {
+  const supabase = createClient();
+  const { ctx } = useSession();
+  const [connected, setConnected] = useState<Set<string>>(new Set());
 
-  const supabase = await createClient();
-  const { data: integrations } = await supabase
-    .from("integrations")
-    .select("provider,status")
-    .eq("workspace_id", ctx.workspace.id);
-  const connected = new Set(
-    (integrations || []).filter((i: any) => i.status === "connected").map((i: any) => i.provider)
-  );
+  useEffect(() => {
+    if (!ctx) return;
+    supabase
+      .from("integrations")
+      .select("provider,status")
+      .eq("workspace_id", ctx.workspace.id)
+      .then(({ data }) => {
+        setConnected(new Set((data || []).filter((i: any) => i.status === "connected").map((i: any) => i.provider)));
+      });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ctx?.workspace.id]);
 
   return (
     <>
-      <TopBar
-        title="Apps"
-        subtitle="Connect your tools so agents can act"
-        profileName={ctx.profile.display_name}
-        profileColor={ctx.profile.avatar_color}
-      />
+      <TopBar title="Apps" subtitle="Connect your tools so agents can act" profileName={ctx?.profile.display_name} profileColor={ctx?.profile.avatar_color} />
       <div className="flex-1 space-y-3 px-4 py-4">
         <div className="rounded-2xl border border-amber-300/40 bg-amber-50 p-3 text-xs text-amber-800">
-          Connecting grants agents permission to act in that tool. OAuth is simulated in this
-          demo — add provider credentials to enable live connections.
+          Connecting grants agents permission to act in that tool. OAuth is simulated in this demo — add provider credentials to enable live connections.
         </div>
         {CATALOG.map((c) => (
           <IntegrationCard key={c.provider} {...c} connected={connected.has(c.provider)} />

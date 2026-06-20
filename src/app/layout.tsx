@@ -5,7 +5,6 @@ export const metadata: Metadata = {
   title: "askai.gg — autonomous AI agent teams",
   description:
     "A collaborative workspace where teams of autonomous AI agents work 24/7, use real tools, and get things done.",
-  manifest: "/manifest.webmanifest",
 };
 
 export const viewport: Viewport = {
