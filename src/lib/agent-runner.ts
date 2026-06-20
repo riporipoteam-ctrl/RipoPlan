@@ -1,0 +1,157 @@
+import { groq, GROQ_MODEL, type ChatMessage } from "./groq";
+import { executeTool, schemasForTools, toolLabel } from "./tools";
+import type { Activity, Agent } from "./types";
+
+const MAX_TOOL_ROUNDS = 5;
+
+/** Strip reasoning/tool-call artifacts some open models leak into content. */
+function sanitize(text: string): string {
+  return (text || "")
+    .replace(/<think>[\s\S]*?<\/think>/gi, "")
+    .replace(/<think>[\s\S]*$/i, "")
+    .replace(/<tool_call>[\s\S]*?<\/tool_call>/gi, "")
+    .replace(/<\|?function[\s\S]*?>[\s\S]*?<\/?\|?function[^>]*>/gi, "")
+    .replace(/<function=[\s\S]*$/i, "")
+    .trim();
+}
+
+export interface RunInput {
+  agent: Agent;
+  history: ChatMessage[];
+  workspaceName?: string;
+  memories?: string[];
+  onActivity?: (activities: Activity[]) => Promise<void> | void;
+}
+
+export interface RunOutput {
+  content: string;
+  activities: Activity[];
+  steps: any[];
+  tokensIn: number;
+  tokensOut: number;
+}
+
+function systemPrompt(agent: Agent, workspaceName?: string, memories?: string[]) {
+  const now = new Date();
+  const date = now.toLocaleString("en-US", {
+    weekday: "long",
+    year: "numeric",
+    month: "long",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    timeZoneName: "short",
+  });
+  const tools = (agent.tools || []).join(", ") || "none";
+  const mem =
+    memories && memories.length
+      ? `\n\nRelevant long-term memory from past work:\n${memories.map((m) => `- ${m}`).join("\n")}`
+      : "";
+  return [
+    agent.system_prompt ||
+      `You are ${agent.name}, ${agent.role || "an AI agent"}.`,
+    `\nYou work inside "${workspaceName || "the workspace"}", a collaborative platform where humans and AI agents work together in channels and threads.`,
+    `Current date & time: ${date}.`,
+    `Available tools: ${tools}. Use them whenever they would improve accuracy or freshness — never guess at facts you can look up.`,
+    `When you present structured data (matches, prices, comparisons, schedules), use clean GitHub-flavored Markdown tables.`,
+    `Be concise, helpful, and proactive. Sign off naturally as ${agent.name}.`,
+    mem,
+  ].join("\n");
+}
+
+export async function runAgent(input: RunInput): Promise<RunOutput> {
+  const { agent } = input;
+  const activities: Activity[] = [];
+  const steps: any[] = [];
+  let tokensIn = 0;
+  let tokensOut = 0;
+
+  const messages: any[] = [
+    { role: "system", content: systemPrompt(agent, input.workspaceName, input.memories) },
+    ...input.history,
+  ];
+
+  const tools = schemasForTools(agent.tools || []);
+  const client = groq();
+
+  for (let round = 0; round <= MAX_TOOL_ROUNDS; round++) {
+    const useTools = tools.length > 0 && round < MAX_TOOL_ROUNDS;
+    const completion = await client.chat.completions.create({
+      model: agent.model || GROQ_MODEL,
+      messages,
+      temperature: 0.6,
+      max_completion_tokens: 4096,
+      top_p: 0.95,
+      reasoning_format: "hidden",
+      ...(useTools ? { tools, tool_choice: "auto" } : {}),
+    } as any);
+
+    const usage: any = (completion as any).usage;
+    if (usage) {
+      tokensIn += usage.prompt_tokens || 0;
+      tokensOut += usage.completion_tokens || 0;
+    }
+
+    const choice = completion.choices[0];
+    const msg = choice.message as any;
+    const toolCalls = msg.tool_calls || [];
+
+    if (toolCalls.length === 0) {
+      return {
+        content: sanitize(msg.content || ""),
+        activities,
+        steps,
+        tokensIn,
+        tokensOut,
+      };
+    }
+
+    // Record the assistant turn that requested tools
+    messages.push({ role: "assistant", content: msg.content || "", tool_calls: toolCalls });
+
+    for (const call of toolCalls) {
+      let args: any = {};
+      try {
+        args = JSON.parse(call.function.arguments || "{}");
+      } catch {
+        args = {};
+      }
+      const label = toolLabel(call.function.name, args);
+      const activity: Activity = { label, tool: call.function.name, status: "running" };
+      activities.push(activity);
+      if (input.onActivity) await input.onActivity([...activities]);
+
+      const result = await executeTool(call.function.name, args);
+      activity.status = result.ok ? "done" : "error";
+      activity.detail = result.output.slice(0, 200);
+      steps.push({ tool: call.function.name, args, ok: result.ok });
+      if (input.onActivity) await input.onActivity([...activities]);
+
+      messages.push({
+        role: "tool",
+        tool_call_id: call.id,
+        name: call.function.name,
+        content: result.output.slice(0, 6000),
+      });
+    }
+  }
+
+  // Fell out of the loop — ask for a final synthesis without tools
+  const final = await client.chat.completions.create({
+    model: agent.model || GROQ_MODEL,
+    messages: [
+      ...messages,
+      { role: "user", content: "Summarize your findings and give the final answer now." },
+    ],
+    temperature: 0.6,
+    max_completion_tokens: 2048,
+    reasoning_format: "hidden",
+  } as any);
+  return {
+    content: sanitize(final.choices[0].message.content || ""),
+    activities,
+    steps,
+    tokensIn,
+    tokensOut,
+  };
+}

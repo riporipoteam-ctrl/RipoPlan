@@ -1,0 +1,116 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --bg: #f7f4ef;
+  --card: #ffffff;
+  --border: #e7e2d9;
+  --text: #1a1a1f;
+  --muted: #8a8578;
+}
+.dark {
+  --bg: #0b0b10;
+  --card: #15151c;
+  --border: #26262f;
+  --text: #ececf1;
+  --muted: #9a9aa8;
+}
+
+html,
+body {
+  height: 100%;
+}
+body {
+  background: var(--bg);
+  color: var(--text);
+  -webkit-font-smoothing: antialiased;
+  overscroll-behavior-y: none;
+}
+
+/* thin scrollbars */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
+}
+*::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+*::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 999px;
+}
+
+/* Markdown */
+.md h1,
+.md h2,
+.md h3 {
+  font-weight: 700;
+  margin: 0.6em 0 0.3em;
+}
+.md h2 {
+  font-size: 1.05rem;
+}
+.md p {
+  margin: 0.4em 0;
+  line-height: 1.55;
+}
+.md ul,
+.md ol {
+  margin: 0.4em 0;
+  padding-left: 1.2em;
+  list-style: disc;
+}
+.md ol {
+  list-style: decimal;
+}
+.md li {
+  margin: 0.15em 0;
+}
+.md a {
+  color: #9333ea;
+  text-decoration: underline;
+}
+.md strong {
+  font-weight: 700;
+}
+.md code {
+  background: rgba(140, 120, 180, 0.14);
+  padding: 0.1em 0.35em;
+  border-radius: 4px;
+  font-size: 0.85em;
+}
+.md pre {
+  background: rgba(0, 0, 0, 0.06);
+  padding: 0.7em;
+  border-radius: 8px;
+  overflow-x: auto;
+  margin: 0.5em 0;
+}
+.dark .md pre {
+  background: rgba(255, 255, 255, 0.05);
+}
+.md pre code {
+  background: transparent;
+  padding: 0;
+}
+.md table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 0.6em 0;
+  font-size: 0.85rem;
+  display: block;
+  overflow-x: auto;
+}
+.md th,
+.md td {
+  border: 1px solid var(--border);
+  padding: 0.4em 0.6em;
+  text-align: left;
+  white-space: nowrap;
+}
+.md th {
+  background: rgba(140, 120, 180, 0.08);
+  font-weight: 600;
+}

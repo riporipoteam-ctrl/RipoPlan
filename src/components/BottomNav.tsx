@@ -1,0 +1,41 @@
+"use client";
+
+import Link from "next/link";
+import { usePathname } from "next/navigation";
+import { Home, Hash, Bot, Zap, LayoutGrid } from "lucide-react";
+import clsx from "clsx";
+
+const items = [
+  { href: "/home", icon: Home, label: "Home" },
+  { href: "/channels", icon: Hash, label: "Channels" },
+  { href: "/agents", icon: Bot, label: "Agents" },
+  { href: "/activity", icon: Zap, label: "Activity" },
+  { href: "/apps", icon: LayoutGrid, label: "Apps" },
+];
+
+export function BottomNav() {
+  const pathname = usePathname();
+  return (
+    <nav className="sticky bottom-0 z-20 border-t border-[var(--border)] bg-[var(--card)]/95 backdrop-blur">
+      <div className="mx-auto flex max-w-2xl items-center justify-around px-2 py-2.5">
+        {items.map((it) => {
+          const active = pathname === it.href || pathname.startsWith(it.href + "/");
+          const Icon = it.icon;
+          return (
+            <Link
+              key={it.href}
+              href={it.href}
+              aria-label={it.label}
+              className={clsx(
+                "relative flex h-10 w-12 items-center justify-center rounded-xl transition-colors",
+                active ? "text-nebula-600" : "text-[var(--muted)] hover:text-[var(--text)]"
+              )}
+            >
+              <Icon size={24} strokeWidth={active ? 2.4 : 2} />
+            </Link>
+          );
+        })}
+      </div>
+    </nav>
+  );
+}
