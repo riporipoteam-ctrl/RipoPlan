@@ -18,7 +18,6 @@ export async function summarizeThread(
       ],
       temperature: 0.3,
       max_completion_tokens: 200,
-      reasoning_format: "hidden",
       response_format: { type: "json_object" },
     } as any);
     const parsed = JSON.parse(completion.choices[0].message.content || "{}");

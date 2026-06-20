@@ -2,7 +2,13 @@ import Groq from "groq-sdk";
 
 // Browser-side Groq. The key is baked into the static bundle (public) — this is
 // required for a serverless GitHub Pages deployment. Use a restricted/rotatable key.
-export const GROQ_MODEL = process.env.NEXT_PUBLIC_GROQ_MODEL || "qwen/qwen3.6-27b";
+export const GROQ_MODEL =
+  process.env.NEXT_PUBLIC_GROQ_MODEL || "meta-llama/llama-4-scout-17b-16e-instruct";
+
+/** Reasoning models (qwen, gpt-oss) accept reasoning_format; others reject it. */
+export function isReasoningModel(model: string) {
+  return /qwen|gpt-oss/i.test(model);
+}
 
 export const GROQ_KEY_STORAGE = "agentnexus_groq_key";
 
