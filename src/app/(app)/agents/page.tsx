@@ -1,37 +1,52 @@
+"use client";
+
+import { useEffect, useState } from "react";
 import Link from "next/link";
-import { redirect } from "next/navigation";
-import { getAgents, getSessionContext } from "@/lib/data";
+import { Plus, Loader2 } from "lucide-react";
+import { createClient } from "@/lib/supabase/client";
+import { useSession } from "@/lib/session";
 import { TopBar } from "@/components/TopBar";
 import { AgentRow } from "@/components/AgentRow";
-import { Plus } from "lucide-react";
+import type { Agent } from "@/lib/types";
 
-export const dynamic = "force-dynamic";
+const previews: Record<string, string> = {
+  nebula: "Welcome to your workspace! I'm your Chief of Staff.",
+  writer: "I'm Writer — your go-to for any content that needs writing.",
+  researcher: "Here's what's set up: your Researcher agent is ready.",
+  builder: "Done. Here's what's running: workflows & automations.",
+  "web-browser": "I browse the live web to find current information.",
+};
 
-export default async function AgentsPage() {
-  const ctx = await getSessionContext();
-  if (!ctx?.workspace) redirect("/login");
-  const agents = await getAgents(ctx.workspace.id);
+export default function AgentsPage() {
+  const supabase = createClient();
+  const { ctx } = useSession();
+  const [agents, setAgents] = useState<Agent[]>([]);
+  const [loading, setLoading] = useState(true);
 
-  const previews: Record<string, string> = {
-    nebula: "Welcome to your workspace! I'm your Chief of Staff.",
-    writer: "I'm Writer — your go-to for any content that needs writing.",
-    researcher: "Here's what's set up: your Researcher agent is ready.",
-    builder: "Done. Here's what's running: workflows & automations.",
-    "web-browser": "I browse the live web to find current information.",
-  };
+  useEffect(() => {
+    if (!ctx) return;
+    supabase
+      .from("agents")
+      .select("*")
+      .eq("workspace_id", ctx.workspace.id)
+      .neq("status", "archived")
+      .order("created_at")
+      .then(({ data }) => {
+        setAgents((data as Agent[]) || []);
+        setLoading(false);
+      });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ctx?.workspace.id]);
 
   return (
     <>
       <TopBar
         title="Agents"
-        profileName={ctx.profile.display_name}
-        profileColor={ctx.profile.avatar_color}
+        profileName={ctx?.profile.display_name}
+        profileColor={ctx?.profile.avatar_color}
         notifCount={2}
         leading={
-          <Link
-            href="/agents/new"
-            className="-ml-1 mr-1 flex h-7 w-7 items-center justify-center rounded-md text-[var(--muted)] hover:bg-black/5"
-          >
+          <Link href="/agents/new" className="-ml-1 mr-1 flex h-7 w-7 items-center justify-center rounded-md text-[var(--muted)] hover:bg-black/5">
             <Plus size={20} />
           </Link>
         }
@@ -45,15 +60,18 @@ export default async function AgentsPage() {
         </span>
       </div>
       <div className="flex-1">
-        {agents.map((a) => (
-          <AgentRow key={a.id} agent={a} preview={previews[a.handle || ""]} />
-        ))}
-        <Link
-          href="/agents/new"
-          className="m-4 flex items-center justify-center gap-2 rounded-2xl border border-dashed border-[var(--border)] py-4 text-sm font-medium text-nebula-600 hover:bg-nebula-50"
-        >
-          <Plus size={18} /> Create a new agent
-        </Link>
+        {loading ? (
+          <div className="flex justify-center py-10 text-[var(--muted)]"><Loader2 className="animate-spin" /></div>
+        ) : (
+          <>
+            {agents.map((a) => (
+              <AgentRow key={a.id} agent={a} preview={previews[a.handle || ""]} />
+            ))}
+            <Link href="/agents/new" className="m-4 flex items-center justify-center gap-2 rounded-2xl border border-dashed border-[var(--border)] py-4 text-sm font-medium text-nebula-600 hover:bg-nebula-50">
+              <Plus size={18} /> Create a new agent
+            </Link>
+          </>
+        )}
       </div>
     </>
   );

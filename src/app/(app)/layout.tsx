@@ -1,10 +1,26 @@
-import { redirect } from "next/navigation";
-import { getSessionContext } from "@/lib/data";
-import { BottomNav } from "@/components/BottomNav";
+"use client";
 
-export default async function AppLayout({ children }: { children: React.ReactNode }) {
-  const ctx = await getSessionContext();
-  if (!ctx) redirect("/login");
+import { SessionProvider, useSession } from "@/lib/session";
+import { BottomNav } from "@/components/BottomNav";
+import { Loader2 } from "lucide-react";
+
+function Shell({ children }: { children: React.ReactNode }) {
+  const { loading, ctx } = useSession();
+
+  if (loading) {
+    return (
+      <div className="flex min-h-dvh items-center justify-center bg-[var(--bg)] text-[var(--muted)]">
+        <Loader2 className="animate-spin" />
+      </div>
+    );
+  }
+  if (!ctx) {
+    return (
+      <div className="flex min-h-dvh items-center justify-center bg-[var(--bg)] text-sm text-[var(--muted)]">
+        Redirecting…
+      </div>
+    );
+  }
   if (!ctx.workspace) {
     return (
       <div className="flex min-h-dvh items-center justify-center p-8 text-center text-sm text-[var(--muted)]">
@@ -18,5 +34,13 @@ export default async function AppLayout({ children }: { children: React.ReactNod
       <main className="flex flex-1 flex-col">{children}</main>
       <BottomNav />
     </div>
+  );
+}
+
+export default function AppLayout({ children }: { children: React.ReactNode }) {
+  return (
+    <SessionProvider>
+      <Shell>{children}</Shell>
+    </SessionProvider>
   );
 }

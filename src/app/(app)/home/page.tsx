@@ -1,36 +1,56 @@
-import { redirect } from "next/navigation";
-import { getAgents, getSessionContext, getThreads } from "@/lib/data";
+"use client";
+
+import { useEffect, useState } from "react";
+import { ChevronDown, Loader2 } from "lucide-react";
+import { createClient } from "@/lib/supabase/client";
+import { useSession } from "@/lib/session";
 import { TopBar } from "@/components/TopBar";
 import { Composer } from "@/components/Composer";
 import { ThreadCard } from "@/components/ThreadCard";
-import { ChevronDown } from "lucide-react";
+import type { Agent, Thread } from "@/lib/types";
 
-export const dynamic = "force-dynamic";
+export default function HomePage() {
+  const supabase = createClient();
+  const { ctx } = useSession();
+  const [agents, setAgents] = useState<Agent[]>([]);
+  const [threads, setThreads] = useState<Thread[]>([]);
+  const [loading, setLoading] = useState(true);
 
-export default async function HomePage() {
-  const ctx = await getSessionContext();
-  if (!ctx?.workspace) redirect("/login");
+  useEffect(() => {
+    if (!ctx) return;
+    let active = true;
+    async function load() {
+      const [{ data: a }, { data: t }] = await Promise.all([
+        supabase.from("agents").select("*").eq("workspace_id", ctx!.workspace.id).neq("status", "archived").order("created_at"),
+        supabase.from("threads").select("*").eq("workspace_id", ctx!.workspace.id).order("last_activity_at", { ascending: false }).limit(50),
+      ]);
+      if (!active) return;
+      setAgents((a as Agent[]) || []);
+      setThreads((t as Thread[]) || []);
+      setLoading(false);
+    }
+    load();
+    const ch = supabase
+      .channel(`home-${ctx.workspace.id}`)
+      .on("postgres_changes", { event: "*", schema: "public", table: "threads", filter: `workspace_id=eq.${ctx.workspace.id}` }, load)
+      .subscribe();
+    return () => {
+      active = false;
+      supabase.removeChannel(ch);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ctx?.workspace.id]);
 
-  const [agents, threads] = await Promise.all([
-    getAgents(ctx.workspace.id),
-    getThreads(ctx.workspace.id),
-  ]);
   const agentMap = new Map(agents.map((a) => [a.id, a]));
 
   return (
     <>
-      <TopBar
-        title="Home"
-        profileName={ctx.profile.display_name}
-        profileColor={ctx.profile.avatar_color}
-        notifCount={2}
-      />
+      <TopBar title="Home" profileName={ctx?.profile.display_name} profileColor={ctx?.profile.avatar_color} notifCount={2} />
       <div className="flex-1 space-y-5 px-4 py-4">
         <div>
           <p className="mb-2 px-1 text-sm text-[var(--muted)]">What should your agents do?</p>
           <Composer mode="start" agents={agents} />
         </div>
-
         <div>
           <div className="mb-2 flex items-center justify-between px-1">
             <h2 className="font-bold">Threads</h2>
@@ -38,22 +58,26 @@ export default async function HomePage() {
               My stuff <ChevronDown size={14} />
             </button>
           </div>
-          <div className="space-y-3">
-            {threads.length === 0 && (
-              <p className="rounded-2xl border border-dashed border-[var(--border)] p-6 text-center text-sm text-[var(--muted)]">
-                No threads yet. Describe a goal above and your agents will get to work.
-              </p>
-            )}
-            {threads.map((t) => (
-              <ThreadCard
-                key={t.id}
-                thread={t}
-                agent={t.primary_agent_id ? agentMap.get(t.primary_agent_id) : undefined}
-                userName={ctx.profile.display_name}
-                userColor={ctx.profile.avatar_color}
-              />
-            ))}
-          </div>
+          {loading ? (
+            <div className="flex justify-center py-10 text-[var(--muted)]"><Loader2 className="animate-spin" /></div>
+          ) : (
+            <div className="space-y-3">
+              {threads.length === 0 && (
+                <p className="rounded-2xl border border-dashed border-[var(--border)] p-6 text-center text-sm text-[var(--muted)]">
+                  No threads yet. Describe a goal above and your agents will get to work.
+                </p>
+              )}
+              {threads.map((t) => (
+                <ThreadCard
+                  key={t.id}
+                  thread={t}
+                  agent={t.primary_agent_id ? agentMap.get(t.primary_agent_id) : undefined}
+                  userName={ctx?.profile.display_name}
+                  userColor={ctx?.profile.avatar_color}
+                />
+              ))}
+            </div>
+          )}
         </div>
       </div>
     </>

@@ -8,7 +8,7 @@ export function AgentRow({ agent, preview }: { agent: Agent; preview?: string })
   const time = agent.last_run_at || agent.created_at;
   return (
     <Link
-      href={`/agents/${agent.id}`}
+      href={`/agent?id=${agent.id}`}
       className="flex items-center gap-3 border-b border-[var(--border)] px-4 py-3 transition-colors hover:bg-black/[0.02]"
     >
       <AgentAvatar emoji={agent.emoji} color={agent.avatar_color} size={44} withDot={agent.status === "active"} />

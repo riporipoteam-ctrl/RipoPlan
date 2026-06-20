@@ -58,9 +58,10 @@ export default function LoginPage() {
 
   async function oauth(provider: "google" | "github") {
     setErr(null);
+    const base = process.env.NEXT_PUBLIC_BASE_PATH || "";
     const { error } = await supabase.auth.signInWithOAuth({
       provider,
-      options: { redirectTo: `${window.location.origin}/auth/callback` },
+      options: { redirectTo: `${window.location.origin}${base}/home/` },
     });
     if (error) setErr(`${provider} sign-in not configured: ${error.message}`);
   }

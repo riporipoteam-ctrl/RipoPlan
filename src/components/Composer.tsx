@@ -4,6 +4,9 @@ import { useRouter } from "next/navigation";
 import { useRef, useState } from "react";
 import { Paperclip, ArrowUp, Settings2, Loader2, ChevronDown } from "lucide-react";
 import type { Agent } from "@/lib/types";
+import { createClient } from "@/lib/supabase/client";
+import { useSession } from "@/lib/session";
+import { startThread, runThread, postMessage } from "@/lib/actions";
 
 export function Composer({
   mode,
@@ -11,16 +14,16 @@ export function Composer({
   channelId,
   agents,
   placeholder,
-  onOptimistic,
 }: {
   mode: "start" | "thread" | "channel";
   threadId?: string;
   channelId?: string;
   agents: Agent[];
   placeholder?: string;
-  onOptimistic?: (text: string) => void;
 }) {
   const router = useRouter();
+  const supabase = createClient();
+  const { ctx } = useSession();
   const [text, setText] = useState("");
   const [sending, setSending] = useState(false);
   const [showMentions, setShowMentions] = useState(false);
@@ -35,8 +38,7 @@ export function Composer({
 
   function onChange(v: string) {
     setText(v);
-    const m = v.match(/@([\w-]*)$/);
-    setShowMentions(!!m);
+    setShowMentions(/@([\w-]*)$/.test(v));
     autosize();
   }
 
@@ -48,29 +50,21 @@ export function Composer({
 
   async function send() {
     const content = text.trim();
-    if (!content || sending) return;
+    if (!content || sending || !ctx) return;
     setSending(true);
     try {
       if (mode === "start") {
-        const res = await fetch("/api/threads/start", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ content }),
-        });
-        const data = await res.json();
-        if (data.threadId) {
-          router.push(`/threads/${data.threadId}`);
+        const id = await startThread(supabase, ctx, content);
+        if (id) {
+          router.push(`/thread?id=${id}`);
+          // continue running in the background (SPA keeps this promise alive)
+          runThread(supabase, ctx, id, content);
         }
       } else {
-        onOptimistic?.(content);
         setText("");
         autosize();
-        await fetch("/api/messages", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ content, threadId, channelId }),
-        });
-        router.refresh();
+        // fire-and-forget; realtime streams the user msg + agent reply into the view
+        postMessage(supabase, ctx, { content, threadId, channelId });
       }
     } finally {
       setSending(false);
@@ -78,8 +72,7 @@ export function Composer({
   }
 
   const mentionMatches = agents.filter((a) => {
-    const m = text.match(/@([\w-]*)$/);
-    const q = m?.[1]?.toLowerCase() || "";
+    const q = text.match(/@([\w-]*)$/)?.[1]?.toLowerCase() || "";
     return (a.handle || a.name).toLowerCase().includes(q);
   });
 
@@ -123,9 +116,7 @@ export function Composer({
         />
         <div className="mt-1 flex items-center justify-between">
           <button className="flex items-center gap-1.5 rounded-lg px-2 py-1 text-xs text-[var(--muted)] hover:bg-black/5">
-            <Settings2 size={14} />
-            Auto
-            <ChevronDown size={12} />
+            <Settings2 size={14} /> Auto <ChevronDown size={12} />
           </button>
           <div className="flex items-center gap-1">
             <button className="rounded-lg p-1.5 text-[var(--muted)] hover:bg-black/5">
