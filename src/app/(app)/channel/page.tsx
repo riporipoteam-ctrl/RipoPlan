@@ -50,7 +50,7 @@ function ChannelView() {
       <div className="flex-1 overflow-y-auto px-4 py-4">
         {messages.length === 0 && (
           <p className="rounded-2xl border border-dashed border-[var(--border)] p-6 text-center text-sm text-[var(--muted)]">
-            This is the start of #{channel?.name}. Mention an agent like <b>@nebula</b> to get help here.
+            This is the start of #{channel?.name}. Mention an agent like <b>@agentnexus</b> to get help here.
           </p>
         )}
         <MessageList key={id} initial={messages} agents={agents} profile={ctx.profile} channelId={id} />

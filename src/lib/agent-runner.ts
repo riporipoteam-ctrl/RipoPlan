@@ -1,5 +1,5 @@
 import { groq, GROQ_MODEL, type ChatMessage } from "./groq";
-import { executeTool, schemasForTools, toolLabel } from "./tools";
+import { executeTool, schemasForTools, connectorSchemas, toolLabel } from "./tools";
 import type { Activity, Agent } from "./types";
 
 const MAX_TOOL_ROUNDS = 5;
@@ -20,6 +20,7 @@ export interface RunInput {
   history: ChatMessage[];
   workspaceName?: string;
   memories?: string[];
+  connectors?: Record<string, string>;
   onActivity?: (activities: Activity[]) => Promise<void> | void;
 }
 
@@ -31,7 +32,7 @@ export interface RunOutput {
   tokensOut: number;
 }
 
-function systemPrompt(agent: Agent, workspaceName?: string, memories?: string[]) {
+function systemPrompt(agent: Agent, workspaceName?: string, memories?: string[], connectors?: Record<string, string>) {
   const now = new Date();
   const date = now.toLocaleString("en-US", {
     weekday: "long",
@@ -42,7 +43,12 @@ function systemPrompt(agent: Agent, workspaceName?: string, memories?: string[])
     minute: "2-digit",
     timeZoneName: "short",
   });
-  const tools = (agent.tools || []).join(", ") || "none";
+  const connected = Object.keys(connectors || {});
+  const tools = [...(agent.tools || []), ...connected].join(", ") || "none";
+  const conn =
+    connected.length > 0
+      ? `\n\nConnected integrations you can act on via tools: ${connected.join(", ")}. Use them to take real actions when asked (e.g. create a GitHub issue, post to Slack).`
+      : "";
   const mem =
     memories && memories.length
       ? `\n\nRelevant long-term memory from past work:\n${memories.map((m) => `- ${m}`).join("\n")}`
@@ -55,6 +61,7 @@ function systemPrompt(agent: Agent, workspaceName?: string, memories?: string[])
     `Available tools: ${tools}. Use them whenever they would improve accuracy or freshness — never guess at facts you can look up.`,
     `When you present structured data (matches, prices, comparisons, schedules), use clean GitHub-flavored Markdown tables.`,
     `Be concise, helpful, and proactive. Sign off naturally as ${agent.name}.`,
+    conn,
     mem,
   ].join("\n");
 }
@@ -67,11 +74,12 @@ export async function runAgent(input: RunInput): Promise<RunOutput> {
   let tokensOut = 0;
 
   const messages: any[] = [
-    { role: "system", content: systemPrompt(agent, input.workspaceName, input.memories) },
+    { role: "system", content: systemPrompt(agent, input.workspaceName, input.memories, input.connectors) },
     ...input.history,
   ];
 
-  const tools = schemasForTools(agent.tools || []);
+  const connectors = input.connectors || {};
+  const tools = [...schemasForTools(agent.tools || []), ...connectorSchemas(connectors)];
   const client = groq();
 
   for (let round = 0; round <= MAX_TOOL_ROUNDS; round++) {
@@ -121,7 +129,7 @@ export async function runAgent(input: RunInput): Promise<RunOutput> {
       activities.push(activity);
       if (input.onActivity) await input.onActivity([...activities]);
 
-      const result = await executeTool(call.function.name, args);
+      const result = await executeTool(call.function.name, args, connectors);
       activity.status = result.ok ? "done" : "error";
       activity.detail = result.output.slice(0, 200);
       steps.push({ tool: call.function.name, args, ok: result.ok });

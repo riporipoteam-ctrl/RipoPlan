@@ -10,7 +10,7 @@ import { AgentRow } from "@/components/AgentRow";
 import type { Agent } from "@/lib/types";
 
 const previews: Record<string, string> = {
-  nebula: "Welcome to your workspace! I'm your Chief of Staff.",
+  agentnexus: "Welcome to your workspace! I'm your Chief of Staff.",
   writer: "I'm Writer — your go-to for any content that needs writing.",
   researcher: "Here's what's set up: your Researcher agent is ready.",
   builder: "Done. Here's what's running: workflows & automations.",

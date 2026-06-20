@@ -263,25 +263,33 @@ export async function runJob(supabase: SB, ctx: SessionCtx, id: string): Promise
   return threadId;
 }
 
-export async function toggleIntegration(supabase: SB, ctx: SessionCtx, provider: string, connect: boolean) {
+export async function toggleIntegration(
+  supabase: SB,
+  ctx: SessionCtx,
+  provider: string,
+  connect: boolean,
+  secret?: string,
+  accountLabel?: string
+) {
   const { data: existing } = await supabase
     .from("integrations")
     .select("id")
     .eq("workspace_id", ctx.workspace.id)
     .eq("provider", provider)
     .maybeSingle();
+  const fields = {
+    status: connect ? "connected" : "available",
+    account_label: connect ? accountLabel || ctx.profile.email : null,
+    secret: connect ? secret || null : null,
+  };
   if (existing) {
-    await supabase
-      .from("integrations")
-      .update({ status: connect ? "connected" : "available", account_label: connect ? ctx.profile.email : null })
-      .eq("id", existing.id);
+    await supabase.from("integrations").update(fields).eq("id", existing.id);
   } else if (connect) {
     await supabase.from("integrations").insert({
       workspace_id: ctx.workspace.id,
       provider,
-      status: "connected",
-      account_label: ctx.profile.email,
       connected_by: ctx.userId,
+      ...fields,
     });
   }
 }

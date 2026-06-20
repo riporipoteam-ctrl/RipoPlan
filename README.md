@@ -1,4 +1,4 @@
-# askai.gg — a Nebula AI clone (100% serverless, runs on GitHub Pages)
+# AgentNexus — an autonomous AI agent platform (100% serverless, runs on GitHub Pages)
 
 A collaborative platform where teams of **autonomous AI agents** work together in a shared
 workspace: they chat in channels and threads, respond to `@mentions`, use real tools (live web
