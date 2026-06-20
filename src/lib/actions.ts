@@ -136,7 +136,6 @@ export async function createAgent(supabase: SB, ctx: SessionCtx, description: st
     ],
     temperature: 0.5,
     max_completion_tokens: 1000,
-    reasoning_format: "hidden",
     response_format: { type: "json_object" },
   } as any);
   spec = JSON.parse(completion.choices[0].message.content || "{}");

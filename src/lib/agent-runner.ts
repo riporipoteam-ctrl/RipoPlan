@@ -1,8 +1,8 @@
-import { groq, GROQ_MODEL, type ChatMessage } from "./groq";
+import { groq, GROQ_MODEL, isReasoningModel, type ChatMessage } from "./groq";
 import { executeTool, schemasForTools, connectorSchemas, toolLabel } from "./tools";
 import type { Activity, Agent } from "./types";
 
-const MAX_TOOL_ROUNDS = 5;
+const MAX_TOOL_ROUNDS = 3;
 
 /** Strip reasoning/tool-call artifacts some open models leak into content. */
 function sanitize(text: string): string {
@@ -81,18 +81,37 @@ export async function runAgent(input: RunInput): Promise<RunOutput> {
   const connectors = input.connectors || {};
   const tools = [...schemasForTools(agent.tools || []), ...connectorSchemas(connectors)];
   const client = groq();
+  const model = agent.model || GROQ_MODEL;
+  const reasoning = isReasoningModel(model);
 
   for (let round = 0; round <= MAX_TOOL_ROUNDS; round++) {
     const useTools = tools.length > 0 && round < MAX_TOOL_ROUNDS;
-    const completion = await client.chat.completions.create({
-      model: agent.model || GROQ_MODEL,
-      messages,
-      temperature: 0.6,
-      max_completion_tokens: 4096,
-      top_p: 0.95,
-      reasoning_format: "hidden",
-      ...(useTools ? { tools, tool_choice: "auto" } : {}),
-    } as any);
+    let completion: any;
+    try {
+      completion = await client.chat.completions.create({
+        model,
+        messages,
+        temperature: 0.6,
+        max_completion_tokens: 4096,
+        top_p: 0.95,
+        ...(reasoning ? { reasoning_format: "hidden" } : {}),
+        ...(useTools ? { tools, tool_choice: "auto" } : {}),
+      } as any);
+    } catch (err: any) {
+      // Some models occasionally emit a malformed tool call which the API
+      // rejects (tool_use_failed). Recover by answering without tools.
+      const failed = err?.error?.error?.failed_generation || err?.failed_generation;
+      const recovered = sanitize(typeof failed === "string" ? failed : "");
+      if (recovered) return { content: recovered, activities, steps, tokensIn, tokensOut };
+      const plain = await client.chat.completions.create({
+        model,
+        messages: [...messages, { role: "user", content: "Answer now in plain text without calling any tools." }],
+        temperature: 0.6,
+        max_completion_tokens: 2048,
+        ...(reasoning ? { reasoning_format: "hidden" } : {}),
+      } as any);
+      return { content: sanitize(plain.choices[0].message.content || ""), activities, steps, tokensIn, tokensOut };
+    }
 
     const usage: any = (completion as any).usage;
     if (usage) {
@@ -146,14 +165,14 @@ export async function runAgent(input: RunInput): Promise<RunOutput> {
 
   // Fell out of the loop — ask for a final synthesis without tools
   const final = await client.chat.completions.create({
-    model: agent.model || GROQ_MODEL,
+    model,
     messages: [
       ...messages,
       { role: "user", content: "Summarize your findings and give the final answer now." },
     ],
     temperature: 0.6,
     max_completion_tokens: 2048,
-    reasoning_format: "hidden",
+    ...(reasoning ? { reasoning_format: "hidden" } : {}),
   } as any);
   return {
     content: sanitize(final.choices[0].message.content || ""),

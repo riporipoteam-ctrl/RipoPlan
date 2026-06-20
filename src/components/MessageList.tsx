@@ -1,22 +1,26 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import type { Agent, Message, Profile } from "@/lib/types";
 import { AgentAvatar, UserAvatar } from "./Avatar";
 import { Markdown } from "./Markdown";
 import { clockTime } from "@/lib/format";
-import { Activity as ActivityIcon, ChevronRight, Check, Loader2, X } from "lucide-react";
+import { Activity as ActivityIcon, ChevronRight, Check, Loader2, X, Search, Globe, Code2 } from "lucide-react";
 
-function ActivityTrail({ activities, done }: { activities: Message["activities"]; done: boolean }) {
+function toolIcon(tool?: string) {
+  if (tool === "web_search") return Search;
+  if (tool === "browse") return Globe;
+  if (tool === "code") return Code2;
+  return ActivityIcon;
+}
+
+function ActivityTrail({ activities }: { activities: Message["activities"] }) {
   const [open, setOpen] = useState(false);
   if (!activities?.length) return null;
   return (
-    <div className="mb-1.5">
-      <button
-        onClick={() => setOpen((o) => !o)}
-        className="flex items-center gap-1.5 text-xs text-[var(--muted)]"
-      >
+    <div className="mb-1">
+      <button onClick={() => setOpen((o) => !o)} className="flex items-center gap-1.5 text-xs text-[var(--muted)]">
         <ActivityIcon size={13} />
         {activities.length} {activities.length === 1 ? "activity" : "activities"}
         <span className="opacity-50">·</span>
@@ -24,7 +28,7 @@ function ActivityTrail({ activities, done }: { activities: Message["activities"]
         <ChevronRight size={12} className={open ? "rotate-90 transition" : "transition"} />
       </button>
       {open && (
-        <div className="mt-1.5 space-y-1 rounded-lg border border-[var(--border)] bg-black/[0.02] p-2">
+        <div className="mt-1.5 space-y-1 rounded-lg border border-[var(--border)] bg-black/[0.02] p-2 dark:bg-white/[0.03]">
           {activities.map((a, i) => (
             <div key={i} className="flex items-start gap-2 text-xs">
               {a.status === "running" ? (
@@ -46,14 +50,44 @@ function ActivityTrail({ activities, done }: { activities: Message["activities"]
   );
 }
 
+function Thinking({ activities, onCancel }: { activities: Message["activities"]; onCancel?: () => void }) {
+  const latest = activities && activities.length ? activities[activities.length - 1] : null;
+  const Icon = toolIcon(latest?.tool);
+  return (
+    <div className="py-0.5">
+      <div className="text-sm font-medium text-[var(--muted)]">Thinking…</div>
+      {latest && (
+        <div className="mt-1 flex items-center gap-1.5 text-xs text-[var(--muted)]">
+          <Icon size={13} className="text-nebula-500" />
+          <span className="truncate">{latest.label}</span>
+        </div>
+      )}
+      <div className="mt-1.5 flex items-center gap-3">
+        <span className="flex gap-1">
+          <span className="h-1.5 w-1.5 rounded-full bg-nebula-pink animate-pulse-dot" />
+          <span className="h-1.5 w-1.5 rounded-full bg-nebula-pink animate-pulse-dot [animation-delay:0.2s]" />
+          <span className="h-1.5 w-1.5 rounded-full bg-nebula-pink animate-pulse-dot [animation-delay:0.4s]" />
+        </span>
+        {onCancel && (
+          <button onClick={onCancel} className="text-xs text-nebula-600">
+            Cancel
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function MessageItem({
   m,
   agents,
   profile,
+  onCancel,
 }: {
   m: Message;
   agents: Map<string, Agent>;
   profile: Profile;
+  onCancel: (id: string) => void;
 }) {
   const isAgent = m.sender_type === "agent";
   const agent = m.agent_id ? agents.get(m.agent_id) : undefined;
@@ -72,18 +106,13 @@ function MessageItem({
           <span className="text-xs text-[var(--muted)]">{clockTime(m.created_at)}</span>
         </div>
         <div className="mt-0.5">
-          {isAgent && <ActivityTrail activities={m.activities} done={m.status === "complete"} />}
-          {m.status === "thinking" && !m.content ? (
-            <div className="flex items-center gap-2 py-1 text-sm text-[var(--muted)]">
-              <span className="flex gap-1">
-                <span className="h-1.5 w-1.5 rounded-full bg-nebula-pink animate-pulse-dot" />
-                <span className="h-1.5 w-1.5 rounded-full bg-nebula-pink animate-pulse-dot [animation-delay:0.2s]" />
-                <span className="h-1.5 w-1.5 rounded-full bg-nebula-pink animate-pulse-dot [animation-delay:0.4s]" />
-              </span>
-              <span className="text-nebula-600">Cancel</span>
-            </div>
+          {m.status === "thinking" ? (
+            <Thinking activities={m.activities} onCancel={() => onCancel(m.id)} />
           ) : (
-            m.content && <Markdown>{m.content}</Markdown>
+            <>
+              {isAgent && <ActivityTrail activities={m.activities} />}
+              {m.content && <Markdown>{m.content}</Markdown>}
+            </>
           )}
         </div>
       </div>
@@ -109,29 +138,43 @@ export function MessageList({
   const bottomRef = useRef<HTMLDivElement>(null);
   const supabase = createClient();
 
+  const fetchMessages = useCallback(async () => {
+    let q = supabase.from("messages").select("*").order("created_at", { ascending: true });
+    if (threadId) q = q.eq("thread_id", threadId);
+    else if (channelId) q = q.eq("channel_id", channelId).is("thread_id", null);
+    const { data } = await q;
+    if (data) setMessages(data as Message[]);
+  }, [supabase, threadId, channelId]);
+
+  async function cancel(id: string) {
+    setMessages((prev) => prev.filter((m) => m.id !== id));
+    await supabase.from("messages").delete().eq("id", id);
+  }
+
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
+  // Realtime for instant updates …
   useEffect(() => {
     const filter = threadId ? `thread_id=eq.${threadId}` : `channel_id=eq.${channelId}`;
     const channel = supabase
       .channel(`msgs-${threadId || channelId}`)
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "messages", filter },
-        (payload) => {
-          const row = payload.new as Message;
-          if (channelId && !threadId && row.thread_id) return; // channel root only
-          setMessages((prev) => {
-            const idx = prev.findIndex((x) => x.id === row.id);
-            if (idx === -1) return [...prev, row];
-            const copy = [...prev];
-            copy[idx] = row;
-            return copy;
-          });
+      .on("postgres_changes", { event: "*", schema: "public", table: "messages", filter }, (payload) => {
+        const row = payload.new as Message;
+        if (payload.eventType === "DELETE") {
+          setMessages((prev) => prev.filter((x) => x.id !== (payload.old as any).id));
+          return;
         }
-      )
+        if (channelId && !threadId && row.thread_id) return; // channel root only
+        setMessages((prev) => {
+          const idx = prev.findIndex((x) => x.id === row.id);
+          if (idx === -1) return [...prev, row];
+          const copy = [...prev];
+          copy[idx] = row;
+          return copy;
+        });
+      })
       .subscribe();
     return () => {
       supabase.removeChannel(channel);
@@ -139,10 +182,19 @@ export function MessageList({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [threadId, channelId]);
 
+  // … plus a polling fallback so updates always appear even if realtime drops.
+  useEffect(() => {
+    const id = setInterval(() => {
+      const working = messages.some((m) => m.status === "thinking" || m.status === "streaming");
+      if (working) fetchMessages();
+    }, 2000);
+    return () => clearInterval(id);
+  }, [messages, fetchMessages]);
+
   return (
     <div className="space-y-5">
       {messages.map((m) => (
-        <MessageItem key={m.id} m={m} agents={agentMap} profile={profile} />
+        <MessageItem key={m.id} m={m} agents={agentMap} profile={profile} onCancel={cancel} />
       ))}
       <div ref={bottomRef} />
     </div>
