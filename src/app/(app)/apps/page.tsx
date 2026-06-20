@@ -1,0 +1,52 @@
+import { redirect } from "next/navigation";
+import { createClient } from "@/lib/supabase/server";
+import { getSessionContext } from "@/lib/data";
+import { TopBar } from "@/components/TopBar";
+import { IntegrationCard } from "@/components/IntegrationCard";
+
+export const dynamic = "force-dynamic";
+
+const CATALOG = [
+  { provider: "gmail", label: "Gmail", description: "Read & send email on your behalf", glyph: "✉️", color: "#ea4335" },
+  { provider: "google_calendar", label: "Google Calendar", description: "Schedule & manage events", glyph: "📅", color: "#4285f4" },
+  { provider: "google_drive", label: "Google Drive", description: "Read & write files and docs", glyph: "📁", color: "#0f9d58" },
+  { provider: "github", label: "GitHub", description: "Issues, PRs, code & reviews", glyph: "🐙", color: "#24292e" },
+  { provider: "slack", label: "Slack", description: "Post & read messages in channels", glyph: "💬", color: "#4a154b" },
+  { provider: "notion", label: "Notion", description: "Create & update pages and databases", glyph: "📝", color: "#000000" },
+  { provider: "linear", label: "Linear", description: "Create & track issues and projects", glyph: "📐", color: "#5e6ad2" },
+  { provider: "sheets", label: "Google Sheets", description: "Read & update spreadsheets", glyph: "📊", color: "#0f9d58" },
+];
+
+export default async function AppsPage() {
+  const ctx = await getSessionContext();
+  if (!ctx?.workspace) redirect("/login");
+
+  const supabase = await createClient();
+  const { data: integrations } = await supabase
+    .from("integrations")
+    .select("provider,status")
+    .eq("workspace_id", ctx.workspace.id);
+  const connected = new Set(
+    (integrations || []).filter((i: any) => i.status === "connected").map((i: any) => i.provider)
+  );
+
+  return (
+    <>
+      <TopBar
+        title="Apps"
+        subtitle="Connect your tools so agents can act"
+        profileName={ctx.profile.display_name}
+        profileColor={ctx.profile.avatar_color}
+      />
+      <div className="flex-1 space-y-3 px-4 py-4">
+        <div className="rounded-2xl border border-amber-300/40 bg-amber-50 p-3 text-xs text-amber-800">
+          Connecting grants agents permission to act in that tool. OAuth is simulated in this
+          demo — add provider credentials to enable live connections.
+        </div>
+        {CATALOG.map((c) => (
+          <IntegrationCard key={c.provider} {...c} connected={connected.has(c.provider)} />
+        ))}
+      </div>
+    </>
+  );
+}
