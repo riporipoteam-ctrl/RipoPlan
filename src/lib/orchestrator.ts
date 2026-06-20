@@ -45,15 +45,35 @@ async function buildHistory(
     }));
 }
 
-async function getMemories(supabase: SupabaseClient, agent: Agent): Promise<string[]> {
-  if (!agent.memory_enabled) return [];
-  const { data } = await supabase
-    .from("agent_memories")
-    .select("content")
-    .eq("agent_id", agent.id)
+async function getMemories(
+  supabase: SupabaseClient,
+  agent: Agent,
+  workspaceId: string
+): Promise<string[]> {
+  const out: string[] = [];
+
+  // Workspace knowledge base — shared context for every agent
+  const { data: kb } = await supabase
+    .from("knowledge")
+    .select("title,content")
+    .eq("workspace_id", workspaceId)
     .order("created_at", { ascending: false })
-    .limit(5);
-  return ((data as { content: string }[]) || []).map((m) => m.content);
+    .limit(10);
+  for (const k of (kb as { title: string; content: string }[]) || []) {
+    out.push(`${k.title}: ${k.content || ""}`.trim());
+  }
+
+  // Agent's own long-term memory
+  if (agent.memory_enabled) {
+    const { data } = await supabase
+      .from("agent_memories")
+      .select("content")
+      .eq("agent_id", agent.id)
+      .order("created_at", { ascending: false })
+      .limit(5);
+    for (const m of (data as { content: string }[]) || []) out.push(m.content);
+  }
+  return out;
 }
 
 export interface DispatchOpts {
@@ -110,7 +130,7 @@ export async function dispatch(opts: DispatchOpts): Promise<void> {
         { threadId: opts.threadId, channelId: opts.channelId },
         agent.id
       );
-      const memories = await getMemories(supabase, agent);
+      const memories = await getMemories(supabase, agent, workspaceId);
 
       const result = await runAgent({
         agent,

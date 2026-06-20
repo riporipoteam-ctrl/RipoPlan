@@ -49,7 +49,7 @@ export function TopBar({
           </span>
         )}
       </Link>
-      <Link href="/profile">
+      <Link href="/settings">
         <UserAvatar name={profileName} color={profileColor} size={30} />
       </Link>
     </header>
