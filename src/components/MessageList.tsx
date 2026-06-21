@@ -6,7 +6,48 @@ import type { Agent, Message, Profile } from "@/lib/types";
 import { AgentAvatar, UserAvatar } from "./Avatar";
 import { Markdown } from "./Markdown";
 import { clockTime } from "@/lib/format";
-import { Activity as ActivityIcon, ChevronRight, Check, Loader2, X, Search, Globe, Code2 } from "lucide-react";
+import Link from "next/link";
+import { Activity as ActivityIcon, ChevronRight, Check, Loader2, X, Search, Globe, Code2, FileText } from "lucide-react";
+import { AgentAvatar as AvatarBox } from "./Avatar";
+
+function Attachments({ items }: { items: any[] }) {
+  const cards = items.filter((a) => a?.type === "agent_created");
+  const media = items.filter((a) => a?.type === "image" || a?.type === "file");
+  return (
+    <>
+      {media.length > 0 && (
+        <div className="mt-1.5 flex flex-wrap gap-2">
+          {media.map((a, i) =>
+            a.type === "image" ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <a key={i} href={a.url} target="_blank" rel="noreferrer">
+                <img src={a.url} alt={a.name} className="max-h-48 rounded-xl border border-[var(--border)] object-cover" />
+              </a>
+            ) : (
+              <a key={i} href={a.url} target="_blank" rel="noreferrer" className="flex items-center gap-1.5 rounded-lg border border-[var(--border)] px-2.5 py-1.5 text-xs hover:bg-black/5">
+                <FileText size={14} /> {a.name}
+              </a>
+            )
+          )}
+        </div>
+      )}
+      {cards.map((c, i) => (
+        <Link key={i} href={`/agent?id=${c.id}`} className="mt-2 flex items-center gap-3 rounded-xl border border-[var(--border)] bg-[var(--card)] p-2.5 hover:border-nebula-400">
+          <AvatarBox emoji={c.emoji} color={c.color} size={36} />
+          <div className="min-w-0 flex-1">
+            <div className="font-semibold leading-tight">{c.name}</div>
+            <div className="text-xs text-emerald-600">Created{c.role ? ` · ${c.role}` : ""}</div>
+          </div>
+          <Arrow size={16} className="text-[var(--muted)]" />
+        </Link>
+      ))}
+    </>
+  );
+}
+
+function Arrow({ size, className }: { size: number; className?: string }) {
+  return <ChevronRight size={size} className={className} />;
+}
 
 function toolIcon(tool?: string) {
   if (tool === "web_search") return Search;
@@ -112,6 +153,7 @@ function MessageItem({
             <>
               {isAgent && <ActivityTrail activities={m.activities} />}
               {m.content && <Markdown>{m.content}</Markdown>}
+              {m.attachments && m.attachments.length > 0 && <Attachments items={m.attachments} />}
             </>
           )}
         </div>
