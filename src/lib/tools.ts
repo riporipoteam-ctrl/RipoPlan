@@ -216,17 +216,21 @@ async function wikipediaSearch(query: string): Promise<ToolResult> {
 }
 
 async function jinaSearch(query: string): Promise<ToolResult> {
-  // Use the Jina reader to fetch DuckDuckGo's HTML results server-side (bypasses
-  // browser CORS + bot blocks) and return readable text.
+  // Jina reader returns markdown with real links preserved — fetch DuckDuckGo
+  // results server-side (bypasses CORS + bot blocks) so the model gets clickable URLs.
   try {
     const res = await fetch(
       `https://r.jina.ai/https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`,
-      { headers: { "X-Return-Format": "text" } }
+      { headers: { "X-Return-Format": "markdown", "X-No-Cache": "true" } }
     );
     if (!res.ok) return { ok: false, output: "" };
-    const text = await res.text();
-    const clean = text.replace(/\n{3,}/g, "\n\n").trim();
-    return { ok: clean.length > 80, output: clean.slice(0, 4000) };
+    let md = await res.text();
+    // Unwrap DuckDuckGo redirect links → real destination URLs.
+    md = md.replace(/https?:\/\/(?:html\.)?duckduckgo\.com\/l\/\?uddg=([^)&\s]+)[^)\s]*/g, (_m, u) => {
+      try { return decodeURIComponent(u); } catch { return _m; }
+    });
+    md = md.replace(/\n{3,}/g, "\n\n").trim();
+    return { ok: md.length > 80, output: md.slice(0, 5000) };
   } catch {
     return { ok: false, output: "" };
   }

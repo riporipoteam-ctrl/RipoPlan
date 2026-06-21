@@ -36,6 +36,8 @@ export function Composer({
   const fileRef = useRef<HTMLInputElement>(null);
 
   const selectedAgent = agents.find((a) => a.id === agentId);
+  // On the Home composer (top of page) open menus downward; elsewhere upward.
+  const dropCls = mode === "start" ? "top-full mt-2" : "bottom-full mb-2";
 
   function autosize() {
     const el = taRef.current;
@@ -107,7 +109,7 @@ export function Composer({
   return (
     <div className="relative">
       {showMentions && mentionMatches.length > 0 && (
-        <div className="absolute bottom-full mb-2 w-full overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--card)] shadow-lg">
+        <div className={`absolute ${dropCls} z-30 max-h-60 w-full overflow-auto rounded-xl border border-[var(--border)] bg-[var(--card)] shadow-lg`}>
           {mentionMatches.slice(0, 5).map((a) => (
             <button key={a.id} onClick={() => pickMention(a.handle || a.name)} className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-black/5">
               <AgentAvatar emoji={a.emoji} color={a.avatar_color} size={22} />
@@ -119,7 +121,7 @@ export function Composer({
       )}
 
       {pickerOpen && (
-        <div className="absolute bottom-full mb-2 w-56 overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--card)] shadow-lg">
+        <div className={`absolute ${dropCls} left-0 z-30 max-h-60 w-56 overflow-auto rounded-xl border border-[var(--border)] bg-[var(--card)] shadow-lg`}>
           <button onClick={() => { setAgentId(null); setPickerOpen(false); }} className="flex w-full items-center justify-between px-3 py-2 text-left text-sm hover:bg-black/5">
             <span className="flex items-center gap-2"><Settings2 size={15} /> Auto</span>
             {!agentId && <Check size={14} className="text-nebula-600" />}

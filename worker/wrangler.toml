@@ -1,0 +1,14 @@
+name = "agentnexus-backend"
+main = "src/index.ts"
+compatibility_date = "2024-11-01"
+
+# Set these with: wrangler secret put <NAME>
+#   GROQ_API_KEY            - (optional) proxy Groq so the key isn't in the client bundle
+#   NVIDIA_API_KEY          - from https://build.nvidia.com  (enables NVIDIA models)
+#   GOOGLE_CLIENT_ID        - Google OAuth client (Web application)
+#   GOOGLE_CLIENT_SECRET    - Google OAuth client secret
+#
+# Vars below are safe to commit:
+[vars]
+ALLOWED_ORIGIN = "https://riporipoteam-ctrl.github.io"
+APP_REDIRECT = "https://riporipoteam-ctrl.github.io/RipoPlan/oauth/"
