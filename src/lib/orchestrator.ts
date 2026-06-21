@@ -42,6 +42,45 @@ function isSupervisorIntent(content: string): boolean {
   );
 }
 
+const NAME_STOP = new Set([
+  "agent", "an", "a", "the", "new", "another", "that", "this", "it", "one", "bot",
+  "ai", "assistant", "please", "can", "you", "me", "my", "us", "here", "in", "to", "some",
+]);
+
+/** Parse the agent name from a create/add request, if any. */
+export function parseAgentName(content: string): string | null {
+  const pats = [
+    /\b(?:called|named)\s+([A-Za-z][\w-]{1,20})/i,
+    /\b(?:get|bring|add|invite|put)\s+([A-Za-z][\w-]{1,20})\s+(?:in|into|to|here)\b/i,
+    /\b(?:make|create|build|spin ?up|set ?up|add)\s+(?:a |an )?(?:new )?agent\s+(?:called |named )?([A-Za-z][\w-]{1,20})/i,
+  ];
+  for (const re of pats) {
+    const m = re.exec(content);
+    if (m && m[1] && !NAME_STOP.has(m[1].toLowerCase())) return m[1];
+  }
+  return null;
+}
+
+function isCreateIntent(content: string): boolean {
+  return /\b(make|create|build|add|spin ?up|set ?up|get|bring|invite|need|want)\b/i.test(content);
+}
+
+function inferSpec(name: string, content: string) {
+  const c = content.toLowerCase();
+  let role = "AI Agent";
+  let tools = ["web_search", "browse", "code"];
+  if (/cod(e|ing)|develop|program|engineer|software|\bapp\b|website|build/.test(c)) {
+    role = "Software Engineer"; tools = ["code", "web_search", "browse"];
+  } else if (/research|find|search|analy|investigat|\bdata\b|news|market|stock/.test(c)) {
+    role = "Research Analyst"; tools = ["web_search", "browse"];
+  } else if (/writ|content|blog|copy|email|post|draft/.test(c)) {
+    role = "Content Writer"; tools = ["web_search", "browse"];
+  } else if (/design|image|art|logo|photo|video/.test(c)) {
+    role = "Creative"; tools = ["web_search", "browse"];
+  }
+  return { name, role, description: `${name} is a ${role.toLowerCase()} on the team.`, tools };
+}
+
 export function selectAgents(
   content: string,
   agents: Agent[],
@@ -270,6 +309,38 @@ export async function dispatch(opts: DispatchOpts): Promise<void> {
     const supIds = new Set(opts.agents.filter((a) => a.is_supervisor).map((a) => a.id));
     for (const r of (data as { agent_id: string }[]) || []) {
       if (r.agent_id && !supIds.has(r.agent_id)) { preferSpecialistId = r.agent_id; break; }
+    }
+  }
+
+  const supervisor = opts.agents.find((a) => a.is_supervisor);
+
+  // Deterministic agent creation / bring-in — don't rely on the model deciding
+  // to call the tool. If the user names an agent to add/get:
+  const reqName = isCreateIntent(opts.userContent) ? parseAgentName(opts.userContent) : null;
+  if (reqName) {
+    const existing = opts.agents.find(
+      (a) => a.name.toLowerCase() === reqName.toLowerCase() || (a.handle || "").toLowerCase() === reqName.toLowerCase()
+    );
+    if (!existing && hasGroqKey()) {
+      const niceName = reqName.charAt(0).toUpperCase() + reqName.slice(1);
+      const card = await createAgentFromSpec(supabase, workspaceId, opts.createdBy ?? null, inferSpec(niceName, opts.userContent));
+      if (card) {
+        await supabase.from("messages").insert({
+          workspace_id: workspaceId,
+          thread_id: opts.threadId ?? null,
+          channel_id: opts.channelId ?? null,
+          sender_type: "agent",
+          agent_id: supervisor?.id ?? card.id,
+          content: `Done — I've added **${card.name}** to the team! 🎉 ${card.role ? `They're set up as a ${card.role}.` : ""} You can message **${card.name}** directly or @mention them anytime.`,
+          attachments: [{ type: "agent_created", ...card }],
+          status: "complete",
+        });
+        return;
+      }
+    } else if (existing && !existing.is_supervisor) {
+      // Agent already exists → have THEM respond (they "join"), not AgentNexus.
+      await runOneAgent(opts, connectors, existing, opts.userContent, 0, new Set());
+      return;
     }
   }
 
