@@ -58,8 +58,14 @@ function sanitize(text: string): string {
     .replace(/<tool_call>[\s\S]*?<\/tool_call>/gi, "")
     .replace(/<\|?function[\s\S]*?>[\s\S]*?<\/?\|?function[^>]*>/gi, "")
     .replace(/<function=[\s\S]*$/i, "");
-  // Some models echo the raw tool schema/JSON as text — drop that.
-  if (/"parameters"\s*:|"name"\s*:\s*"(web_search|create_agent|delegate|browse|code)"/.test(out)) {
+  // Bracketed tool-call echoes, e.g. [web_search={"query":"..."}] or {web_search:{...}}
+  out = out
+    .replace(/\[\s*(web_search|browse|code|create_agent|delegate|generate_image|github|slack)\s*=?\s*\{[\s\S]*?\}\s*\]/gi, "")
+    .replace(/^\s*(web_search|browse|code|create_agent|delegate|generate_image|github|slack)\s*=\s*\{[\s\S]*?\}\s*$/gim, "");
+  // Leaked history prefixes like "[from Henna]".
+  out = out.replace(/\[from [^\]]{1,40}\]\s*/gi, "");
+  // Raw JSON tool-schema echo.
+  if (/"parameters"\s*:|"name"\s*:\s*"(web_search|create_agent|delegate|browse|code|generate_image)"/.test(out)) {
     out = out.replace(/\[?\s*\{\s*"name"[\s\S]*$/m, "").trim();
   }
   return out.trim();
