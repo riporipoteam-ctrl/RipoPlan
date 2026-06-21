@@ -2,6 +2,7 @@
 
 import { SessionProvider, useSession } from "@/lib/session";
 import { BottomNav } from "@/components/BottomNav";
+import { Sidebar } from "@/components/Sidebar";
 import { Onboarding } from "@/components/Onboarding";
 import { Loader2 } from "lucide-react";
 
@@ -31,9 +32,14 @@ function Shell({ children }: { children: React.ReactNode }) {
   }
 
   return (
-    <div className="mx-auto flex min-h-dvh max-w-2xl flex-col bg-[var(--bg)]">
-      <main className="flex flex-1 flex-col">{children}</main>
-      <BottomNav />
+    <div className="mx-auto flex min-h-dvh w-full max-w-6xl bg-[var(--bg)]">
+      <Sidebar className="sticky top-0 hidden h-dvh md:flex" />
+      <div className="flex min-h-dvh w-full flex-1 flex-col md:border-r md:border-[var(--border)]">
+        <main className="flex flex-1 flex-col">{children}</main>
+        <div className="md:hidden">
+          <BottomNav />
+        </div>
+      </div>
       <Onboarding />
     </div>
   );

@@ -1,18 +1,22 @@
-import { groq, GROQ_MODEL, isReasoningModel, type ChatMessage } from "./groq";
+import { groq, GROQ_MODEL, VISION_MODEL, isReasoningModel, isVisionModel, type ChatMessage } from "./groq";
 import { executeTool, schemasForTools, connectorSchemas, toolLabel } from "./tools";
 import type { Activity, Agent } from "./types";
 
 const MAX_TOOL_ROUNDS = 3;
 
-/** Strip reasoning/tool-call artifacts some open models leak into content. */
+/** Strip reasoning/tool-call artifacts and tool-schema echoes some models leak. */
 function sanitize(text: string): string {
-  return (text || "")
+  let out = (text || "")
     .replace(/<think>[\s\S]*?<\/think>/gi, "")
     .replace(/<think>[\s\S]*$/i, "")
     .replace(/<tool_call>[\s\S]*?<\/tool_call>/gi, "")
     .replace(/<\|?function[\s\S]*?>[\s\S]*?<\/?\|?function[^>]*>/gi, "")
-    .replace(/<function=[\s\S]*$/i, "")
-    .trim();
+    .replace(/<function=[\s\S]*$/i, "");
+  // Some models echo the raw tool schema/JSON as text — drop that.
+  if (/"parameters"\s*:|"name"\s*:\s*"(web_search|create_agent|delegate|browse|code)"/.test(out)) {
+    out = out.replace(/\[?\s*\{\s*"name"[\s\S]*$/m, "").trim();
+  }
+  return out.trim();
 }
 
 export interface CreatedAgentCard {
@@ -93,7 +97,10 @@ export async function runAgent(input: RunInput): Promise<RunOutput> {
   const connectors = input.connectors || {};
   const tools = [...schemasForTools(agent.tools || []), ...connectorSchemas(connectors)];
   const client = groq();
-  const model = agent.model || GROQ_MODEL;
+  // Auto-upgrade to a vision model if the conversation contains image attachments.
+  const hasImage = input.history.some((m) => Array.isArray((m as any).content));
+  let model = agent.model || GROQ_MODEL;
+  if (hasImage && !isVisionModel(model)) model = VISION_MODEL;
   const reasoning = isReasoningModel(model);
 
   for (let round = 0; round <= MAX_TOOL_ROUNDS; round++) {

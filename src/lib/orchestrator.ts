@@ -4,19 +4,45 @@ import type { Agent, Message } from "./types";
 import { hasGroqKey, type ChatMessage } from "./groq";
 import { AGENT_COLORS } from "./emoji";
 
-/** Find agents explicitly @mentioned in the text. */
-function parseMentions(content: string, agents: Agent[]): Agent[] {
-  const handles = [...content.matchAll(/@([\w-]+)/g)].map((m) => m[1].toLowerCase());
-  if (handles.length === 0) return [];
-  return agents.filter((a) =>
-    handles.includes((a.handle || "").toLowerCase()) ||
-    handles.includes(a.name.toLowerCase().replace(/\s+/g, "-"))
-  );
+/** Agents explicitly @mentioned (by handle or name) in the text. */
+export function resolveMentions(content: string, agents: Agent[]): Agent[] {
+  const tokens = [...content.matchAll(/@([a-z0-9_-]+)/gi)].map((m) => m[1].toLowerCase());
+  if (!tokens.length) return [];
+  return agents.filter((a) => {
+    const h = (a.handle || "").toLowerCase();
+    const n1 = a.name.toLowerCase().replace(/\s+/g, "-");
+    const n2 = a.name.toLowerCase().replace(/\s+/g, "");
+    return tokens.includes(h) || tokens.includes(n1) || tokens.includes(n2);
+  });
 }
 
-export function selectAgents(content: string, agents: Agent[], primaryAgentId?: string | null): Agent[] {
-  const mentioned = parseMentions(content, agents);
+/** A non-supervisor agent addressed by its bare name (e.g. "max, find ..."). */
+function bareNameRef(content: string, agents: Agent[]): Agent | null {
+  const lc = content.toLowerCase();
+  // Prefer agents whose name appears earliest in the message.
+  let best: { a: Agent; idx: number } | null = null;
+  for (const a of agents) {
+    if (a.is_supervisor) continue;
+    const name = a.name.toLowerCase();
+    if (name.length < 3) continue;
+    const re = new RegExp(`(^|[^a-z0-9])${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}([^a-z0-9]|$)`);
+    const m = re.exec(lc);
+    if (m && (best === null || m.index < best.idx)) best = { a, idx: m.index };
+  }
+  return best?.a ?? null;
+}
+
+export function selectAgents(
+  content: string,
+  agents: Agent[],
+  primaryAgentId?: string | null,
+  threadAgentIds?: Set<string>
+): Agent[] {
+  const mentioned = resolveMentions(content, agents);
   if (mentioned.length) return mentioned;
+  // If the user addresses a specialist by name, route straight to them.
+  const bare = bareNameRef(content, agents);
+  if (bare) return [bare];
   if (primaryAgentId) {
     const a = agents.find((x) => x.id === primaryAgentId);
     if (a) return [a];
@@ -199,146 +225,157 @@ async function getConnectors(supabase: SupabaseClient, workspaceId: string): Pro
   return out;
 }
 
+const MAX_FANOUT_DEPTH = 1;
+
 /** Run the selected agent(s) for a freshly-posted user message. Awaits completion. */
 export async function dispatch(opts: DispatchOpts): Promise<void> {
   const { supabase, workspaceId } = opts;
-  const selected = selectAgents(opts.userContent, opts.agents, opts.primaryAgentId);
   const connectors = await getConnectors(supabase, workspaceId);
+  const selected = selectAgents(opts.userContent, opts.agents, opts.primaryAgentId);
+  const triggered = new Set<string>();
 
   for (const agent of selected) {
-    // No API key yet → post a friendly nudge instead of a raw 401.
-    if (!hasGroqKey()) {
-      await supabase.from("messages").insert({
-        workspace_id: workspaceId,
-        thread_id: opts.threadId ?? null,
-        channel_id: opts.channelId ?? null,
-        sender_type: "agent",
-        agent_id: agent.id,
-        content:
-          "I'd love to help! I just need a **Groq API key** to think. Add one in **Settings → Groq API key** — it's free at console.groq.com/keys and stays on your device.",
-        status: "complete",
-      });
-      continue;
+    await runOneAgent(opts, connectors, agent, opts.userContent, 0, triggered);
+  }
+}
+
+async function runOneAgent(
+  opts: DispatchOpts,
+  connectors: Record<string, string>,
+  agent: Agent,
+  triggerText: string,
+  depth: number,
+  triggered: Set<string>
+): Promise<void> {
+  const { supabase, workspaceId } = opts;
+  if (triggered.has(agent.id)) return;
+  triggered.add(agent.id);
+
+  // No API key yet → post a friendly nudge instead of a raw 401.
+  if (!hasGroqKey()) {
+    await supabase.from("messages").insert({
+      workspace_id: workspaceId,
+      thread_id: opts.threadId ?? null,
+      channel_id: opts.channelId ?? null,
+      sender_type: "agent",
+      agent_id: agent.id,
+      content:
+        "I'd love to help! I just need a **Groq API key** to think. Add one in **Settings → Groq API key** — it's free at console.groq.com/keys and stays on your device.",
+      status: "complete",
+    });
+    return;
+  }
+
+  const { data: placeholder } = await supabase
+    .from("messages")
+    .insert({
+      workspace_id: workspaceId,
+      thread_id: opts.threadId ?? null,
+      channel_id: opts.channelId ?? null,
+      sender_type: "agent",
+      agent_id: agent.id,
+      content: "",
+      status: "thinking",
+      activities: [],
+    })
+    .select("id")
+    .single();
+  const msgId = placeholder?.id as string;
+
+  const { data: run } = await supabase
+    .from("agent_runs")
+    .insert({
+      workspace_id: workspaceId,
+      agent_id: agent.id,
+      thread_id: opts.threadId ?? null,
+      trigger: "message",
+      status: "running",
+      input: triggerText.slice(0, 1000),
+    })
+    .select("id")
+    .single();
+
+  try {
+    const history = await buildHistory(supabase, { threadId: opts.threadId, channelId: opts.channelId }, agent.id);
+    const memories = await getMemories(supabase, agent, workspaceId);
+
+    const result = await runAgent({
+      agent,
+      history,
+      workspaceName: opts.workspaceName,
+      memories,
+      connectors,
+      onActivity: async (activities) => {
+        if (msgId) await supabase.from("messages").update({ activities }).eq("id", msgId);
+      },
+      onCreateAgent: (spec) => createAgentFromSpec(supabase, workspaceId, opts.createdBy ?? null, spec),
+      onDelegate: (handle, task) =>
+        delegateToAgent(supabase, {
+          workspaceId,
+          workspaceName: opts.workspaceName,
+          threadId: opts.threadId ?? null,
+          channelId: opts.channelId ?? null,
+          agents: opts.agents,
+          connectors,
+          handle,
+          task,
+        }),
+    });
+
+    if (msgId) {
+      const attachments = result.createdAgents.map((c) => ({ type: "agent_created", ...c }));
+      await supabase
+        .from("messages")
+        .update({ content: result.content, activities: result.activities, attachments, status: "complete" })
+        .eq("id", msgId);
     }
 
-    // 1. Insert placeholder "thinking" message (realtime shows the typing bubble)
-    const { data: placeholder } = await supabase
-      .from("messages")
-      .insert({
-        workspace_id: workspaceId,
-        thread_id: opts.threadId ?? null,
-        channel_id: opts.channelId ?? null,
-        sender_type: "agent",
-        agent_id: agent.id,
-        content: "",
-        status: "thinking",
-        activities: [],
-      })
-      .select("id")
-      .single();
-    const msgId = placeholder?.id as string;
+    if (run?.id) {
+      await supabase
+        .from("agent_runs")
+        .update({
+          status: "done",
+          output: result.content.slice(0, 4000),
+          steps: result.steps,
+          tokens_in: result.tokensIn,
+          tokens_out: result.tokensOut,
+          finished_at: new Date().toISOString(),
+        })
+        .eq("id", run.id);
+    }
 
-    // 2. Open a run log
-    const { data: run } = await supabase
-      .from("agent_runs")
-      .insert({
+    await supabase.from("agents").update({ last_run_at: new Date().toISOString() }).eq("id", agent.id);
+
+    if (agent.memory_enabled) {
+      await supabase.from("agent_memories").insert({
         workspace_id: workspaceId,
         agent_id: agent.id,
-        thread_id: opts.threadId ?? null,
-        trigger: "message",
-        status: "running",
-        input: opts.userContent.slice(0, 1000),
-      })
-      .select("id")
-      .single();
-
-    try {
-      const history = await buildHistory(
-        supabase,
-        { threadId: opts.threadId, channelId: opts.channelId },
-        agent.id
-      );
-      const memories = await getMemories(supabase, agent, workspaceId);
-
-      const result = await runAgent({
-        agent,
-        history,
-        workspaceName: opts.workspaceName,
-        memories,
-        connectors,
-        onActivity: async (activities) => {
-          if (msgId) await supabase.from("messages").update({ activities }).eq("id", msgId);
-        },
-        onCreateAgent: (spec) => createAgentFromSpec(supabase, workspaceId, opts.createdBy ?? null, spec),
-        onDelegate: (handle, task) =>
-          delegateToAgent(supabase, {
-            workspaceId,
-            workspaceName: opts.workspaceName,
-            threadId: opts.threadId ?? null,
-            channelId: opts.channelId ?? null,
-            agents: opts.agents,
-            connectors,
-            handle,
-            task,
-          }),
+        kind: "interaction",
+        content: `Asked: "${triggerText.slice(0, 200)}". Responded: ${result.content.slice(0, 300)}`,
       });
+    }
 
-      // 3. Finalize the message (+ attach any created-agent cards)
-      if (msgId) {
-        const attachments = result.createdAgents.map((c) => ({ type: "agent_created", ...c }));
-        await supabase
-          .from("messages")
-          .update({
-            content: result.content,
-            activities: result.activities,
-            attachments,
-            status: "complete",
-          })
-          .eq("id", msgId);
+    // Fan-out: if this agent @mentioned other agents, bring them in to reply too.
+    if (depth < MAX_FANOUT_DEPTH) {
+      const mentioned = resolveMentions(result.content, opts.agents).filter(
+        (m) => m.id !== agent.id && !triggered.has(m.id)
+      );
+      for (const m of mentioned) {
+        await runOneAgent(opts, connectors, m, result.content, depth + 1, triggered);
       }
-
-      // 4. Close the run
-      if (run?.id) {
-        await supabase
-          .from("agent_runs")
-          .update({
-            status: "done",
-            output: result.content.slice(0, 4000),
-            steps: result.steps,
-            tokens_in: result.tokensIn,
-            tokens_out: result.tokensOut,
-            finished_at: new Date().toISOString(),
-          })
-          .eq("id", run.id);
-      }
-
-      await supabase.from("agents").update({ last_run_at: new Date().toISOString() }).eq("id", agent.id);
-
-      // 5. Store a long-term memory snippet
-      if (agent.memory_enabled) {
-        await supabase.from("agent_memories").insert({
-          workspace_id: workspaceId,
-          agent_id: agent.id,
-          kind: "interaction",
-          content: `User asked: "${opts.userContent.slice(0, 200)}". I responded with: ${result.content.slice(0, 300)}`,
-        });
-      }
-    } catch (e: any) {
-      if (msgId) {
-        await supabase
-          .from("messages")
-          .update({
-            content: `⚠️ I ran into an error: ${e.message}. A human may need to step in.`,
-            status: "error",
-          })
-          .eq("id", msgId);
-      }
-      if (run?.id) {
-        await supabase
-          .from("agent_runs")
-          .update({ status: "error", output: e.message, finished_at: new Date().toISOString() })
-          .eq("id", run.id);
-      }
+    }
+  } catch (e: any) {
+    if (msgId) {
+      await supabase
+        .from("messages")
+        .update({ content: `⚠️ I ran into an error: ${e.message}. A human may need to step in.`, status: "error" })
+        .eq("id", msgId);
+    }
+    if (run?.id) {
+      await supabase
+        .from("agent_runs")
+        .update({ status: "error", output: e.message, finished_at: new Date().toISOString() })
+        .eq("id", run.id);
     }
   }
 }
