@@ -132,6 +132,36 @@ export function connectorSchemas(connectors: Record<string, string>) {
     .map((p) => CONNECTOR_TOOL_SCHEMAS[p]);
 }
 
+// Image generation via the Cloudflare NVIDIA worker (FLUX).
+export const IMAGE_TOOL_SCHEMA = {
+  type: "function",
+  function: {
+    name: "generate_image",
+    description:
+      "Generate an image from a text description (logos, art, photos, product shots, designs). The image is shown to the user automatically.",
+    parameters: {
+      type: "object",
+      properties: { prompt: { type: "string", description: "Detailed description of the image to create" } },
+      required: ["prompt"],
+    },
+  },
+};
+
+export async function generateImage(backendUrl: string, prompt: string): Promise<{ ok: boolean; url?: string; error?: string }> {
+  try {
+    const res = await fetch(`${backendUrl.replace(/\/+$/, "")}/image/generate`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ prompt }),
+    });
+    const d = await res.json();
+    if (d.image) return { ok: true, url: d.image };
+    return { ok: false, error: d.error || "Image generation failed." };
+  } catch (e: any) {
+    return { ok: false, error: e.message };
+  }
+}
+
 async function githubTool(args: any, token: string): Promise<ToolResult> {
   const headers = {
     Authorization: `Bearer ${token}`,

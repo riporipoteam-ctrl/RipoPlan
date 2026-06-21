@@ -455,7 +455,10 @@ async function runOneAgent(
     });
 
     if (msgId) {
-      const attachments = result.createdAgents.map((c) => ({ type: "agent_created", ...c }));
+      const attachments = [
+        ...result.createdAgents.map((c) => ({ type: "agent_created", ...c })),
+        ...result.generatedImages.map((url) => ({ type: "image", url, name: "Generated image" })),
+      ];
       await supabase
         .from("messages")
         .update({ content: result.content, activities: result.activities, attachments, status: "complete" })

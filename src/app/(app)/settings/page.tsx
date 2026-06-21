@@ -8,6 +8,7 @@ import { useSession } from "@/lib/session";
 import { TopBar } from "@/components/TopBar";
 import { ProfileActions } from "@/components/ProfileActions";
 import { GroqKeyField } from "@/components/GroqKeyField";
+import { BackendUrlField } from "@/components/BackendUrlField";
 
 export default function SettingsPage() {
   const supabase = createClient();
@@ -64,6 +65,14 @@ export default function SettingsPage() {
           <div className="mb-2 text-sm font-semibold">Groq API key</div>
           <p className="mb-3 text-xs text-[var(--muted)]">Powers your agents. Stored only on this device.</p>
           <GroqKeyField />
+        </div>
+
+        <div className="rounded-2xl border border-[var(--border)] bg-[var(--card)] p-4">
+          <div className="mb-2 text-sm font-semibold">NVIDIA backend (image generation)</div>
+          <p className="mb-3 text-xs text-[var(--muted)]">
+            Paste your Cloudflare <b>ripoai-nvidia</b> Worker URL to enable AI image generation. Find it in Cloudflare → Workers &amp; Pages → ripoai-nvidia.
+          </p>
+          <BackendUrlField />
         </div>
         <div className="overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--card)]">
           {links.map((it) => (
