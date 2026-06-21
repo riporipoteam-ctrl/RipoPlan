@@ -9,7 +9,21 @@ token exchange. This optional Worker adds exactly that:
   for Gmail / Calendar / Drive / Sheets (no key pasting). The callback posts the
   token back to the app, which stores it as a connected integration.
 
-## Deploy (≈2 min)
+## Easiest: auto-deploy via GitHub Actions (recommended)
+There's a workflow at `.github/workflows/worker.yml` that deploys this Worker to
+**your Cloudflare account** automatically. You only add secrets once:
+
+1. Repo **Settings → Secrets and variables → Actions** → add:
+   - `CLOUDFLARE_API_TOKEN` — create one with the **"Edit Cloudflare Workers"** template at
+     dash.cloudflare.com/profile/api-tokens
+   - `CLOUDFLARE_ACCOUNT_ID` — from the Cloudflare dashboard URL / Workers overview
+   - (optional) `NVIDIA_API_KEY`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`
+2. Run the **"Deploy Cloudflare Worker"** action (or push any change under `worker/`).
+
+That's it — CI runs `wrangler deploy` and sets the secrets for you. Grab the
+`*.workers.dev` URL from the action log.
+
+## Or deploy manually (≈2 min)
 ```bash
 cd worker
 npm i -g wrangler

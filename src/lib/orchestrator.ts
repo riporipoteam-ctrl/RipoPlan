@@ -81,6 +81,23 @@ function inferSpec(name: string, content: string) {
   return { name, role, description: `${name} is a ${role.toLowerCase()} on the team.`, tools };
 }
 
+/** Any agent (incl. the supervisor / its "nexus" nickname) addressed by name. */
+function nameRef(content: string, agents: Agent[]): Agent | null {
+  const lc = content.toLowerCase();
+  let best: { a: Agent; idx: number } | null = null;
+  for (const a of agents) {
+    const aliases = [a.name.toLowerCase(), (a.handle || "").toLowerCase().replace(/-/g, " ")];
+    if (a.is_supervisor) aliases.push("nexus", "agent nexus", "agentnexus");
+    for (const al of aliases) {
+      if (al.length < 3) continue;
+      const re = new RegExp(`(^|[^a-z0-9])${al.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}([^a-z0-9]|$)`);
+      const m = re.exec(lc);
+      if (m && (best === null || m.index < best.idx)) best = { a, idx: m.index };
+    }
+  }
+  return best?.a ?? null;
+}
+
 export function selectAgents(
   content: string,
   agents: Agent[],
@@ -92,12 +109,12 @@ export function selectAgents(
 
   const supervisor = agents.find((a) => a.is_supervisor) || agents[0];
 
-  // Creating/managing agents always goes to the supervisor.
-  if (isSupervisorIntent(content) && supervisor) return [supervisor];
+  // Addressed an agent (incl. AgentNexus) by name → straight to them.
+  const named = nameRef(content, agents);
+  if (named) return [named];
 
-  // Addressed a specialist by name → straight to them.
-  const bare = bareNameRef(content, agents);
-  if (bare) return [bare];
+  // Creating/managing agents otherwise goes to the supervisor.
+  if (isSupervisorIntent(content) && supervisor) return [supervisor];
 
   // Otherwise continue with whichever specialist is active in this thread.
   if (preferSpecialistId) {
@@ -259,6 +276,7 @@ async function delegateToAgent(
       agent: target,
       history: [{ role: "user", content: o.task }],
       workspaceName: o.workspaceName,
+      roster: o.agents.map((a) => ({ name: a.name, role: a.role, handle: a.handle, isSupervisor: a.is_supervisor })),
       connectors: o.connectors,
       onActivity: async (activities) => {
         if (mid) await supabase.from("messages").update({ activities }).eq("id", mid);
@@ -417,6 +435,7 @@ async function runOneAgent(
       history,
       workspaceName: opts.workspaceName,
       memories,
+      roster: opts.agents.map((a) => ({ name: a.name, role: a.role, handle: a.handle, isSupervisor: a.is_supervisor })),
       connectors,
       onActivity: async (activities) => {
         if (msgId) await supabase.from("messages").update({ activities }).eq("id", msgId);
@@ -468,13 +487,14 @@ async function runOneAgent(
       });
     }
 
-    // Fan-out: if this agent @mentioned other agents, bring them in to reply too.
+    // Fan-out: only when this agent @mentioned exactly ONE other agent (a real
+    // handoff). Multiple mentions = a list/summary (e.g. the team roster) → skip.
     if (depth < MAX_FANOUT_DEPTH) {
       const mentioned = resolveMentions(result.content, opts.agents).filter(
         (m) => m.id !== agent.id && !triggered.has(m.id)
       );
-      for (const m of mentioned) {
-        await runOneAgent(opts, connectors, m, result.content, depth + 1, triggered);
+      if (mentioned.length === 1) {
+        await runOneAgent(opts, connectors, mentioned[0], result.content, depth + 1, triggered);
       }
     }
   } catch (e: any) {
