@@ -32,6 +32,7 @@ export interface RunInput {
   history: ChatMessage[];
   workspaceName?: string;
   memories?: string[];
+  roster?: { name: string; role: string | null; handle: string | null; isSupervisor?: boolean }[];
   connectors?: Record<string, string>;
   onActivity?: (activities: Activity[]) => Promise<void> | void;
   onCreateAgent?: (spec: any) => Promise<CreatedAgentCard | null>;
@@ -47,7 +48,7 @@ export interface RunOutput {
   tokensOut: number;
 }
 
-function systemPrompt(agent: Agent, workspaceName?: string, memories?: string[], connectors?: Record<string, string>) {
+function systemPrompt(agent: Agent, workspaceName?: string, memories?: string[], connectors?: Record<string, string>, roster?: RunInput["roster"]) {
   const now = new Date();
   const date = now.toLocaleString("en-US", {
     weekday: "long",
@@ -64,6 +65,12 @@ function systemPrompt(agent: Agent, workspaceName?: string, memories?: string[],
     connected.length > 0
       ? `\n\nConnected integrations you can act on via tools: ${connected.join(", ")}. Use them to take real actions when asked (e.g. create a GitHub issue, post to Slack).`
       : "";
+  const team =
+    roster && roster.length
+      ? `\n\nYour team in this workspace (answer any "what agents do we have / who's on the team" questions from THIS list — never browse the web for it). When listing them, write plain names, do NOT prefix with @:\n${roster
+          .map((r) => `- ${r.name} — ${r.role || "Agent"}${r.isSupervisor ? " (Chief of Staff)" : ""}`)
+          .join("\n")}`
+      : "";
   const mem =
     memories && memories.length
       ? `\n\nRelevant long-term memory from past work:\n${memories.map((m) => `- ${m}`).join("\n")}`
@@ -78,6 +85,7 @@ function systemPrompt(agent: Agent, workspaceName?: string, memories?: string[],
     `When you present structured data (matches, prices, comparisons, schedules), use clean GitHub-flavored Markdown tables.`,
     `Be concise, helpful, and proactive. Sign off naturally as ${agent.name}.`,
     conn,
+    team,
     mem,
   ].join("\n");
 }
@@ -91,7 +99,7 @@ export async function runAgent(input: RunInput): Promise<RunOutput> {
   let tokensOut = 0;
 
   const messages: any[] = [
-    { role: "system", content: systemPrompt(agent, input.workspaceName, input.memories, input.connectors) },
+    { role: "system", content: systemPrompt(agent, input.workspaceName, input.memories, input.connectors, input.roster) },
     ...input.history,
   ];
 
