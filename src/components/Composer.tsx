@@ -7,6 +7,7 @@ import type { Agent } from "@/lib/types";
 import { createClient } from "@/lib/supabase/client";
 import { useSession } from "@/lib/session";
 import { startThread, runThread, postMessage, uploadFile, type Attachment } from "@/lib/actions";
+import { haptic } from "@/lib/native";
 import { AgentAvatar } from "./Avatar";
 
 export function Composer({
@@ -77,6 +78,7 @@ export function Composer({
   async function send() {
     const content = text.trim();
     if ((!content && attachments.length === 0) || sending || uploading > 0 || !ctx) return;
+    haptic("medium");
     setSending(true);
     try {
       if (mode === "start") {

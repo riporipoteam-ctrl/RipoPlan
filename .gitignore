@@ -11,3 +11,8 @@ npm-debug.log*
 .vercel
 next-env.d.ts
 .turbo
+
+# Capacitor native projects (generated in CI)
+ios/
+android/
+.capacitor/
