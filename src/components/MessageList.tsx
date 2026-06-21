@@ -119,6 +119,25 @@ function Thinking({ activities, onCancel }: { activities: Message["activities"];
   );
 }
 
+function stripMentions(text: string, agents: Agent[]): string {
+  if (!text) return text;
+  const tokens = new Set<string>();
+  for (const a of agents) {
+    if (a.handle) tokens.add(a.handle.toLowerCase());
+    tokens.add(a.name.toLowerCase().replace(/\s+/g, "-"));
+    tokens.add(a.name.toLowerCase().replace(/\s+/g, ""));
+  }
+  let out = text.replace(/@([a-z0-9_-]+)/gi, (m, t) => (tokens.has(String(t).toLowerCase()) ? "" : m));
+  out = out
+    .replace(/\[\s*\]/g, "")
+    .replace(/\(\s*\)/g, "")
+    .replace(/[ \t]{2,}/g, " ")
+    .replace(/^[ \t]*[:,–-]\s*/gm, "")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+  return out;
+}
+
 function MessageItem({
   m,
   agents,
@@ -133,6 +152,8 @@ function MessageItem({
   const isAgent = m.sender_type === "agent";
   const agent = m.agent_id ? agents.get(m.agent_id) : undefined;
   const name = isAgent ? agent?.name || "Agent" : profile.display_name || "You";
+  const raw = m.content || "";
+  const display = isAgent ? stripMentions(raw, Array.from(agents.values())) || raw : raw;
 
   return (
     <div className="flex gap-3 animate-fade-in">
@@ -152,7 +173,7 @@ function MessageItem({
           ) : (
             <>
               {isAgent && <ActivityTrail activities={m.activities} />}
-              {m.content && <Markdown>{m.content}</Markdown>}
+              {display && <Markdown>{display}</Markdown>}
               {m.attachments && m.attachments.length > 0 && <Attachments items={m.attachments} />}
             </>
           )}
@@ -176,9 +197,38 @@ export function MessageList({
   channelId?: string;
 }) {
   const [messages, setMessages] = useState<Message[]>(initial);
-  const agentMap = new Map(agents.map((a) => [a.id, a]));
+  const [agentList, setAgentList] = useState<Agent[]>(agents);
+  const agentMap = new Map(agentList.map((a) => [a.id, a]));
   const bottomRef = useRef<HTMLDivElement>(null);
   const supabase = createClient();
+
+  useEffect(() => setAgentList((prev) => {
+    const ids = new Set(prev.map((a) => a.id));
+    const merged = [...prev];
+    for (const a of agents) if (!ids.has(a.id)) merged.push(a);
+    return merged;
+  }), [agents]);
+
+  // Resolve any agents referenced by messages that we don't have yet (e.g. just-created ones)
+  useEffect(() => {
+    const known = new Set(agentList.map((a) => a.id));
+    const missing = Array.from(
+      new Set(messages.filter((m) => m.agent_id && !known.has(m.agent_id)).map((m) => m.agent_id as string))
+    );
+    if (!missing.length) return;
+    supabase
+      .from("agents")
+      .select("*")
+      .in("id", missing)
+      .then(({ data }) => {
+        if (data && data.length) {
+          setAgentList((prev) => {
+            const ids = new Set(prev.map((a) => a.id));
+            return [...prev, ...(data as Agent[]).filter((a) => !ids.has(a.id))];
+          });
+        }
+      });
+  }, [messages, agentList, supabase]);
 
   const fetchMessages = useCallback(async () => {
     let q = supabase.from("messages").select("*").order("created_at", { ascending: true });
