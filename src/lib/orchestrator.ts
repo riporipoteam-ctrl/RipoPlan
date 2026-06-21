@@ -49,16 +49,36 @@ const NAME_STOP = new Set([
 
 /** Parse the agent name from a create/add request, if any. */
 export function parseAgentName(content: string): string | null {
-  const pats = [
-    /\b(?:called|named)\s+([A-Za-z][\w-]{1,20})/i,
-    /\b(?:get|bring|add|invite|put)\s+([A-Za-z][\w-]{1,20})\s+(?:in|into|to|here)\b/i,
+  const hasAgentWord = /\bagent\b/i.test(content);
+  const pats: RegExp[] = [
+    // "get/bring/add Bob in/into/to/here/for" — clearest "bring this agent in"
+    /\b(?:get|bring|invite|put)\s+([A-Za-z][\w-]{1,20})\s+(?:in|into|to|here|for|on)\b/i,
+    // "make/create/build an agent (called) Bob"
     /\b(?:make|create|build|spin ?up|set ?up|add)\s+(?:a |an )?(?:new )?agent\s+(?:called |named )?([A-Za-z][\w-]{1,20})/i,
   ];
+  // "called/named Bob" only when the message is actually about an agent.
+  if (hasAgentWord) pats.push(/\b(?:called|named)\s+([A-Za-z][\w-]{1,20})/i);
   for (const re of pats) {
     const m = re.exec(content);
     if (m && m[1] && !NAME_STOP.has(m[1].toLowerCase())) return m[1];
   }
   return null;
+}
+
+/** ALL agents (incl. supervisor / "nexus") addressed by name or @mention. */
+function nameRefAll(content: string, agents: Agent[]): Agent[] {
+  const lc = content.toLowerCase();
+  const out: Agent[] = [];
+  for (const a of agents) {
+    const aliases = [a.name.toLowerCase(), (a.handle || "").toLowerCase().replace(/-/g, " ")];
+    if (a.is_supervisor) aliases.push("nexus", "agent nexus", "agentnexus");
+    const hit = aliases.some((al) => {
+      if (al.length < 3) return false;
+      return new RegExp(`(^|[^a-z0-9])${al.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}([^a-z0-9]|$)`).test(lc);
+    });
+    if (hit) out.push(a);
+  }
+  return out;
 }
 
 function isCreateIntent(content: string): boolean {
@@ -104,14 +124,15 @@ export function selectAgents(
   primaryAgentId?: string | null,
   preferSpecialistId?: string | null
 ): Agent[] {
+  // Explicit @mentions → all of them respond.
   const mentioned = resolveMentions(content, agents);
   if (mentioned.length) return mentioned;
 
   const supervisor = agents.find((a) => a.is_supervisor) || agents[0];
 
-  // Addressed an agent (incl. AgentNexus) by name → straight to them.
-  const named = nameRef(content, agents);
-  if (named) return [named];
+  // Addressed agents by name (one or several) → all of them respond.
+  const named = nameRefAll(content, agents);
+  if (named.length) return named;
 
   // Creating/managing agents otherwise goes to the supervisor.
   if (isSupervisorIntent(content) && supervisor) return [supervisor];
@@ -331,15 +352,17 @@ export async function dispatch(opts: DispatchOpts): Promise<void> {
   }
 
   const supervisor = opts.agents.find((a) => a.is_supervisor);
+  let agentsList = opts.agents;
+  const newlyCreated: Agent[] = [];
 
-  // Deterministic agent creation / bring-in — don't rely on the model deciding
-  // to call the tool. If the user names an agent to add/get:
+  // Deterministic agent creation / bring-in — if the user names a NEW agent to
+  // add/get, create it (don't rely on the model), announce it, and let it join.
   const reqName = isCreateIntent(opts.userContent) ? parseAgentName(opts.userContent) : null;
-  if (reqName) {
-    const existing = opts.agents.find(
+  if (reqName && hasGroqKey()) {
+    const existing = agentsList.find(
       (a) => a.name.toLowerCase() === reqName.toLowerCase() || (a.handle || "").toLowerCase() === reqName.toLowerCase()
     );
-    if (!existing && hasGroqKey()) {
+    if (!existing) {
       const niceName = reqName.charAt(0).toUpperCase() + reqName.slice(1);
       const card = await createAgentFromSpec(supabase, workspaceId, opts.createdBy ?? null, inferSpec(niceName, opts.userContent));
       if (card) {
@@ -349,24 +372,31 @@ export async function dispatch(opts: DispatchOpts): Promise<void> {
           channel_id: opts.channelId ?? null,
           sender_type: "agent",
           agent_id: supervisor?.id ?? card.id,
-          content: `Done — I've added **${card.name}** to the team! 🎉 ${card.role ? `They're set up as a ${card.role}.` : ""} You can message **${card.name}** directly or @mention them anytime.`,
+          content: `Done — I've added **${card.name}** to the team! 🎉 ${card.role ? `They're set up as a ${card.role}.` : ""}`,
           attachments: [{ type: "agent_created", ...card }],
           status: "complete",
         });
-        return;
+        const { data: full } = await supabase.from("agents").select("*").eq("id", card.id).maybeSingle();
+        if (full) {
+          agentsList = [...agentsList, full as Agent];
+          newlyCreated.push(full as Agent);
+        }
       }
-    } else if (existing && !existing.is_supervisor) {
-      // Agent already exists → have THEM respond (they "join"), not AgentNexus.
-      await runOneAgent(opts, connectors, existing, opts.userContent, 0, new Set());
-      return;
     }
   }
 
-  const selected = selectAgents(opts.userContent, opts.agents, opts.primaryAgentId, preferSpecialistId);
-  const triggered = new Set<string>();
+  const opts2 = { ...opts, agents: agentsList };
+  // Responders = any newly-created agent + everyone selected (mentions/names/etc).
+  const selected = selectAgents(opts.userContent, agentsList, opts.primaryAgentId, preferSpecialistId);
+  const responders: Agent[] = [];
+  const seen = new Set<string>();
+  for (const a of [...newlyCreated, ...selected]) {
+    if (!seen.has(a.id)) { seen.add(a.id); responders.push(a); }
+  }
 
-  for (const agent of selected) {
-    await runOneAgent(opts, connectors, agent, opts.userContent, 0, triggered);
+  const triggered = new Set<string>();
+  for (const agent of responders) {
+    await runOneAgent(opts2, connectors, agent, opts.userContent, 0, triggered);
   }
 }
 
@@ -455,7 +485,10 @@ async function runOneAgent(
     });
 
     if (msgId) {
-      const attachments = result.createdAgents.map((c) => ({ type: "agent_created", ...c }));
+      const attachments = [
+        ...result.createdAgents.map((c) => ({ type: "agent_created", ...c })),
+        ...result.generatedImages.map((url) => ({ type: "image", url, name: "Generated image" })),
+      ];
       await supabase
         .from("messages")
         .update({ content: result.content, activities: result.activities, attachments, status: "complete" })

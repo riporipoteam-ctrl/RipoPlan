@@ -1,13 +1,18 @@
 "use client";
 
+import { useEffect } from "react";
 import { SessionProvider, useSession } from "@/lib/session";
 import { BottomNav } from "@/components/BottomNav";
 import { Sidebar } from "@/components/Sidebar";
 import { Onboarding } from "@/components/Onboarding";
+import { initNative } from "@/lib/native";
 import { Loader2 } from "lucide-react";
 
 function Shell({ children }: { children: React.ReactNode }) {
   const { loading, ctx } = useSession();
+  useEffect(() => {
+    initNative();
+  }, []);
 
   if (loading) {
     return (

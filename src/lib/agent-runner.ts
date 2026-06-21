@@ -1,5 +1,6 @@
 import { groq, GROQ_MODEL, VISION_MODEL, isReasoningModel, isVisionModel, type ChatMessage } from "./groq";
-import { executeTool, schemasForTools, connectorSchemas, toolLabel } from "./tools";
+import { executeTool, schemasForTools, connectorSchemas, toolLabel, IMAGE_TOOL_SCHEMA, generateImage } from "./tools";
+import { getBackendUrl } from "./backend";
 import type { Activity, Agent } from "./types";
 
 const MAX_TOOL_ROUNDS = 3;
@@ -57,8 +58,14 @@ function sanitize(text: string): string {
     .replace(/<tool_call>[\s\S]*?<\/tool_call>/gi, "")
     .replace(/<\|?function[\s\S]*?>[\s\S]*?<\/?\|?function[^>]*>/gi, "")
     .replace(/<function=[\s\S]*$/i, "");
-  // Some models echo the raw tool schema/JSON as text — drop that.
-  if (/"parameters"\s*:|"name"\s*:\s*"(web_search|create_agent|delegate|browse|code)"/.test(out)) {
+  // Bracketed tool-call echoes, e.g. [web_search={"query":"..."}] or {web_search:{...}}
+  out = out
+    .replace(/\[\s*(web_search|browse|code|create_agent|delegate|generate_image|github|slack)\s*=?\s*\{[\s\S]*?\}\s*\]/gi, "")
+    .replace(/^\s*(web_search|browse|code|create_agent|delegate|generate_image|github|slack)\s*=\s*\{[\s\S]*?\}\s*$/gim, "");
+  // Leaked history prefixes like "[from Henna]".
+  out = out.replace(/\[from [^\]]{1,40}\]\s*/gi, "");
+  // Raw JSON tool-schema echo.
+  if (/"parameters"\s*:|"name"\s*:\s*"(web_search|create_agent|delegate|browse|code|generate_image)"/.test(out)) {
     out = out.replace(/\[?\s*\{\s*"name"[\s\S]*$/m, "").trim();
   }
   return out.trim();
@@ -89,6 +96,7 @@ export interface RunOutput {
   activities: Activity[];
   steps: any[];
   createdAgents: CreatedAgentCard[];
+  generatedImages: string[];
   tokensIn: number;
   tokensOut: number;
 }
@@ -140,6 +148,7 @@ export async function runAgent(input: RunInput): Promise<RunOutput> {
   const activities: Activity[] = [];
   const steps: any[] = [];
   const createdAgents: CreatedAgentCard[] = [];
+  const generatedImages: string[] = [];
   let tokensIn = 0;
   let tokensOut = 0;
 
@@ -149,7 +158,9 @@ export async function runAgent(input: RunInput): Promise<RunOutput> {
   ];
 
   const connectors = input.connectors || {};
+  const backendUrl = getBackendUrl();
   const tools = [...schemasForTools(agent.tools || []), ...connectorSchemas(connectors)];
+  if (backendUrl) tools.push(IMAGE_TOOL_SCHEMA);
   const client = groq();
   // Auto-upgrade to a vision model if the conversation contains image attachments.
   const hasImage = input.history.some((m) => Array.isArray((m as any).content));
@@ -170,7 +181,7 @@ export async function runAgent(input: RunInput): Promise<RunOutput> {
       // A model emitted a malformed tool call → recover from its text.
       const failed = err?.error?.error?.failed_generation || err?.failed_generation;
       const recovered = sanitize(typeof failed === "string" ? failed : "");
-      if (recovered) return { content: recovered, activities, steps, createdAgents, tokensIn, tokensOut };
+      if (recovered) return { content: recovered, activities, steps, createdAgents, generatedImages, tokensIn, tokensOut };
       // Last resort: plain answer (no tools) across the model chain.
       const plain = await complete(
         client,
@@ -181,7 +192,7 @@ export async function runAgent(input: RunInput): Promise<RunOutput> {
         },
         chain
       );
-      return { content: sanitize(plain.choices[0].message.content || ""), activities, steps, createdAgents, tokensIn, tokensOut };
+      return { content: sanitize(plain.choices[0].message.content || ""), activities, steps, createdAgents, generatedImages, tokensIn, tokensOut };
     }
 
     const usage: any = (completion as any).usage;
@@ -200,6 +211,7 @@ export async function runAgent(input: RunInput): Promise<RunOutput> {
         activities,
         steps,
         createdAgents,
+        generatedImages,
         tokensIn,
         tokensOut,
       };
@@ -222,7 +234,15 @@ export async function runAgent(input: RunInput): Promise<RunOutput> {
       if (input.onActivity) await input.onActivity([...activities]);
 
       let result: { ok: boolean; output: string };
-      if (name === "create_agent") {
+      if (name === "generate_image") {
+        const img = await generateImage(backendUrl, String(args.prompt || ""));
+        if (img.ok && img.url) {
+          generatedImages.push(img.url);
+          result = { ok: true, output: "Image generated and displayed to the user. Briefly describe what you made." };
+        } else {
+          result = { ok: false, output: img.error || "Could not generate the image." };
+        }
+      } else if (name === "create_agent") {
         const card = input.onCreateAgent ? await input.onCreateAgent(args) : null;
         if (card) {
           createdAgents.push(card);
@@ -267,6 +287,7 @@ export async function runAgent(input: RunInput): Promise<RunOutput> {
     activities,
     steps,
     createdAgents,
+    generatedImages,
     tokensIn,
     tokensOut,
   };
