@@ -43,6 +43,44 @@ export const TOOL_SCHEMAS: Record<string, any> = {
       },
     },
   },
+  create_agent: {
+    type: "function",
+    function: {
+      name: "create_agent",
+      description:
+        "Create a brand-new AI agent in this workspace and add it to the team. Use this whenever the user asks to make/add an agent.",
+      parameters: {
+        type: "object",
+        properties: {
+          name: { type: "string", description: "Short proper name, e.g. 'Bob'" },
+          role: { type: "string", description: "Short role title, e.g. 'Software Engineer'" },
+          description: { type: "string", description: "One sentence on what it does" },
+          tools: {
+            type: "array",
+            items: { type: "string", enum: ["web_search", "browse", "code"] },
+            description: "Which tools the new agent should have",
+          },
+        },
+        required: ["name", "role"],
+      },
+    },
+  },
+  delegate: {
+    type: "function",
+    function: {
+      name: "delegate",
+      description:
+        "Delegate a task to one of the existing specialist agents by handle (e.g. 'writer', 'researcher', 'web-browser'). The agent will reply in this thread.",
+      parameters: {
+        type: "object",
+        properties: {
+          handle: { type: "string", description: "The agent handle to delegate to" },
+          task: { type: "string", description: "Clear instructions for that agent" },
+        },
+        required: ["handle", "task"],
+      },
+    },
+  },
 };
 
 export function schemasForTools(tools: string[]) {
@@ -277,6 +315,10 @@ export function toolLabel(name: string, args: any): string {
       return `GitHub: ${args.action}${args.repo ? ` (${args.repo})` : ""}`;
     case "slack":
       return `Posting to Slack`;
+    case "create_agent":
+      return `Creating agent: ${args.name || "new agent"}`;
+    case "delegate":
+      return `Delegating to @${args.handle}`;
     default:
       return name;
   }

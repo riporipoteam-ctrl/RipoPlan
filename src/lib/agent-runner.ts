@@ -15,6 +15,14 @@ function sanitize(text: string): string {
     .trim();
 }
 
+export interface CreatedAgentCard {
+  id: string;
+  name: string;
+  emoji?: string;
+  color?: string;
+  role?: string;
+}
+
 export interface RunInput {
   agent: Agent;
   history: ChatMessage[];
@@ -22,12 +30,15 @@ export interface RunInput {
   memories?: string[];
   connectors?: Record<string, string>;
   onActivity?: (activities: Activity[]) => Promise<void> | void;
+  onCreateAgent?: (spec: any) => Promise<CreatedAgentCard | null>;
+  onDelegate?: (handle: string, task: string) => Promise<string>;
 }
 
 export interface RunOutput {
   content: string;
   activities: Activity[];
   steps: any[];
+  createdAgents: CreatedAgentCard[];
   tokensIn: number;
   tokensOut: number;
 }
@@ -70,6 +81,7 @@ export async function runAgent(input: RunInput): Promise<RunOutput> {
   const { agent } = input;
   const activities: Activity[] = [];
   const steps: any[] = [];
+  const createdAgents: CreatedAgentCard[] = [];
   let tokensIn = 0;
   let tokensOut = 0;
 
@@ -102,7 +114,7 @@ export async function runAgent(input: RunInput): Promise<RunOutput> {
       // rejects (tool_use_failed). Recover by answering without tools.
       const failed = err?.error?.error?.failed_generation || err?.failed_generation;
       const recovered = sanitize(typeof failed === "string" ? failed : "");
-      if (recovered) return { content: recovered, activities, steps, tokensIn, tokensOut };
+      if (recovered) return { content: recovered, activities, steps, createdAgents, tokensIn, tokensOut };
       const plain = await client.chat.completions.create({
         model,
         messages: [...messages, { role: "user", content: "Answer now in plain text without calling any tools." }],
@@ -110,7 +122,7 @@ export async function runAgent(input: RunInput): Promise<RunOutput> {
         max_completion_tokens: 2048,
         ...(reasoning ? { reasoning_format: "hidden" } : {}),
       } as any);
-      return { content: sanitize(plain.choices[0].message.content || ""), activities, steps, tokensIn, tokensOut };
+      return { content: sanitize(plain.choices[0].message.content || ""), activities, steps, createdAgents, tokensIn, tokensOut };
     }
 
     const usage: any = (completion as any).usage;
@@ -128,6 +140,7 @@ export async function runAgent(input: RunInput): Promise<RunOutput> {
         content: sanitize(msg.content || ""),
         activities,
         steps,
+        createdAgents,
         tokensIn,
         tokensOut,
       };
@@ -143,12 +156,29 @@ export async function runAgent(input: RunInput): Promise<RunOutput> {
       } catch {
         args = {};
       }
-      const label = toolLabel(call.function.name, args);
-      const activity: Activity = { label, tool: call.function.name, status: "running" };
+      const name = call.function.name;
+      const label = toolLabel(name, args);
+      const activity: Activity = { label, tool: name, status: "running" };
       activities.push(activity);
       if (input.onActivity) await input.onActivity([...activities]);
 
-      const result = await executeTool(call.function.name, args, connectors);
+      let result: { ok: boolean; output: string };
+      if (name === "create_agent") {
+        const card = input.onCreateAgent ? await input.onCreateAgent(args) : null;
+        if (card) {
+          createdAgents.push(card);
+          result = { ok: true, output: `Created agent "${card.name}" (${card.role || ""}). It is now on the team and can be @mentioned as needed.` };
+        } else {
+          result = { ok: false, output: "Could not create the agent." };
+        }
+      } else if (name === "delegate") {
+        const reply = input.onDelegate ? await input.onDelegate(String(args.handle || ""), String(args.task || "")) : "";
+        result = reply
+          ? { ok: true, output: `Delegated to @${args.handle}. They replied: ${reply.slice(0, 500)}` }
+          : { ok: false, output: `Could not delegate to @${args.handle}.` };
+      } else {
+        result = await executeTool(name, args, connectors);
+      }
       activity.status = result.ok ? "done" : "error";
       activity.detail = result.output.slice(0, 200);
       steps.push({ tool: call.function.name, args, ok: result.ok });
@@ -178,6 +208,7 @@ export async function runAgent(input: RunInput): Promise<RunOutput> {
     content: sanitize(final.choices[0].message.content || ""),
     activities,
     steps,
+    createdAgents,
     tokensIn,
     tokensOut,
   };

@@ -18,16 +18,50 @@ async function getAgents(supabase: SB, workspaceId: string): Promise<Agent[]> {
   return (data as Agent[]) || [];
 }
 
-export async function startThread(supabase: SB, ctx: SessionCtx, content: string): Promise<string | null> {
+export interface Attachment {
+  type: "image" | "file";
+  url: string;
+  name: string;
+  mime?: string;
+}
+
+/** Upload a file to Supabase Storage and return an attachment descriptor. */
+export async function uploadFile(supabase: SB, ctx: SessionCtx, file: File): Promise<Attachment> {
+  const ext = file.name.split(".").pop() || "bin";
+  const path = `${ctx.workspace.id}/${crypto.randomUUID()}.${ext}`;
+  const { error } = await supabase.storage.from("chat-uploads").upload(path, file, {
+    cacheControl: "3600",
+    contentType: file.type || undefined,
+    upsert: false,
+  });
+  if (error) throw new Error(error.message);
+  const { data } = supabase.storage.from("chat-uploads").getPublicUrl(path);
+  return {
+    type: file.type.startsWith("image/") ? "image" : "file",
+    url: data.publicUrl,
+    name: file.name,
+    mime: file.type,
+  };
+}
+
+export async function startThread(
+  supabase: SB,
+  ctx: SessionCtx,
+  content: string,
+  attachments: Attachment[] = [],
+  forcedAgentId?: string | null
+): Promise<string | null> {
   const agents = await getAgents(supabase, ctx.workspace.id);
-  const primary = selectAgents(content, agents, null)[0];
+  const primary = forcedAgentId
+    ? agents.find((a) => a.id === forcedAgentId)
+    : selectAgents(content, agents, null)[0];
 
   const { data: thread } = await supabase
     .from("threads")
     .insert({
       workspace_id: ctx.workspace.id,
       primary_agent_id: primary?.id ?? null,
-      title: content.split(/\s+/).slice(0, 6).join(" ").slice(0, 80),
+      title: (content || attachments[0]?.name || "New thread").split(/\s+/).slice(0, 6).join(" ").slice(0, 80),
       summary: "Working on it…",
       created_by: ctx.userId,
       last_activity_at: new Date().toISOString(),
@@ -42,6 +76,7 @@ export async function startThread(supabase: SB, ctx: SessionCtx, content: string
     sender_type: "user",
     user_id: ctx.userId,
     content,
+    attachments,
     status: "complete",
   });
   return thread.id as string;
@@ -64,6 +99,7 @@ export async function runThread(supabase: SB, ctx: SessionCtx, threadId: string,
     userContent: content,
     agents,
     primaryAgentId: thread?.primary_agent_id ?? null,
+    createdBy: ctx.userId,
   });
 
   const { data: reply } = await supabase
@@ -84,7 +120,7 @@ export async function runThread(supabase: SB, ctx: SessionCtx, threadId: string,
 export async function postMessage(
   supabase: SB,
   ctx: SessionCtx,
-  opts: { content: string; threadId?: string; channelId?: string }
+  opts: { content: string; threadId?: string; channelId?: string; attachments?: Attachment[]; forcedAgentId?: string | null }
 ) {
   const agents = await getAgents(supabase, ctx.workspace.id);
   await supabase.from("messages").insert({
@@ -94,27 +130,31 @@ export async function postMessage(
     sender_type: "user",
     user_id: ctx.userId,
     content: opts.content,
+    attachments: opts.attachments || [],
     status: "complete",
   });
 
-  let primaryAgentId: string | null = null;
+  let primaryAgentId: string | null = opts.forcedAgentId ?? null;
   if (opts.threadId) {
     await supabase.from("threads").update({ last_activity_at: new Date().toISOString() }).eq("id", opts.threadId);
-    const { data: t } = await supabase.from("threads").select("primary_agent_id").eq("id", opts.threadId).maybeSingle();
-    primaryAgentId = t?.primary_agent_id ?? null;
+    if (!primaryAgentId) {
+      const { data: t } = await supabase.from("threads").select("primary_agent_id").eq("id", opts.threadId).maybeSingle();
+      primaryAgentId = t?.primary_agent_id ?? null;
+    }
   }
 
   const hasMention = /@[\w-]+/.test(opts.content);
-  if (opts.threadId || hasMention) {
+  if (opts.threadId || hasMention || opts.forcedAgentId) {
     await dispatch({
       supabase,
       workspaceId: ctx.workspace.id,
       workspaceName: ctx.workspace.name,
       threadId: opts.threadId ?? null,
       channelId: opts.channelId ?? null,
-      userContent: opts.content,
+      userContent: opts.content || "(see attachment)",
       agents,
       primaryAgentId,
+      createdBy: ctx.userId,
     });
   }
 }
@@ -257,6 +297,7 @@ export async function runJob(supabase: SB, ctx: SessionCtx, id: string): Promise
     userContent: job.prompt || `Run scheduled job: ${job.name}`,
     agents,
     primaryAgentId: job.agent_id,
+    createdBy: ctx.userId,
   });
   await supabase.from("jobs").update({ last_run_at: new Date().toISOString() }).eq("id", id);
   return threadId;

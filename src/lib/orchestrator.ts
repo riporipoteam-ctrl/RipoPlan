@@ -2,6 +2,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { runAgent } from "./agent-runner";
 import type { Agent, Message } from "./types";
 import { hasGroqKey, type ChatMessage } from "./groq";
+import { AGENT_COLORS } from "./emoji";
 
 /** Find agents explicitly @mentioned in the text. */
 function parseMentions(content: string, agents: Agent[]): Agent[] {
@@ -35,14 +36,26 @@ async function buildHistory(
   const { data } = await q;
   const rows = (data as Message[]) || [];
   return rows
-    .filter((m) => m.status !== "thinking" && m.content)
-    .map<ChatMessage>((m) => ({
-      role: m.sender_type === "user" ? "user" : "assistant",
-      content:
+    .filter((m) => m.status !== "thinking" && (m.content || (m.attachments && m.attachments.length)))
+    .map<ChatMessage>((m) => {
+      const role = m.sender_type === "user" ? "user" : "assistant";
+      const text =
         m.sender_type === "agent" && m.agent_id !== selfAgentId
-          ? `[from another agent] ${m.content}`
-          : (m.content as string),
-    }));
+          ? `[from another agent] ${m.content || ""}`
+          : (m.content as string) || "";
+      // Multimodal: include image attachments so vision-capable models can see them.
+      const images = (m.attachments || []).filter((a: any) => a?.type === "image" && a.url);
+      if (role === "user" && images.length) {
+        return {
+          role,
+          content: [
+            { type: "text", text: text || "(see attached image)" },
+            ...images.map((img: any) => ({ type: "image_url", image_url: { url: img.url } })),
+          ],
+        } as any;
+      }
+      return { role, content: text };
+    });
 }
 
 async function getMemories(
@@ -85,6 +98,92 @@ export interface DispatchOpts {
   userContent: string;
   agents: Agent[];
   primaryAgentId?: string | null;
+  createdBy?: string | null;
+}
+
+const SPEC_TOOLS = ["web_search", "browse", "code"];
+const SPEC_EMOJI = ["robot", "rocket", "brain", "chart", "code", "wrench", "bolt", "magnifier", "pencil", "globe"];
+
+/** Create a new agent from a create_agent tool call. */
+async function createAgentFromSpec(
+  supabase: SupabaseClient,
+  workspaceId: string,
+  createdBy: string | null,
+  spec: any
+) {
+  const tools = Array.isArray(spec.tools) ? spec.tools.filter((t: string) => SPEC_TOOLS.includes(t)) : ["web_search", "browse", "code"];
+  const emoji = SPEC_EMOJI[Math.floor(Math.random() * SPEC_EMOJI.length)];
+  const color = AGENT_COLORS[Math.floor(Math.random() * AGENT_COLORS.length)];
+  const handle = String(spec.name || "agent").toLowerCase().replace(/[^a-z0-9-]/g, "-").slice(0, 40) || "agent";
+  const { data, error } = await supabase
+    .from("agents")
+    .insert({
+      workspace_id: workspaceId,
+      name: spec.name || "New Agent",
+      handle,
+      role: spec.role || "AI Agent",
+      description: spec.description || `${spec.role || "Helps with tasks"}.`,
+      emoji,
+      avatar_color: color,
+      tools: tools.length ? tools : ["web_search", "browse", "code"],
+      system_prompt: `You are ${spec.name || "an agent"}, ${spec.role || "an AI agent"}. ${spec.description || ""} Use your tools to do real work and answer clearly in markdown.`,
+      created_by: createdBy,
+    })
+    .select("id,name,emoji,avatar_color,role")
+    .single();
+  if (error || !data) return null;
+  return { id: data.id, name: data.name, emoji: data.emoji, color: data.avatar_color, role: data.role };
+}
+
+/** Delegate a task to an existing agent: it replies in the same thread/channel. */
+async function delegateToAgent(
+  supabase: SupabaseClient,
+  o: {
+    workspaceId: string;
+    workspaceName?: string;
+    threadId: string | null;
+    channelId: string | null;
+    agents: Agent[];
+    connectors: Record<string, string>;
+    handle: string;
+    task: string;
+  }
+): Promise<string> {
+  const target = o.agents.find(
+    (a) => (a.handle || "").toLowerCase() === o.handle.toLowerCase() || a.name.toLowerCase() === o.handle.toLowerCase()
+  );
+  if (!target) return "";
+  const { data: ph } = await supabase
+    .from("messages")
+    .insert({
+      workspace_id: o.workspaceId,
+      thread_id: o.threadId,
+      channel_id: o.channelId,
+      sender_type: "agent",
+      agent_id: target.id,
+      content: "",
+      status: "thinking",
+      activities: [],
+    })
+    .select("id")
+    .single();
+  const mid = ph?.id as string;
+  try {
+    const res = await runAgent({
+      agent: target,
+      history: [{ role: "user", content: o.task }],
+      workspaceName: o.workspaceName,
+      connectors: o.connectors,
+      onActivity: async (activities) => {
+        if (mid) await supabase.from("messages").update({ activities }).eq("id", mid);
+      },
+    });
+    if (mid) await supabase.from("messages").update({ content: res.content, activities: res.activities, status: "complete" }).eq("id", mid);
+    return res.content;
+  } catch (e: any) {
+    if (mid) await supabase.from("messages").update({ content: `⚠️ ${e.message}`, status: "error" }).eq("id", mid);
+    return "";
+  }
 }
 
 async function getConnectors(supabase: SupabaseClient, workspaceId: string): Promise<Record<string, string>> {
@@ -170,15 +269,29 @@ export async function dispatch(opts: DispatchOpts): Promise<void> {
         onActivity: async (activities) => {
           if (msgId) await supabase.from("messages").update({ activities }).eq("id", msgId);
         },
+        onCreateAgent: (spec) => createAgentFromSpec(supabase, workspaceId, opts.createdBy ?? null, spec),
+        onDelegate: (handle, task) =>
+          delegateToAgent(supabase, {
+            workspaceId,
+            workspaceName: opts.workspaceName,
+            threadId: opts.threadId ?? null,
+            channelId: opts.channelId ?? null,
+            agents: opts.agents,
+            connectors,
+            handle,
+            task,
+          }),
       });
 
-      // 3. Finalize the message
+      // 3. Finalize the message (+ attach any created-agent cards)
       if (msgId) {
+        const attachments = result.createdAgents.map((c) => ({ type: "agent_created", ...c }));
         await supabase
           .from("messages")
           .update({
             content: result.content,
             activities: result.activities,
+            attachments,
             status: "complete",
           })
           .eq("id", msgId);
