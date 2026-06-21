@@ -32,22 +32,43 @@ function bareNameRef(content: string, agents: Agent[]): Agent | null {
   return best?.a ?? null;
 }
 
+/** Intents only the supervisor (AgentNexus) should handle. */
+function isSupervisorIntent(content: string): boolean {
+  const c = content.toLowerCase();
+  return (
+    /\b(make|create|add|build|spin up|set ?up)\b[^.?!]*\bagent/.test(c) ||
+    /\b(get|bring|invite|add)\b[^.?!]*\b(in(to)? (the|this) chat|to the team|here)\b/.test(c) ||
+    /\bdelegate\b/.test(c)
+  );
+}
+
 export function selectAgents(
   content: string,
   agents: Agent[],
   primaryAgentId?: string | null,
-  threadAgentIds?: Set<string>
+  preferSpecialistId?: string | null
 ): Agent[] {
   const mentioned = resolveMentions(content, agents);
   if (mentioned.length) return mentioned;
-  // If the user addresses a specialist by name, route straight to them.
+
+  const supervisor = agents.find((a) => a.is_supervisor) || agents[0];
+
+  // Creating/managing agents always goes to the supervisor.
+  if (isSupervisorIntent(content) && supervisor) return [supervisor];
+
+  // Addressed a specialist by name → straight to them.
   const bare = bareNameRef(content, agents);
   if (bare) return [bare];
+
+  // Otherwise continue with whichever specialist is active in this thread.
+  if (preferSpecialistId) {
+    const a = agents.find((x) => x.id === preferSpecialistId && !x.is_supervisor);
+    if (a) return [a];
+  }
   if (primaryAgentId) {
     const a = agents.find((x) => x.id === primaryAgentId);
     if (a) return [a];
   }
-  const supervisor = agents.find((a) => a.is_supervisor) || agents[0];
   return supervisor ? [supervisor] : [];
 }
 
@@ -231,7 +252,28 @@ const MAX_FANOUT_DEPTH = 1;
 export async function dispatch(opts: DispatchOpts): Promise<void> {
   const { supabase, workspaceId } = opts;
   const connectors = await getConnectors(supabase, workspaceId);
-  const selected = selectAgents(opts.userContent, opts.agents, opts.primaryAgentId);
+
+  // Most-recent non-supervisor agent active in this thread/channel — generic
+  // tasks continue with them (e.g. once "Max" joins, research goes to Max).
+  let preferSpecialistId: string | null = null;
+  if (opts.threadId || opts.channelId) {
+    let q = supabase
+      .from("messages")
+      .select("agent_id")
+      .eq("sender_type", "agent")
+      .not("agent_id", "is", null)
+      .order("created_at", { ascending: false })
+      .limit(12);
+    if (opts.threadId) q = q.eq("thread_id", opts.threadId);
+    else q = q.eq("channel_id", opts.channelId!).is("thread_id", null);
+    const { data } = await q;
+    const supIds = new Set(opts.agents.filter((a) => a.is_supervisor).map((a) => a.id));
+    for (const r of (data as { agent_id: string }[]) || []) {
+      if (r.agent_id && !supIds.has(r.agent_id)) { preferSpecialistId = r.agent_id; break; }
+    }
+  }
+
+  const selected = selectAgents(opts.userContent, opts.agents, opts.primaryAgentId, preferSpecialistId);
   const triggered = new Set<string>();
 
   for (const agent of selected) {
