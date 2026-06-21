@@ -4,6 +4,51 @@ import type { Activity, Agent } from "./types";
 
 const MAX_TOOL_ROUNDS = 3;
 
+// Each Groq model has its own separate free-tier daily limit, so rotating across
+// models multiplies capacity and survives a single model's 429 rate limit.
+const FALLBACK_MODELS = [
+  "llama-3.3-70b-versatile",
+  "llama-3.1-8b-instant",
+  "openai/gpt-oss-20b",
+  "meta-llama/llama-4-scout-17b-16e-instruct",
+];
+const VISION_FALLBACK = ["meta-llama/llama-4-scout-17b-16e-instruct"];
+
+function modelChain(preferred: string, hasImage: boolean): string[] {
+  if (hasImage) return VISION_FALLBACK;
+  return [preferred, ...FALLBACK_MODELS.filter((m) => m !== preferred)];
+}
+
+function isRateLimit(e: any): boolean {
+  const s = e?.status || e?.error?.error?.code || "";
+  const msg = e?.message || e?.error?.error?.message || "";
+  return s === 429 || /rate limit|tokens per day|\bTPD\b|429/i.test(String(msg));
+}
+
+/** Try a request across a chain of models, skipping ones that error (e.g. 429). */
+async function complete(
+  client: ReturnType<typeof groq>,
+  base: any,
+  models: string[],
+  tools?: any[]
+): Promise<any> {
+  let lastErr: any;
+  for (const m of models) {
+    try {
+      return await client.chat.completions.create({
+        ...base,
+        model: m,
+        ...(isReasoningModel(m) ? { reasoning_format: "hidden" } : {}),
+        ...(tools && tools.length ? { tools, tool_choice: "auto" } : {}),
+      } as any);
+    } catch (e: any) {
+      lastErr = e;
+      // Rate limit or transient → try the next model. Other errors also fall through.
+    }
+  }
+  throw lastErr;
+}
+
 /** Strip reasoning/tool-call artifacts and tool-schema echoes some models leak. */
 function sanitize(text: string): string {
   let out = (text || "")
@@ -108,36 +153,34 @@ export async function runAgent(input: RunInput): Promise<RunOutput> {
   const client = groq();
   // Auto-upgrade to a vision model if the conversation contains image attachments.
   const hasImage = input.history.some((m) => Array.isArray((m as any).content));
-  let model = agent.model || GROQ_MODEL;
-  if (hasImage && !isVisionModel(model)) model = VISION_MODEL;
-  const reasoning = isReasoningModel(model);
+  const preferred = agent.model || GROQ_MODEL;
+  const chain = modelChain(preferred, hasImage);
 
   for (let round = 0; round <= MAX_TOOL_ROUNDS; round++) {
     const useTools = tools.length > 0 && round < MAX_TOOL_ROUNDS;
     let completion: any;
     try {
-      completion = await client.chat.completions.create({
-        model,
-        messages,
-        temperature: 0.6,
-        max_completion_tokens: 4096,
-        top_p: 0.95,
-        ...(reasoning ? { reasoning_format: "hidden" } : {}),
-        ...(useTools ? { tools, tool_choice: "auto" } : {}),
-      } as any);
+      completion = await complete(
+        client,
+        { messages, temperature: 0.6, max_completion_tokens: 4096, top_p: 0.95 },
+        chain,
+        useTools ? tools : undefined
+      );
     } catch (err: any) {
-      // Some models occasionally emit a malformed tool call which the API
-      // rejects (tool_use_failed). Recover by answering without tools.
+      // A model emitted a malformed tool call → recover from its text.
       const failed = err?.error?.error?.failed_generation || err?.failed_generation;
       const recovered = sanitize(typeof failed === "string" ? failed : "");
       if (recovered) return { content: recovered, activities, steps, createdAgents, tokensIn, tokensOut };
-      const plain = await client.chat.completions.create({
-        model,
-        messages: [...messages, { role: "user", content: "Answer now in plain text without calling any tools." }],
-        temperature: 0.6,
-        max_completion_tokens: 2048,
-        ...(reasoning ? { reasoning_format: "hidden" } : {}),
-      } as any);
+      // Last resort: plain answer (no tools) across the model chain.
+      const plain = await complete(
+        client,
+        {
+          messages: [...messages, { role: "user", content: "Answer now in plain text without calling any tools." }],
+          temperature: 0.6,
+          max_completion_tokens: 2048,
+        },
+        chain
+      );
       return { content: sanitize(plain.choices[0].message.content || ""), activities, steps, createdAgents, tokensIn, tokensOut };
     }
 
@@ -210,16 +253,15 @@ export async function runAgent(input: RunInput): Promise<RunOutput> {
   }
 
   // Fell out of the loop — ask for a final synthesis without tools
-  const final = await client.chat.completions.create({
-    model,
-    messages: [
-      ...messages,
-      { role: "user", content: "Summarize your findings and give the final answer now." },
-    ],
-    temperature: 0.6,
-    max_completion_tokens: 2048,
-    ...(reasoning ? { reasoning_format: "hidden" } : {}),
-  } as any);
+  const final = await complete(
+    client,
+    {
+      messages: [...messages, { role: "user", content: "Summarize your findings and give the final answer now." }],
+      temperature: 0.6,
+      max_completion_tokens: 2048,
+    },
+    chain
+  );
   return {
     content: sanitize(final.choices[0].message.content || ""),
     activities,

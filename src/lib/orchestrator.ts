@@ -498,11 +498,13 @@ async function runOneAgent(
       }
     }
   } catch (e: any) {
+    const msg = e?.message || e?.error?.error?.message || String(e);
+    const rate = /429|rate limit|tokens per day|\bTPD\b/i.test(msg);
+    const friendly = rate
+      ? "⚡ We've hit today's free shared AI usage limit (across all models). Add your own free Groq key in **Settings → Groq API key** (console.groq.com/keys) for your own quota, or try again later."
+      : `⚠️ I ran into an error: ${msg}. A human may need to step in.`;
     if (msgId) {
-      await supabase
-        .from("messages")
-        .update({ content: `⚠️ I ran into an error: ${e.message}. A human may need to step in.`, status: "error" })
-        .eq("id", msgId);
+      await supabase.from("messages").update({ content: friendly, status: "error" }).eq("id", msgId);
     }
     if (run?.id) {
       await supabase
