@@ -17,7 +17,7 @@ const items = [
 export function BottomNav() {
   const pathname = usePathname();
   return (
-    <nav className="sticky bottom-0 z-20 border-t border-[var(--border)] bg-[var(--card)]/95 backdrop-blur">
+    <nav className="fixed inset-x-0 bottom-0 z-30 border-t border-[var(--border)] bg-[var(--card)]/95 backdrop-blur pb-[env(safe-area-inset-bottom)]">
       <div className="mx-auto flex max-w-2xl items-center justify-around px-2 py-2.5">
         {items.map((it) => {
           const active = pathname === it.href || pathname.startsWith(it.href + "/");

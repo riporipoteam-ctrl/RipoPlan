@@ -114,17 +114,24 @@ function sanitize(text: string): string {
     .replace(/<tool_call>[\s\S]*?<\/tool_call>/gi, "")
     .replace(/<\|?function[\s\S]*?>[\s\S]*?<\/?\|?function[^>]*>/gi, "")
     .replace(/<function=[\s\S]*$/i, "");
-  // XML-style tool tags, e.g. <delegate>{...}</delegate> or <web_search>{...}.
-  const names = "web_search|browse|code|create_agent|delegate|generate_image|github|slack";
+  const names = "web_search|browse|code|create_agent|delegate|generate_image|github|slack|build_app|create_rank|assign_rank|edit_rank";
+  // Leaked tool call written as a tag wrapping JSON, often closed by a stray
+  // </Word> (frequently an agent's name) instead of the matching tag, e.g.
+  //   <code>{"source": "..."}</KreekCraft>
   out = out
+    .replace(new RegExp(`<(${names})>\\s*[\\{\\[][\\s\\S]*?<\\/[A-Za-z][\\w-]*>`, "gi"), "")
     .replace(new RegExp(`<(${names})>[\\s\\S]*?</(${names})>`, "gi"), "")
-    .replace(new RegExp(`<(${names})>[\\s\\S]*$`, "i"), "")
+    .replace(new RegExp(`<(${names})>\\s*[\\{\\[][\\s\\S]*$`, "i"), "")
     .replace(new RegExp(`\\[\\s*(${names})\\s*=?\\s*\\{[\\s\\S]*?\\}\\s*\\]`, "gi"), "")
     .replace(new RegExp(`^\\s*(${names})\\s*=\\s*\\{[\\s\\S]*?\\}\\s*$`, "gim"), "")
     .replace(new RegExp(`\\b(${names})\\s*\\(\\s*\\{[\\s\\S]*?\\}\\s*\\)`, "gi"), "");
+  // Stray capitalized XML-ish tags like <KreekCraft> or </Ilma> — the model
+  // wrapping impersonated content in another agent's name.
+  out = out.replace(/<\/?[A-Z][\w-]{1,30}>/g, "");
   // Leaked history prefixes like "[from Henna]".
   out = out.replace(/\[from [^\]]{1,40}\]\s*/gi, "");
-  // Raw JSON tool-schema echo — remove only the JSON object, NOT everything after it.
+  // Raw JSON tool-schema echo (object that looks like a tool call / agent def).
+  out = out.replace(/\{\s*"(?:name|source|tool|team|arguments|handle|task)"\s*:[\s\S]*?\}\s*$/gi, "");
   out = out.replace(/\{\s*"name"\s*:\s*"(web_search|create_agent|delegate|browse|code|generate_image)"[\s\S]*?\}\s*/gi, "");
   out = out.trim();
   // Safety net: never destroy a real reply. If stripping emptied a non-empty
@@ -201,6 +208,8 @@ function systemPrompt(agent: Agent, workspaceName?: string, memories?: string[],
     `WHEN TO SEARCH vs ANSWER DIRECTLY: Do NOT call web_search for casual chat, greetings, opinions, math, coding, writing, brainstorming, summarizing the conversation, questions about this workspace/your team, or anything you already know with confidence. Answer those instantly from your own knowledge — searching for them just makes you slow and annoying. ONLY use web_search for things that are genuinely time-sensitive or that you cannot know: current events, today's news/prices/scores, recent releases, real-time data, specific live listings, or niche facts you're unsure about. When unsure whether you need it, prefer answering directly first. Never search twice for the same thing.`,
     `SEARCH RULES: After web_search, extract the actual results — give specific items with their real URLs as Markdown links (e.g. [Pod 51 Hotel — $89/night](https://...)). Do NOT just name websites like "check Booking.com or Kayak". If the user wants concrete items (hotels, products, listings, prices), pick the most relevant result URL and call browse on it to pull out the real details (names, prices, links), then present 3-6 concrete options in a Markdown table with a clickable link for each.`,
     `When you present structured data (matches, prices, comparisons, schedules), use clean GitHub-flavored Markdown tables.`,
+    `SPEAK ONLY AS YOURSELF (${agent.name}). Never write dialogue, lines, narration, or actions for other agents or for the user. Never invent or quote what another agent "said". Never output pseudo-code that defines a "team", other agents, or simulates a multi-agent script. If another agent should respond, use the delegate tool — do NOT write their reply yourself.`,
+    `Never output raw tool syntax, XML tags, angle-bracket tags, or JSON tool calls as visible text. Either call the tool properly or just write plain prose. If you are not calling a tool, write only natural Markdown.`,
     `Do NOT repeat yourself: never restate greetings, intros, or points you've already made earlier in this conversation — read the prior messages and move things forward with something new.`,
     unfiltered
       ? `Match the user's tone and energy. Have a real personality — be blunt, sweary, sarcastic, flirty or dark if that fits the moment. Never sound like a corporate or kid-friendly assistant.`

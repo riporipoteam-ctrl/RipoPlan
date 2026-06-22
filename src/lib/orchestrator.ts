@@ -89,6 +89,31 @@ function isCreateIntent(content: string): boolean {
 // code (image gen + connectors are added automatically at run time when available).
 const FULL_TOOLSET = ["web_search", "browse", "code"];
 
+// Distinct personalities per role so created agents feel like real teammates,
+// not interchangeable bots. Each gets its own voice, strengths, and quirks.
+const PERSONAS: Record<string, { traits: string; voice: string }> = {
+  "Software Engineer": {
+    traits: "pragmatic, detail-obsessed, loves clean code and shipping working software",
+    voice: "Explain your approach briefly, then deliver. Use code blocks. Call out trade-offs and edge cases.",
+  },
+  "Research Analyst": {
+    traits: "curious, rigorous, skeptical of unsourced claims",
+    voice: "Always search before answering, cite real sources with links, and present findings in tidy Markdown tables.",
+  },
+  "Content Writer": {
+    traits: "creative, sharp, with a strong sense of voice and rhythm",
+    voice: "Write with personality and clarity. Match the requested tone. No filler, no clichés.",
+  },
+  "Creative": {
+    traits: "imaginative, visual, bold with ideas",
+    voice: "Think in concepts and moodboards. Offer a few distinct directions before committing.",
+  },
+  "AI Agent": {
+    traits: "resourceful, proactive, gets things done",
+    voice: "Be direct and useful. Use your tools when they genuinely help.",
+  },
+};
+
 function inferSpec(name: string, content: string) {
   const c = content.toLowerCase();
   let role = "AI Agent";
@@ -96,7 +121,10 @@ function inferSpec(name: string, content: string) {
   else if (/research|find|search|analy|investigat|\bdata\b|news|market|stock/.test(c)) role = "Research Analyst";
   else if (/writ|content|blog|copy|email|post|draft/.test(c)) role = "Content Writer";
   else if (/design|image|art|logo|photo|video/.test(c)) role = "Creative";
-  return { name, role, description: `${name} is a ${role.toLowerCase()} on the team.`, tools: [...FULL_TOOLSET] };
+  const p = PERSONAS[role] || PERSONAS["AI Agent"];
+  const description = `${name} — a ${role.toLowerCase()} who is ${p.traits}.`;
+  const persona = `You are ${name}, a ${role} on this team. Personality: ${p.traits}. ${p.voice} You have your own distinct voice and opinions — never sound generic. Speak ONLY as ${name}; never write other agents' or the user's lines.`;
+  return { name, role, description, persona, tools: [...FULL_TOOLSET] };
 }
 
 /** Any agent (incl. the supervisor / its "nexus" nickname) addressed by name. */
@@ -253,7 +281,9 @@ async function createAgentFromSpec(
       emoji,
       avatar_color: color,
       tools: tools.length ? tools : ["web_search", "browse", "code"],
-      system_prompt: `You are ${spec.name || "an agent"}, ${spec.role || "an AI agent"}. ${spec.description || ""} Use your tools to do real work and answer clearly in markdown.`,
+      system_prompt:
+        spec.persona ||
+        `You are ${spec.name || "an agent"}, ${spec.role || "an AI agent"}. ${spec.description || ""} Have a distinct personality and voice. Use your tools to do real work and answer clearly in markdown. Speak only as yourself.`,
       created_by: createdBy,
     })
     .select("id,name,emoji,avatar_color,role")
