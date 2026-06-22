@@ -27,6 +27,7 @@ export interface Agent {
   goals: string | null;
   emoji: string | null;
   avatar_color: string | null;
+  avatar_url: string | null;
   model: string | null;
   system_prompt: string | null;
   tools: string[];

@@ -223,7 +223,9 @@ export async function updateAgent(supabase: SB, ctx: SessionCtx, id: string, pat
 }
 
 export async function archiveAgent(supabase: SB, ctx: SessionCtx, id: string) {
-  await supabase.from("agents").update({ status: "archived" }).eq("id", id).eq("workspace_id", ctx.workspace.id);
+  // Hard delete so it's actually gone (messages keep via FK on-delete-set-null).
+  const { error } = await supabase.from("agents").delete().eq("id", id).eq("workspace_id", ctx.workspace.id);
+  if (error) throw new Error(error.message);
 }
 
 export async function openAgentDM(supabase: SB, ctx: SessionCtx, agentId: string): Promise<string | null> {

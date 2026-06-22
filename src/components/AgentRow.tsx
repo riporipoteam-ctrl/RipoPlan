@@ -11,7 +11,7 @@ export function AgentRow({ agent, preview }: { agent: Agent; preview?: string })
       href={`/agent?id=${agent.id}`}
       className="flex items-center gap-3 border-b border-[var(--border)] px-4 py-3 transition-colors hover:bg-black/[0.02]"
     >
-      <AgentAvatar emoji={agent.emoji} color={agent.avatar_color} size={44} withDot={agent.status === "active"} />
+      <AgentAvatar emoji={agent.emoji} color={agent.avatar_color} imageUrl={agent.avatar_url} size={44} withDot={agent.status === "active"} />
       <div className="min-w-0 flex-1">
         <div className="flex items-center justify-between">
           <span className="truncate font-bold">{agent.name}</span>

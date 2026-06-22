@@ -59,7 +59,7 @@ export default function ActivityPage() {
               const agent = agentMap.get(r.agent_id);
               return (
                 <div key={r.id} className="flex gap-3 rounded-2xl border border-[var(--border)] bg-[var(--card)] p-3">
-                  <AgentAvatar emoji={agent?.emoji} color={agent?.avatar_color} size={36} />
+                  <AgentAvatar emoji={agent?.emoji} color={agent?.avatar_color} imageUrl={agent?.avatar_url} size={36} />
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center justify-between">
                       <span className="font-semibold">{agent?.name || "Agent"}</span>

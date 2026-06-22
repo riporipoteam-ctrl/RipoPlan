@@ -4,27 +4,39 @@ import clsx from "clsx";
 export function AgentAvatar({
   emoji,
   color,
+  imageUrl,
   size = 36,
   rounded = "lg",
   withDot = false,
 }: {
   emoji?: string | null;
   color?: string | null;
+  imageUrl?: string | null;
   size?: number;
   rounded?: "lg" | "full";
   withDot?: boolean;
 }) {
   return (
     <div className="relative shrink-0" style={{ width: size, height: size }}>
-      <div
-        className={clsx(
-          "flex items-center justify-center text-white",
-          rounded === "lg" ? "rounded-xl" : "rounded-full"
-        )}
-        style={{ width: size, height: size, background: color || "#a855f7", fontSize: size * 0.5 }}
-      >
-        <span>{emojiFor(emoji)}</span>
-      </div>
+      {imageUrl ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          src={imageUrl}
+          alt=""
+          className={clsx("object-cover", rounded === "lg" ? "rounded-xl" : "rounded-full")}
+          style={{ width: size, height: size }}
+        />
+      ) : (
+        <div
+          className={clsx(
+            "flex items-center justify-center text-white",
+            rounded === "lg" ? "rounded-xl" : "rounded-full"
+          )}
+          style={{ width: size, height: size, background: color || "#a855f7", fontSize: size * 0.5 }}
+        >
+          <span>{emojiFor(emoji)}</span>
+        </div>
+      )}
       {withDot && (
         <span className="absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full bg-emerald-500 ring-2 ring-[var(--card)]" />
       )}
