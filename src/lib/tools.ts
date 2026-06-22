@@ -1,3 +1,5 @@
+import { getBackendUrl } from "./backend";
+
 export interface ToolResult {
   ok: boolean;
   output: string;
@@ -194,7 +196,45 @@ export const CONNECTOR_TOOL_SCHEMAS: Record<string, any> = {
       },
     },
   },
+  gmail: {
+    type: "function",
+    function: {
+      name: "gmail",
+      description:
+        "Read the connected Gmail inbox. action 'list' (recent emails, optional search query 'q'), or 'read' a specific message by 'id'.",
+      parameters: {
+        type: "object",
+        properties: {
+          action: { type: "string", enum: ["list", "read"] },
+          q: { type: "string", description: "Gmail search query, e.g. 'from:boss is:unread'" },
+          id: { type: "string", description: "Message id to read" },
+        },
+        required: ["action"],
+      },
+    },
+  },
 };
+
+async function gmailTool(args: any, token: string): Promise<ToolResult> {
+  const base = getBackendUrl();
+  if (!base) return { ok: false, output: "Gmail needs the backend worker to be configured." };
+  try {
+    const res = await fetch(`${base}/gmail`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ token, action: args.action || "list", q: args.q, id: args.id }),
+    });
+    const d = await res.json();
+    if (args.action === "read" && d.message) {
+      const headers = (d.message.payload?.headers || []).reduce((a: any, h: any) => ((a[h.name] = h.value), a), {});
+      return { ok: true, output: `From: ${headers.From}\nSubject: ${headers.Subject}\nDate: ${headers.Date}\n\n${d.message.snippet || ""}` };
+    }
+    const items = (d.items || []).map((m: any) => `- **${m.subject}** — ${m.from} (${m.date})\n  ${m.snippet}  [id: ${m.id}]`);
+    return { ok: items.length > 0, output: items.join("\n") || "No emails found." };
+  } catch (e: any) {
+    return { ok: false, output: `Gmail request failed: ${e.message}` };
+  }
+}
 
 /** Tool schemas for providers the workspace has connected. */
 export function connectorSchemas(connectors: Record<string, string>) {
@@ -360,7 +400,26 @@ async function proxyDdgSearch(query: string): Promise<ToolResult> {
   }
 }
 
+/** When the backend worker is configured, search/browse server-side (no CORS,
+ * more reliable). Falls back to the in-browser methods on any failure. */
+async function backendBrowse(opts: { url?: string; query?: string }): Promise<ToolResult | null> {
+  const base = getBackendUrl();
+  if (!base) return null;
+  try {
+    const res = await fetch(`${base}/browse`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(opts),
+    });
+    const d = await res.json();
+    if (d?.content && String(d.content).length > 80) return { ok: true, output: String(d.content).slice(0, 6000) };
+  } catch {}
+  return null;
+}
+
 export async function webSearch(query: string): Promise<ToolResult> {
+  const viaBackend = await backendBrowse({ query });
+  if (viaBackend) return viaBackend;
   let base = await jinaSearch(query);
   if (!base.ok || base.output.length < 120) {
     const ddg = await proxyDdgSearch(query);
@@ -385,6 +444,8 @@ export async function webSearch(query: string): Promise<ToolResult> {
 
 // ------- Browse a page via the Jina reader (CORS-friendly) -------
 export async function browse(url: string): Promise<ToolResult> {
+  const viaBackend = await backendBrowse({ url });
+  if (viaBackend) return viaBackend;
   const target = url.startsWith("http") ? url : `https://${url}`;
   try {
     const res = await fetch(`https://r.jina.ai/${target}`);
@@ -457,6 +518,10 @@ export async function executeTool(
       return connectors.slack
         ? slackTool(args, connectors.slack)
         : { ok: false, output: "Slack is not connected." };
+    case "gmail":
+      return connectors.gmail
+        ? gmailTool(args, connectors.gmail)
+        : { ok: false, output: "Gmail is not connected." };
     default:
       return { ok: false, output: `Unknown tool: ${name}` };
   }

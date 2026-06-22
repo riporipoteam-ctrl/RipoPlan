@@ -2,13 +2,20 @@ name = "agentnexus-backend"
 main = "src/index.ts"
 compatibility_date = "2024-11-01"
 
-# Set these with: wrangler secret put <NAME>
+# Run the background task queue every minute so agents keep working with the app closed.
+[triggers]
+crons = ["* * * * *"]
+
+# Set these with: wrangler secret put <NAME>  (or via the deploy workflow)
+#   NVIDIA_API_KEY          - from https://build.nvidia.com  (agent brain for background tasks)
 #   GROQ_API_KEY            - (optional) proxy Groq so the key isn't in the client bundle
-#   NVIDIA_API_KEY          - from https://build.nvidia.com  (enables NVIDIA models)
-#   GOOGLE_CLIENT_ID        - Google OAuth client (Web application)
+#   GOOGLE_CLIENT_ID        - Google OAuth client (Web application)  -> Gmail
 #   GOOGLE_CLIENT_SECRET    - Google OAuth client secret
+#   SUPABASE_SERVICE_KEY    - Supabase service role key (lets the cron read/write, bypassing RLS)
 #
 # Vars below are safe to commit:
 [vars]
-ALLOWED_ORIGIN = "https://riporipoteam-ctrl.github.io"
+ALLOWED_ORIGIN = "*"
 APP_REDIRECT = "https://riporipoteam-ctrl.github.io/RipoPlan/oauth/"
+SUPABASE_URL = "https://xbwhvkzgbnyqsjplbyox.supabase.co"
+AGENT_MODEL = "meta/llama-3.1-405b-instruct"
