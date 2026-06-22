@@ -82,6 +82,29 @@ async function complete(
   throw lastErr;
 }
 
+const TOOL_NAMES = ["web_search", "browse", "code", "create_agent", "delegate", "generate_image", "github", "slack"];
+
+/** Detect a tool call a model wrote as plain text instead of a real call. */
+function parseLeakedToolCall(content: string): { name: string; args: any } | null {
+  if (!content) return null;
+  for (const n of TOOL_NAMES) {
+    const pats = [
+      new RegExp(`<${n}>\\s*(\\{[\\s\\S]*?\\})`, "i"),
+      new RegExp(`\\[\\s*${n}\\s*=\\s*(\\{[\\s\\S]*?\\})\\s*\\]`, "i"),
+      new RegExp(`\\b${n}\\s*\\(\\s*(\\{[\\s\\S]*?\\})\\s*\\)`, "i"),
+    ];
+    for (const re of pats) {
+      const m = re.exec(content);
+      if (m) {
+        try {
+          return { name: n, args: JSON.parse(m[1]) };
+        } catch {}
+      }
+    }
+  }
+  return null;
+}
+
 /** Strip reasoning/tool-call artifacts and tool-schema echoes some models leak. */
 function sanitize(text: string): string {
   const original = (text || "").trim();
@@ -91,10 +114,14 @@ function sanitize(text: string): string {
     .replace(/<tool_call>[\s\S]*?<\/tool_call>/gi, "")
     .replace(/<\|?function[\s\S]*?>[\s\S]*?<\/?\|?function[^>]*>/gi, "")
     .replace(/<function=[\s\S]*$/i, "");
-  // Bracketed tool-call echoes, e.g. [web_search={"query":"..."}].
+  // XML-style tool tags, e.g. <delegate>{...}</delegate> or <web_search>{...}.
+  const names = "web_search|browse|code|create_agent|delegate|generate_image|github|slack";
   out = out
-    .replace(/\[\s*(web_search|browse|code|create_agent|delegate|generate_image|github|slack)\s*=?\s*\{[\s\S]*?\}\s*\]/gi, "")
-    .replace(/^\s*(web_search|browse|code|create_agent|delegate|generate_image|github|slack)\s*=\s*\{[\s\S]*?\}\s*$/gim, "");
+    .replace(new RegExp(`<(${names})>[\\s\\S]*?</(${names})>`, "gi"), "")
+    .replace(new RegExp(`<(${names})>[\\s\\S]*$`, "i"), "")
+    .replace(new RegExp(`\\[\\s*(${names})\\s*=?\\s*\\{[\\s\\S]*?\\}\\s*\\]`, "gi"), "")
+    .replace(new RegExp(`^\\s*(${names})\\s*=\\s*\\{[\\s\\S]*?\\}\\s*$`, "gim"), "")
+    .replace(new RegExp(`\\b(${names})\\s*\\(\\s*\\{[\\s\\S]*?\\}\\s*\\)`, "gi"), "");
   // Leaked history prefixes like "[from Henna]".
   out = out.replace(/\[from [^\]]{1,40}\]\s*/gi, "");
   // Raw JSON tool-schema echo — remove only the JSON object, NOT everything after it.
@@ -245,6 +272,39 @@ export async function runAgent(input: RunInput): Promise<RunOutput> {
     return c;
   };
 
+  /** Run a tool by name (handles built-ins, connectors, create/delegate/image). */
+  const runToolNamed = async (name: string, args: any): Promise<{ ok: boolean; output: string }> => {
+    const activity: Activity = { label: toolLabel(name, args), tool: name, status: "running" };
+    activities.push(activity);
+    if (input.onActivity) await input.onActivity([...activities]);
+
+    let result: { ok: boolean; output: string };
+    if (name === "generate_image") {
+      const img = await generateImage(backendUrl, String(args.prompt || ""));
+      if (img.ok && img.url) {
+        generatedImages.push(img.url);
+        result = { ok: true, output: "Image generated and displayed to the user. Briefly describe what you made." };
+      } else result = { ok: false, output: img.error || "Could not generate the image." };
+    } else if (name === "create_agent") {
+      const card = input.onCreateAgent ? await input.onCreateAgent(args) : null;
+      result = card
+        ? (createdAgents.push(card), { ok: true, output: `Created agent "${card.name}" (${card.role || ""}). It is now on the team.` })
+        : { ok: false, output: "Could not create the agent." };
+    } else if (name === "delegate") {
+      const reply = input.onDelegate ? await input.onDelegate(String(args.handle || ""), String(args.task || "")) : "";
+      result = reply
+        ? { ok: true, output: `Delegated to @${args.handle}. They replied: ${reply.slice(0, 500)}` }
+        : { ok: false, output: `Could not delegate to @${args.handle}.` };
+    } else {
+      result = await executeTool(name, args, connectors);
+    }
+    activity.status = result.ok ? "done" : "error";
+    activity.detail = result.output.slice(0, 200);
+    steps.push({ tool: name, args, ok: result.ok });
+    if (input.onActivity) await input.onActivity([...activities]);
+    return result;
+  };
+
   for (let round = 0; round <= MAX_TOOL_ROUNDS; round++) {
     const useTools = tools.length > 0 && round < MAX_TOOL_ROUNDS;
     let completion: any;
@@ -285,7 +345,16 @@ export async function runAgent(input: RunInput): Promise<RunOutput> {
     const msg = choice.message as any;
     const toolCalls = msg.tool_calls || [];
 
+    // Some models emit the tool call as TEXT (e.g. <delegate>{...}</delegate> or
+    // [web_search={...}]) instead of a real tool call. Detect & execute those too.
     if (toolCalls.length === 0) {
+      const leaked = round < MAX_TOOL_ROUNDS ? parseLeakedToolCall(msg.content || "") : null;
+      if (leaked) {
+        messages.push({ role: "assistant", content: "" });
+        const r = await runToolNamed(leaked.name, leaked.args);
+        messages.push({ role: "user", content: `[result of ${leaked.name}]\n${r.output.slice(0, 6000)}` });
+        continue;
+      }
       return {
         content: await ensureGood(msg.content || ""),
         activities,
@@ -307,42 +376,7 @@ export async function runAgent(input: RunInput): Promise<RunOutput> {
       } catch {
         args = {};
       }
-      const name = call.function.name;
-      const label = toolLabel(name, args);
-      const activity: Activity = { label, tool: name, status: "running" };
-      activities.push(activity);
-      if (input.onActivity) await input.onActivity([...activities]);
-
-      let result: { ok: boolean; output: string };
-      if (name === "generate_image") {
-        const img = await generateImage(backendUrl, String(args.prompt || ""));
-        if (img.ok && img.url) {
-          generatedImages.push(img.url);
-          result = { ok: true, output: "Image generated and displayed to the user. Briefly describe what you made." };
-        } else {
-          result = { ok: false, output: img.error || "Could not generate the image." };
-        }
-      } else if (name === "create_agent") {
-        const card = input.onCreateAgent ? await input.onCreateAgent(args) : null;
-        if (card) {
-          createdAgents.push(card);
-          result = { ok: true, output: `Created agent "${card.name}" (${card.role || ""}). It is now on the team and can be @mentioned as needed.` };
-        } else {
-          result = { ok: false, output: "Could not create the agent." };
-        }
-      } else if (name === "delegate") {
-        const reply = input.onDelegate ? await input.onDelegate(String(args.handle || ""), String(args.task || "")) : "";
-        result = reply
-          ? { ok: true, output: `Delegated to @${args.handle}. They replied: ${reply.slice(0, 500)}` }
-          : { ok: false, output: `Could not delegate to @${args.handle}.` };
-      } else {
-        result = await executeTool(name, args, connectors);
-      }
-      activity.status = result.ok ? "done" : "error";
-      activity.detail = result.output.slice(0, 200);
-      steps.push({ tool: call.function.name, args, ok: result.ok });
-      if (input.onActivity) await input.onActivity([...activities]);
-
+      const result = await runToolNamed(call.function.name, args);
       messages.push({
         role: "tool",
         tool_call_id: call.id,

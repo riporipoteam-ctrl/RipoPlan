@@ -2,14 +2,11 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { BookOpen, Clock, LayoutGrid, Bot, Monitor, Boxes, ChevronRight } from "lucide-react";
+import { BookOpen, Clock, LayoutGrid, Bot, Monitor, Boxes, ChevronRight, SlidersHorizontal } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { useSession } from "@/lib/session";
 import { TopBar } from "@/components/TopBar";
 import { ProfileActions } from "@/components/ProfileActions";
-import { GroqKeyField } from "@/components/GroqKeyField";
-import { BackendUrlField } from "@/components/BackendUrlField";
-import { UnfilteredToggle } from "@/components/UnfilteredToggle";
 
 export default function SettingsPage() {
   const supabase = createClient();
@@ -37,6 +34,7 @@ export default function SettingsPage() {
     { href: "/apps", icon: LayoutGrid, label: "Integrations", sub: "Connect your tools" },
     { href: "/devices", icon: Monitor, label: "Devices", sub: "Virtual computers" },
     { href: "/mini-apps", icon: Boxes, label: "Mini Apps", sub: "Custom agent apps" },
+    { href: "/settings/additional", icon: SlidersHorizontal, label: "Additional settings", sub: "18+ mode, advanced options" },
   ];
 
   return (
@@ -61,22 +59,6 @@ export default function SettingsPage() {
             <span className="font-semibold">${estCost}</span>
           </div>
         </div>
-
-        <div className="rounded-2xl border border-[var(--border)] bg-[var(--card)] p-4">
-          <div className="mb-2 text-sm font-semibold">Groq API key</div>
-          <p className="mb-3 text-xs text-[var(--muted)]">Powers your agents. Stored only on this device.</p>
-          <GroqKeyField />
-        </div>
-
-        <div className="rounded-2xl border border-[var(--border)] bg-[var(--card)] p-4">
-          <div className="mb-2 text-sm font-semibold">NVIDIA backend (image generation)</div>
-          <p className="mb-3 text-xs text-[var(--muted)]">
-            Paste your Cloudflare <b>ripoai-nvidia</b> Worker URL to enable AI image generation. Find it in Cloudflare → Workers &amp; Pages → ripoai-nvidia.
-          </p>
-          <BackendUrlField />
-        </div>
-
-        <UnfilteredToggle />
 
         <div className="overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--card)]">
           {links.map((it) => (

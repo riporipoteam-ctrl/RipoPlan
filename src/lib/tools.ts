@@ -266,9 +266,36 @@ async function jinaSearch(query: string): Promise<ToolResult> {
   }
 }
 
+// CORS proxy fallback: fetch DuckDuckGo HTML and parse real result links.
+async function proxyDdgSearch(query: string): Promise<ToolResult> {
+  try {
+    const target = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`;
+    const res = await fetch(`https://api.allorigins.win/raw?url=${encodeURIComponent(target)}`);
+    const html = await res.text();
+    const out: string[] = [];
+    const re = /<a[^>]*class="result__a"[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>[\s\S]*?(?:result__snippet[^>]*>([\s\S]*?)<\/a>)?/gi;
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(html)) && out.length < 6) {
+      let url = m[1];
+      const um = url.match(/uddg=([^&]+)/);
+      if (um) try { url = decodeURIComponent(um[1]); } catch {}
+      const title = m[2].replace(/<[^>]+>/g, "").trim();
+      const snip = (m[3] || "").replace(/<[^>]+>/g, "").trim();
+      if (title && url.startsWith("http")) out.push(`- [${title}](${url})${snip ? `\n  ${snip}` : ""}`);
+    }
+    return { ok: out.length > 0, output: out.join("\n") };
+  } catch {
+    return { ok: false, output: "" };
+  }
+}
+
 export async function webSearch(query: string): Promise<ToolResult> {
-  const jina = await jinaSearch(query);
-  let base = jina.ok ? jina : await wikipediaSearch(query);
+  let base = await jinaSearch(query);
+  if (!base.ok || base.output.length < 120) {
+    const ddg = await proxyDdgSearch(query);
+    if (ddg.ok) base = ddg;
+  }
+  if (!base.ok) base = await wikipediaSearch(query);
   if (!base.ok) return base;
   // Deep search: open the top real result and pull its actual content so the
   // agent gives concrete facts/links, not just a list of site names.
@@ -287,11 +314,25 @@ export async function webSearch(query: string): Promise<ToolResult> {
 
 // ------- Browse a page via the Jina reader (CORS-friendly) -------
 export async function browse(url: string): Promise<ToolResult> {
+  const target = url.startsWith("http") ? url : `https://${url}`;
   try {
-    const target = url.startsWith("http") ? url : `https://${url}`;
     const res = await fetch(`https://r.jina.ai/${target}`);
-    const text = await res.text();
-    return { ok: true, output: text.slice(0, 5000) };
+    if (res.ok) {
+      const text = await res.text();
+      if (text.length > 80) return { ok: true, output: text.slice(0, 5000) };
+    }
+  } catch {}
+  // Fallback: CORS proxy + strip tags.
+  try {
+    const res = await fetch(`https://api.allorigins.win/raw?url=${encodeURIComponent(target)}`);
+    let html = await res.text();
+    html = html
+      .replace(/<script[\s\S]*?<\/script>/gi, "")
+      .replace(/<style[\s\S]*?<\/style>/gi, "")
+      .replace(/<[^>]+>/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+    return { ok: html.length > 80, output: html.slice(0, 5000) };
   } catch (e: any) {
     return { ok: false, output: `Failed to fetch ${url}: ${e.message}` };
   }
