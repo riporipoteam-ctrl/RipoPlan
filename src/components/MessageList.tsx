@@ -2,19 +2,54 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
-import type { Agent, Message, Profile } from "@/lib/types";
+import type { Agent, Message, Profile, Rank } from "@/lib/types";
+import { fetchRanks, rankMapById } from "@/lib/ranks";
+import { RankBadge } from "./RankBadge";
 import { AgentAvatar, UserAvatar } from "./Avatar";
 import { Markdown } from "./Markdown";
 import { clockTime } from "@/lib/format";
 import Link from "next/link";
-import { Activity as ActivityIcon, ChevronRight, Check, Loader2, X, Search, Globe, Code2, FileText } from "lucide-react";
+import { Activity as ActivityIcon, ChevronRight, Check, Loader2, X, Search, Globe, Code2, FileText, Copy, Boxes } from "lucide-react";
 import { AgentAvatar as AvatarBox } from "./Avatar";
+
+function CopyButton({ text }: { text: string }) {
+  const [done, setDone] = useState(false);
+  return (
+    <button
+      onClick={async () => {
+        try {
+          await navigator.clipboard.writeText(text);
+          setDone(true);
+          setTimeout(() => setDone(false), 1400);
+        } catch {}
+      }}
+      className="flex items-center gap-1 text-xs text-[var(--muted)] opacity-0 transition group-hover:opacity-100 hover:text-nebula-600"
+      aria-label="Copy message"
+    >
+      {done ? <Check size={12} className="text-emerald-500" /> : <Copy size={12} />}
+      {done ? "Copied" : "Copy"}
+    </button>
+  );
+}
 
 function Attachments({ items }: { items: any[] }) {
   const cards = items.filter((a) => a?.type === "agent_created");
   const media = items.filter((a) => a?.type === "image" || a?.type === "file");
+  const miniApps = items.filter((a) => a?.type === "mini_app");
   return (
     <>
+      {miniApps.map((a, i) => (
+        <Link key={`app-${i}`} href="/mini-apps" className="mt-2 flex items-center gap-3 rounded-xl border border-[var(--border)] bg-[var(--card)] p-2.5 hover:border-nebula-400">
+          <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-nebula-100 text-nebula-600">
+            <Boxes size={18} />
+          </div>
+          <div className="min-w-0 flex-1">
+            <div className="font-semibold leading-tight">{a.name}</div>
+            <div className="text-xs text-emerald-600">Published to Mini Apps · tap to open</div>
+          </div>
+          <Arrow size={16} className="text-[var(--muted)]" />
+        </Link>
+      ))}
       {media.length > 0 && (
         <div className="mt-1.5 flex flex-wrap gap-2">
           {media.map((a, i) =>
@@ -141,22 +176,25 @@ function stripMentions(text: string, agents: Agent[]): string {
 function MessageItem({
   m,
   agents,
+  ranks,
   profile,
   onCancel,
 }: {
   m: Message;
   agents: Map<string, Agent>;
+  ranks: Map<string, Rank>;
   profile: Profile;
   onCancel: (id: string) => void;
 }) {
   const isAgent = m.sender_type === "agent";
   const agent = m.agent_id ? agents.get(m.agent_id) : undefined;
+  const rank = isAgent && agent?.rank_id ? ranks.get(agent.rank_id) : null;
   const name = isAgent ? agent?.name || "Agent" : profile.display_name || "You";
   const raw = m.content || "";
   const display = isAgent ? stripMentions(raw, Array.from(agents.values())) || raw : raw;
 
   return (
-    <div className="flex gap-3 animate-fade-in">
+    <div className="group flex gap-3 animate-fade-in-up">
       {isAgent ? (
         <AgentAvatar emoji={agent?.emoji} color={agent?.avatar_color} imageUrl={agent?.avatar_url} size={30} withDot />
       ) : (
@@ -165,7 +203,11 @@ function MessageItem({
       <div className="min-w-0 flex-1">
         <div className="flex items-baseline gap-2">
           <span className="text-sm font-bold">{name}</span>
+          {rank && <RankBadge rank={rank} />}
           <span className="text-xs text-[var(--muted)]">{clockTime(m.created_at)}</span>
+          {isAgent && m.status !== "thinking" && display && (
+            <span className="ml-auto"><CopyButton text={display} /></span>
+          )}
         </div>
         <div className="mt-0.5">
           {m.status === "thinking" ? (
@@ -198,9 +240,16 @@ export function MessageList({
 }) {
   const [messages, setMessages] = useState<Message[]>(initial);
   const [agentList, setAgentList] = useState<Agent[]>(agents);
+  const [ranks, setRanks] = useState<Map<string, Rank>>(new Map());
   const agentMap = new Map(agentList.map((a) => [a.id, a]));
   const bottomRef = useRef<HTMLDivElement>(null);
   const supabase = createClient();
+
+  const workspaceId = agents[0]?.workspace_id;
+  useEffect(() => {
+    if (!workspaceId) return;
+    fetchRanks(supabase, workspaceId).then((r) => setRanks(rankMapById(r)));
+  }, [workspaceId, supabase]);
 
   useEffect(() => setAgentList((prev) => {
     const ids = new Set(prev.map((a) => a.id));
@@ -286,7 +335,7 @@ export function MessageList({
   return (
     <div className="space-y-5">
       {messages.map((m) => (
-        <MessageItem key={m.id} m={m} agents={agentMap} profile={profile} onCancel={cancel} />
+        <MessageItem key={m.id} m={m} agents={agentMap} ranks={ranks} profile={profile} onCancel={cancel} />
       ))}
       <div ref={bottomRef} />
     </div>

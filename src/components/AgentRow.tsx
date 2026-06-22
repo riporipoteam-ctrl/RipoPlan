@@ -1,9 +1,10 @@
 import Link from "next/link";
-import type { Agent } from "@/lib/types";
+import type { Agent, Rank } from "@/lib/types";
 import { AgentAvatar } from "./Avatar";
+import { RankBadge } from "./RankBadge";
 import { relativeTime } from "@/lib/format";
 
-export function AgentRow({ agent, preview }: { agent: Agent; preview?: string }) {
+export function AgentRow({ agent, preview, rank }: { agent: Agent; preview?: string; rank?: Rank | null }) {
   const recent = agent.last_run_at && Date.now() - new Date(agent.last_run_at).getTime() < 10 * 60 * 1000;
   const time = agent.last_run_at || agent.created_at;
   return (
@@ -14,7 +15,10 @@ export function AgentRow({ agent, preview }: { agent: Agent; preview?: string })
       <AgentAvatar emoji={agent.emoji} color={agent.avatar_color} imageUrl={agent.avatar_url} size={44} withDot={agent.status === "active"} />
       <div className="min-w-0 flex-1">
         <div className="flex items-center justify-between">
-          <span className="truncate font-bold">{agent.name}</span>
+          <span className="flex min-w-0 items-center gap-1.5">
+            <span className="truncate font-bold">{agent.name}</span>
+            {rank && <RankBadge rank={rank} />}
+          </span>
           <span className="ml-2 shrink-0 text-xs text-[var(--muted)]">{relativeTime(time)}</span>
         </div>
         <p className="truncate text-sm text-[var(--muted)]">

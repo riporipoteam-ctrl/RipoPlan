@@ -2,11 +2,12 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { BookOpen, Clock, LayoutGrid, Bot, Monitor, Boxes, ChevronRight, SlidersHorizontal } from "lucide-react";
+import { BookOpen, Clock, LayoutGrid, Bot, Monitor, Boxes, ChevronRight, SlidersHorizontal, Shield } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { useSession } from "@/lib/session";
 import { TopBar } from "@/components/TopBar";
 import { ProfileActions } from "@/components/ProfileActions";
+import { WorkspaceCard } from "@/components/WorkspaceCard";
 
 export default function SettingsPage() {
   const supabase = createClient();
@@ -31,6 +32,7 @@ export default function SettingsPage() {
     { href: "/knowledge", icon: BookOpen, label: "Knowledge", sub: "Shared context for agents" },
     { href: "/jobs", icon: Clock, label: "Jobs", sub: "Scheduled agent runs" },
     { href: "/agents", icon: Bot, label: "Agents", sub: "Manage your team" },
+    { href: "/settings/ranks", icon: Shield, label: "Ranks", sub: "Badges & hierarchy for agents" },
     { href: "/apps", icon: LayoutGrid, label: "Integrations", sub: "Connect your tools" },
     { href: "/devices", icon: Monitor, label: "Devices", sub: "Virtual computers" },
     { href: "/mini-apps", icon: Boxes, label: "Mini Apps", sub: "Custom agent apps" },
@@ -41,6 +43,7 @@ export default function SettingsPage() {
     <>
       <TopBar title="Settings" subtitle={ctx?.workspace.name} back="/home" />
       <div className="flex-1 space-y-4 px-4 py-4">
+        <WorkspaceCard />
         <div className="grid grid-cols-3 gap-3">
           {[
             { label: "Agents", value: stats.agents },
