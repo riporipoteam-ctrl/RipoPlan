@@ -1,5 +1,5 @@
 import { groq, GROQ_MODEL, VISION_MODEL, NVIDIA_MODEL, isReasoningModel, isVisionModel, isNvidiaModel, nvidiaModelId, type ChatMessage } from "./groq";
-import { executeTool, schemasForTools, connectorSchemas, toolLabel, IMAGE_TOOL_SCHEMA, generateImage } from "./tools";
+import { executeTool, schemasForTools, connectorSchemas, toolLabel, IMAGE_TOOL_SCHEMA, RANK_TOOL_SCHEMAS, generateImage } from "./tools";
 import { getBackendUrl } from "./backend";
 import { getUnfiltered } from "./prefs";
 import type { Activity, Agent } from "./types";
@@ -161,6 +161,7 @@ export interface RunInput {
   onCreateAgent?: (spec: any) => Promise<CreatedAgentCard | null>;
   onDelegate?: (handle: string, task: string) => Promise<string>;
   onBuildApp?: (spec: { name: string; description?: string; html: string }) => Promise<{ id: string; name: string } | null>;
+  onRankAction?: (action: "create_rank" | "assign_rank" | "edit_rank", args: any) => Promise<string>;
 }
 
 export interface BuiltAppCard {
@@ -258,6 +259,8 @@ export async function runAgent(input: RunInput): Promise<RunOutput> {
   const backendUrl = getBackendUrl();
   const tools = [...schemasForTools(agent.tools || []), ...connectorSchemas(connectors)];
   if (backendUrl) tools.push(IMAGE_TOOL_SCHEMA);
+  // The supervisor (AgentNexus) can manage ranks from chat.
+  if (agent.is_supervisor && input.onRankAction) tools.push(...RANK_TOOL_SCHEMAS);
   const client = groq();
   // Auto-upgrade to a vision model if the conversation contains image attachments.
   const hasImage = input.history.some((m) => Array.isArray((m as any).content));
@@ -320,6 +323,9 @@ export async function runAgent(input: RunInput): Promise<RunOutput> {
       result = card
         ? (builtApps.push(card), { ok: true, output: `Published "${card.name}" to Mini Apps. Tell the user it's ready to preview there — do NOT paste the code in chat.` })
         : { ok: false, output: "Could not publish the app." };
+    } else if (name === "create_rank" || name === "assign_rank" || name === "edit_rank") {
+      const out = input.onRankAction ? await input.onRankAction(name, args) : "";
+      result = out ? { ok: true, output: out } : { ok: false, output: "Could not complete the rank change." };
     } else {
       result = await executeTool(name, args, connectors);
     }

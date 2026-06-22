@@ -109,6 +109,58 @@ export function schemasForTools(tools: string[]) {
     .map(([, v]) => v);
 }
 
+// ---- Rank management tools (exposed only to the supervisor / AgentNexus) ----
+export const RANK_TOOL_SCHEMAS = [
+  {
+    type: "function",
+    function: {
+      name: "create_rank",
+      description: "Create a new rank (a titled badge) in this workspace. Use when the user asks to make a rank/role/title for agents.",
+      parameters: {
+        type: "object",
+        properties: {
+          name: { type: "string", description: "Rank name, e.g. 'Senior Engineer'" },
+          badge: { type: "string", description: "One badge keyword: crown, star, shield, medal, gem, fire, trophy, flag, diamond, bolt, rocket, brain" },
+          color: { type: "string", description: "Hex color like #a855f7 (optional)" },
+        },
+        required: ["name"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "assign_rank",
+      description: "Assign (or remove) a rank to an agent by name. Use when the user asks to give an agent a rank/title/badge.",
+      parameters: {
+        type: "object",
+        properties: {
+          agent: { type: "string", description: "The agent's name or handle" },
+          rank: { type: "string", description: "The rank name to assign, or empty string to remove the agent's rank" },
+        },
+        required: ["agent", "rank"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "edit_rank",
+      description: "Rename a rank or change its badge/color. Use when the user asks to edit/recolor/rename a rank.",
+      parameters: {
+        type: "object",
+        properties: {
+          rank: { type: "string", description: "The current rank name to edit" },
+          name: { type: "string", description: "New name (optional)" },
+          badge: { type: "string", description: "New badge keyword (optional)" },
+          color: { type: "string", description: "New hex color (optional)" },
+        },
+        required: ["rank"],
+      },
+    },
+  },
+];
+
 // ---- Connector tools (enabled when the matching integration is connected) ----
 export const CONNECTOR_TOOL_SCHEMAS: Record<string, any> = {
   github: {
@@ -428,6 +480,12 @@ export function toolLabel(name: string, args: any): string {
       return `Delegating to @${args.handle}`;
     case "build_app":
       return `Building app: ${args.name || "web app"}`;
+    case "create_rank":
+      return `Creating rank: ${args.name || "rank"}`;
+    case "assign_rank":
+      return `Assigning ${args.agent} → ${args.rank || "no rank"}`;
+    case "edit_rank":
+      return `Editing rank: ${args.rank}`;
     case "generate_image":
       return `Generating image`;
     default:

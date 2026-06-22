@@ -423,6 +423,56 @@ async function ensureCodeAgent(supabase: SupabaseClient, workspaceId: string, cr
   return (data as Agent) || null;
 }
 
+const RANK_BADGE_WORDS = ["crown","star","shield","medal","gem","fire","trophy","flag","diamond","bolt","rocket","brain"];
+
+/** AgentNexus manages ranks from chat: create / assign / edit. */
+async function handleRankAction(
+  supabase: SupabaseClient,
+  o: { workspaceId: string; agents: Agent[] },
+  action: string,
+  args: any
+): Promise<string> {
+  const ws = o.workspaceId;
+  const badge = RANK_BADGE_WORDS.includes(String(args.badge || "").toLowerCase()) ? String(args.badge).toLowerCase() : undefined;
+  const findRank = async (name: string) => {
+    const { data } = await supabase.from("ranks").select("*").eq("workspace_id", ws);
+    return ((data as any[]) || []).find((r) => r.name.toLowerCase() === String(name || "").toLowerCase()) || null;
+  };
+  if (action === "create_rank") {
+    const { data, error } = await supabase
+      .from("ranks")
+      .insert({ workspace_id: ws, name: args.name || "New Rank", badge: badge || "star", color: args.color || "#a855f7", position: 100 })
+      .select("name,badge")
+      .single();
+    if (error || !data) return "";
+    return `Created the **${data.name}** rank.`;
+  }
+  if (action === "edit_rank") {
+    const rank = await findRank(args.rank);
+    if (!rank) return `I couldn't find a rank called "${args.rank}".`;
+    const patch: any = {};
+    if (args.name) patch.name = args.name;
+    if (badge) patch.badge = badge;
+    if (args.color) patch.color = args.color;
+    if (!Object.keys(patch).length) return `Nothing to change on "${rank.name}".`;
+    await supabase.from("ranks").update(patch).eq("id", rank.id);
+    return `Updated the **${patch.name || rank.name}** rank.`;
+  }
+  // assign_rank
+  const agent = o.agents.find(
+    (a) => a.name.toLowerCase() === String(args.agent || "").toLowerCase() || (a.handle || "").toLowerCase() === String(args.agent || "").toLowerCase()
+  );
+  if (!agent) return `I couldn't find an agent called "${args.agent}".`;
+  if (!String(args.rank || "").trim()) {
+    await supabase.from("agents").update({ rank_id: null }).eq("id", agent.id);
+    return `Removed ${agent.name}'s rank.`;
+  }
+  const rank = await findRank(args.rank);
+  if (!rank) return `I couldn't find a rank called "${args.rank}". Create it first.`;
+  await supabase.from("agents").update({ rank_id: rank.id }).eq("id", agent.id);
+  return `${agent.name} is now **${rank.name}**.`;
+}
+
 async function getConnectors(supabase: SupabaseClient, workspaceId: string): Promise<Record<string, string>> {
   const { data } = await supabase
     .from("integrations")
@@ -594,6 +644,7 @@ async function runOneAgent(
         if (msgId) await supabase.from("messages").update({ activities }).eq("id", msgId);
       },
       onCreateAgent: (spec) => createAgentFromSpec(supabase, workspaceId, opts.createdBy ?? null, spec),
+      onRankAction: (action, args) => handleRankAction(supabase, { workspaceId, agents: opts.agents }, action, args),
       onBuildApp: (spec) =>
         buildAppRecord(supabase, {
           workspaceId,
