@@ -2,7 +2,9 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
-import type { Agent, Message, Profile } from "@/lib/types";
+import type { Agent, Message, Profile, Rank } from "@/lib/types";
+import { fetchRanks, rankMapById } from "@/lib/ranks";
+import { RankBadge } from "./RankBadge";
 import { AgentAvatar, UserAvatar } from "./Avatar";
 import { Markdown } from "./Markdown";
 import { clockTime } from "@/lib/format";
@@ -161,16 +163,19 @@ function stripMentions(text: string, agents: Agent[]): string {
 function MessageItem({
   m,
   agents,
+  ranks,
   profile,
   onCancel,
 }: {
   m: Message;
   agents: Map<string, Agent>;
+  ranks: Map<string, Rank>;
   profile: Profile;
   onCancel: (id: string) => void;
 }) {
   const isAgent = m.sender_type === "agent";
   const agent = m.agent_id ? agents.get(m.agent_id) : undefined;
+  const rank = isAgent && agent?.rank_id ? ranks.get(agent.rank_id) : null;
   const name = isAgent ? agent?.name || "Agent" : profile.display_name || "You";
   const raw = m.content || "";
   const display = isAgent ? stripMentions(raw, Array.from(agents.values())) || raw : raw;
@@ -185,6 +190,7 @@ function MessageItem({
       <div className="min-w-0 flex-1">
         <div className="flex items-baseline gap-2">
           <span className="text-sm font-bold">{name}</span>
+          {rank && <RankBadge rank={rank} />}
           <span className="text-xs text-[var(--muted)]">{clockTime(m.created_at)}</span>
           {isAgent && m.status !== "thinking" && display && (
             <span className="ml-auto"><CopyButton text={display} /></span>
@@ -221,9 +227,16 @@ export function MessageList({
 }) {
   const [messages, setMessages] = useState<Message[]>(initial);
   const [agentList, setAgentList] = useState<Agent[]>(agents);
+  const [ranks, setRanks] = useState<Map<string, Rank>>(new Map());
   const agentMap = new Map(agentList.map((a) => [a.id, a]));
   const bottomRef = useRef<HTMLDivElement>(null);
   const supabase = createClient();
+
+  const workspaceId = agents[0]?.workspace_id;
+  useEffect(() => {
+    if (!workspaceId) return;
+    fetchRanks(supabase, workspaceId).then((r) => setRanks(rankMapById(r)));
+  }, [workspaceId, supabase]);
 
   useEffect(() => setAgentList((prev) => {
     const ids = new Set(prev.map((a) => a.id));
@@ -309,7 +322,7 @@ export function MessageList({
   return (
     <div className="space-y-5">
       {messages.map((m) => (
-        <MessageItem key={m.id} m={m} agents={agentMap} profile={profile} onCancel={cancel} />
+        <MessageItem key={m.id} m={m} agents={agentMap} ranks={ranks} profile={profile} onCancel={cancel} />
       ))}
       <div ref={bottomRef} />
     </div>

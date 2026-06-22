@@ -15,6 +15,18 @@ export interface Workspace {
   id: string;
   name: string;
   owner_id: string | null;
+  avatar_url?: string | null;
+}
+
+export interface Rank {
+  id: string;
+  workspace_id: string;
+  name: string;
+  color: string | null;
+  badge: string | null;
+  position: number;
+  is_default: boolean;
+  created_at?: string;
 }
 
 export interface Agent {
@@ -28,6 +40,7 @@ export interface Agent {
   emoji: string | null;
   avatar_color: string | null;
   avatar_url: string | null;
+  rank_id: string | null;
   model: string | null;
   system_prompt: string | null;
   tools: string[];
@@ -101,4 +114,18 @@ export interface Integration {
   status: "available" | "connected" | "error";
   scopes: string[];
   account_label: string | null;
+}
+
+export interface MiniApp {
+  id: string;
+  workspace_id: string;
+  name: string;
+  description: string | null;
+  html: string | null;
+  prompt: string | null;
+  channel_id: string | null;
+  built_by: string | null;
+  status: "building" | "ready" | "error";
+  created_at: string;
+  updated_at?: string;
 }

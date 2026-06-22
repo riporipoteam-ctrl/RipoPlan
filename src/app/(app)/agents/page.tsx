@@ -2,12 +2,14 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { Plus, Loader2 } from "lucide-react";
+import { Plus, Loader2, Shield } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { useSession } from "@/lib/session";
 import { TopBar } from "@/components/TopBar";
 import { AgentRow } from "@/components/AgentRow";
-import type { Agent } from "@/lib/types";
+import { RankBadge } from "@/components/RankBadge";
+import { fetchRanks } from "@/lib/ranks";
+import type { Agent, Rank } from "@/lib/types";
 
 const previews: Record<string, string> = {
   agentnexus: "Welcome to your workspace! I'm your Chief of Staff.",
@@ -21,22 +23,30 @@ export default function AgentsPage() {
   const supabase = createClient();
   const { ctx } = useSession();
   const [agents, setAgents] = useState<Agent[]>([]);
+  const [ranks, setRanks] = useState<Rank[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     if (!ctx) return;
-    supabase
-      .from("agents")
-      .select("*")
-      .eq("workspace_id", ctx.workspace.id)
-      .neq("status", "archived")
-      .order("created_at")
-      .then(({ data }) => {
-        setAgents((data as Agent[]) || []);
-        setLoading(false);
-      });
+    Promise.all([
+      supabase.from("agents").select("*").eq("workspace_id", ctx.workspace.id).neq("status", "archived").order("created_at"),
+      fetchRanks(supabase, ctx.workspace.id),
+    ]).then(([{ data }, rks]) => {
+      setAgents((data as Agent[]) || []);
+      setRanks(rks);
+      setLoading(false);
+    });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ctx?.workspace.id]);
+
+  // Group agents by rank (ranked groups first in rank order, then "Unranked").
+  const groups: { rank: Rank | null; agents: Agent[] }[] = [];
+  for (const r of ranks) {
+    const inRank = agents.filter((a) => a.rank_id === r.id);
+    if (inRank.length) groups.push({ rank: r, agents: inRank });
+  }
+  const unranked = agents.filter((a) => !a.rank_id || !ranks.some((r) => r.id === a.rank_id));
+  if (unranked.length) groups.push({ rank: null, agents: unranked });
 
   return (
     <>
@@ -55,17 +65,29 @@ export default function AgentsPage() {
         <span className="rounded-full bg-nebula-100 px-3 py-1 text-sm font-medium text-nebula-700">
           My agents <span className="opacity-60">{agents.length}</span>
         </span>
-        <span className="rounded-full border border-[var(--border)] px-3 py-1 text-sm text-[var(--muted)]">
-          All agents <span className="opacity-60">{agents.length}</span>
-        </span>
+        <Link href="/settings/ranks" className="ml-auto flex items-center gap-1.5 rounded-full border border-[var(--border)] px-3 py-1 text-sm text-[var(--muted)] hover:bg-black/5">
+          <Shield size={14} /> Ranks
+        </Link>
       </div>
       <div className="flex-1">
         {loading ? (
           <div className="flex justify-center py-10 text-[var(--muted)]"><Loader2 className="animate-spin" /></div>
         ) : (
           <>
-            {agents.map((a) => (
-              <AgentRow key={a.id} agent={a} preview={previews[a.handle || ""]} />
+            {groups.map((g, gi) => (
+              <div key={g.rank?.id || `unranked-${gi}`}>
+                <div className="flex items-center gap-2 bg-black/[0.02] px-4 py-1.5 dark:bg-white/[0.03]">
+                  {g.rank ? (
+                    <RankBadge rank={g.rank} size="md" />
+                  ) : (
+                    <span className="text-xs font-semibold uppercase tracking-wide text-[var(--muted)]">Unranked</span>
+                  )}
+                  <span className="text-xs text-[var(--muted)]">{g.agents.length}</span>
+                </div>
+                {g.agents.map((a) => (
+                  <AgentRow key={a.id} agent={a} preview={previews[a.handle || ""]} rank={g.rank} />
+                ))}
+              </div>
             ))}
             <Link href="/agents/new" className="m-4 flex items-center justify-center gap-2 rounded-2xl border border-dashed border-[var(--border)] py-4 text-sm font-medium text-nebula-600 hover:bg-nebula-50">
               <Plus size={18} /> Create a new agent

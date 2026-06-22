@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { BookOpen, Clock, LayoutGrid, Bot, Monitor, Boxes, ChevronRight, SlidersHorizontal } from "lucide-react";
+import { BookOpen, Clock, LayoutGrid, Bot, Monitor, Boxes, ChevronRight, SlidersHorizontal, Shield } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { useSession } from "@/lib/session";
 import { TopBar } from "@/components/TopBar";
@@ -31,6 +31,7 @@ export default function SettingsPage() {
     { href: "/knowledge", icon: BookOpen, label: "Knowledge", sub: "Shared context for agents" },
     { href: "/jobs", icon: Clock, label: "Jobs", sub: "Scheduled agent runs" },
     { href: "/agents", icon: Bot, label: "Agents", sub: "Manage your team" },
+    { href: "/settings/ranks", icon: Shield, label: "Ranks", sub: "Badges & hierarchy for agents" },
     { href: "/apps", icon: LayoutGrid, label: "Integrations", sub: "Connect your tools" },
     { href: "/devices", icon: Monitor, label: "Devices", sub: "Virtual computers" },
     { href: "/mini-apps", icon: Boxes, label: "Mini Apps", sub: "Custom agent apps" },
