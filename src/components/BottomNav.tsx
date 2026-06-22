@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Home, Hash, Bot, Zap, LayoutGrid } from "lucide-react";
 import clsx from "clsx";
+import { haptic } from "@/lib/native";
 
 const items = [
   { href: "/home", icon: Home, label: "Home" },
@@ -26,12 +27,14 @@ export function BottomNav() {
               key={it.href}
               href={it.href}
               aria-label={it.label}
+              onClick={() => haptic("light")}
               className={clsx(
                 "relative flex h-10 w-12 items-center justify-center rounded-xl transition-colors",
                 active ? "text-nebula-600" : "text-[var(--muted)] hover:text-[var(--text)]"
               )}
             >
               <Icon size={24} strokeWidth={active ? 2.4 : 2} />
+              {active && <span className="absolute -bottom-0.5 h-1 w-1 rounded-full bg-nebula-600 animate-pop-in" />}
             </Link>
           );
         })}

@@ -7,8 +7,28 @@ import { AgentAvatar, UserAvatar } from "./Avatar";
 import { Markdown } from "./Markdown";
 import { clockTime } from "@/lib/format";
 import Link from "next/link";
-import { Activity as ActivityIcon, ChevronRight, Check, Loader2, X, Search, Globe, Code2, FileText } from "lucide-react";
+import { Activity as ActivityIcon, ChevronRight, Check, Loader2, X, Search, Globe, Code2, FileText, Copy } from "lucide-react";
 import { AgentAvatar as AvatarBox } from "./Avatar";
+
+function CopyButton({ text }: { text: string }) {
+  const [done, setDone] = useState(false);
+  return (
+    <button
+      onClick={async () => {
+        try {
+          await navigator.clipboard.writeText(text);
+          setDone(true);
+          setTimeout(() => setDone(false), 1400);
+        } catch {}
+      }}
+      className="flex items-center gap-1 text-xs text-[var(--muted)] opacity-0 transition group-hover:opacity-100 hover:text-nebula-600"
+      aria-label="Copy message"
+    >
+      {done ? <Check size={12} className="text-emerald-500" /> : <Copy size={12} />}
+      {done ? "Copied" : "Copy"}
+    </button>
+  );
+}
 
 function Attachments({ items }: { items: any[] }) {
   const cards = items.filter((a) => a?.type === "agent_created");
@@ -156,7 +176,7 @@ function MessageItem({
   const display = isAgent ? stripMentions(raw, Array.from(agents.values())) || raw : raw;
 
   return (
-    <div className="flex gap-3 animate-fade-in">
+    <div className="group flex gap-3 animate-fade-in-up">
       {isAgent ? (
         <AgentAvatar emoji={agent?.emoji} color={agent?.avatar_color} imageUrl={agent?.avatar_url} size={30} withDot />
       ) : (
@@ -166,6 +186,9 @@ function MessageItem({
         <div className="flex items-baseline gap-2">
           <span className="text-sm font-bold">{name}</span>
           <span className="text-xs text-[var(--muted)]">{clockTime(m.created_at)}</span>
+          {isAgent && m.status !== "thinking" && display && (
+            <span className="ml-auto"><CopyButton text={display} /></span>
+          )}
         </div>
         <div className="mt-0.5">
           {m.status === "thinking" ? (
