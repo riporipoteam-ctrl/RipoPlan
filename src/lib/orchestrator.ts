@@ -85,20 +85,18 @@ function isCreateIntent(content: string): boolean {
   return /\b(make|create|build|add|spin ?up|set ?up|get|bring|invite|need|want)\b/i.test(content);
 }
 
+// Every agent gets the full toolset by default — live web search, browser, and
+// code (image gen + connectors are added automatically at run time when available).
+const FULL_TOOLSET = ["web_search", "browse", "code"];
+
 function inferSpec(name: string, content: string) {
   const c = content.toLowerCase();
   let role = "AI Agent";
-  let tools = ["web_search", "browse", "code"];
-  if (/cod(e|ing)|develop|program|engineer|software|\bapp\b|website|build/.test(c)) {
-    role = "Software Engineer"; tools = ["code", "web_search", "browse"];
-  } else if (/research|find|search|analy|investigat|\bdata\b|news|market|stock/.test(c)) {
-    role = "Research Analyst"; tools = ["web_search", "browse"];
-  } else if (/writ|content|blog|copy|email|post|draft/.test(c)) {
-    role = "Content Writer"; tools = ["web_search", "browse"];
-  } else if (/design|image|art|logo|photo|video/.test(c)) {
-    role = "Creative"; tools = ["web_search", "browse"];
-  }
-  return { name, role, description: `${name} is a ${role.toLowerCase()} on the team.`, tools };
+  if (/cod(e|ing)|develop|program|engineer|software|\bapp\b|website|build/.test(c)) role = "Software Engineer";
+  else if (/research|find|search|analy|investigat|\bdata\b|news|market|stock/.test(c)) role = "Research Analyst";
+  else if (/writ|content|blog|copy|email|post|draft/.test(c)) role = "Content Writer";
+  else if (/design|image|art|logo|photo|video/.test(c)) role = "Creative";
+  return { name, role, description: `${name} is a ${role.toLowerCase()} on the team.`, tools: [...FULL_TOOLSET] };
 }
 
 /** Any agent (incl. the supervisor / its "nexus" nickname) addressed by name. */

@@ -5,6 +5,17 @@ import Groq from "groq-sdk";
 export const GROQ_MODEL =
   process.env.NEXT_PUBLIC_GROQ_MODEL || "llama-3.3-70b-versatile";
 
+/** Best NVIDIA chat model — used automatically (no selector) when a backend
+ * worker URL is configured. Prefixed with "nvidia:" so we route it correctly. */
+export const NVIDIA_MODEL = "nvidia:meta/llama-3.1-405b-instruct";
+
+export function isNvidiaModel(m: string) {
+  return m.startsWith("nvidia:");
+}
+export function nvidiaModelId(m: string) {
+  return m.replace(/^nvidia:/, "");
+}
+
 /** Vision-capable model used automatically when a message has image attachments. */
 export const VISION_MODEL = "meta-llama/llama-4-scout-17b-16e-instruct";
 

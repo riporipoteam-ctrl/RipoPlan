@@ -180,7 +180,8 @@ export async function createAgent(supabase: SB, ctx: SessionCtx, description: st
   } as any);
   spec = JSON.parse(completion.choices[0].message.content || "{}");
 
-  const tools = Array.isArray(spec.tools) ? spec.tools.filter((t: string) => VALID_TOOLS.includes(t)) : ["web_search"];
+  // Give every new agent the full toolset (live search, browser, code) by default.
+  const tools = VALID_TOOLS;
   const emoji = VALID_EMOJI.includes(spec.emoji) ? spec.emoji : "robot";
   const color = AGENT_COLORS[Math.floor(Math.random() * AGENT_COLORS.length)];
 

@@ -1,4 +1,4 @@
-import { groq, GROQ_MODEL, VISION_MODEL, isReasoningModel, isVisionModel, type ChatMessage } from "./groq";
+import { groq, GROQ_MODEL, VISION_MODEL, NVIDIA_MODEL, isReasoningModel, isVisionModel, isNvidiaModel, nvidiaModelId, type ChatMessage } from "./groq";
 import { executeTool, schemasForTools, connectorSchemas, toolLabel, IMAGE_TOOL_SCHEMA, generateImage } from "./tools";
 import { getBackendUrl } from "./backend";
 import type { Activity, Agent } from "./types";
@@ -15,9 +15,35 @@ const FALLBACK_MODELS = [
 ];
 const VISION_FALLBACK = ["meta-llama/llama-4-scout-17b-16e-instruct"];
 
-function modelChain(preferred: string, hasImage: boolean): string[] {
+function modelChain(preferred: string, hasImage: boolean, backendUrl: string): string[] {
   if (hasImage) return VISION_FALLBACK;
-  return [preferred, ...FALLBACK_MODELS.filter((m) => m !== preferred)];
+  // When a Cloudflare NVIDIA backend is configured, use the top NVIDIA model as
+  // the main brain, then fall back to the Groq chain on any error/limit.
+  const head = backendUrl ? [NVIDIA_MODEL] : [];
+  return [...head, preferred, ...FALLBACK_MODELS.filter((m) => m !== preferred)];
+}
+
+/** Call NVIDIA chat (OpenAI-compatible) through the Cloudflare worker. */
+async function callNvidia(backendUrl: string, base: any, model: string, tools?: any[]): Promise<any> {
+  const { max_completion_tokens, ...rest } = base;
+  const res = await fetch(`${backendUrl.replace(/\/+$/, "")}/v1/chat/completions`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      ...rest,
+      model,
+      max_tokens: max_completion_tokens || 2048,
+      stream: false,
+      ...(tools && tools.length ? { tools, tool_choice: "auto" } : {}),
+    }),
+  });
+  if (!res.ok) {
+    const t = await res.text();
+    const e: any = new Error(`NVIDIA ${res.status}: ${t.slice(0, 200)}`);
+    e.status = res.status;
+    throw e;
+  }
+  return res.json();
 }
 
 function isRateLimit(e: any): boolean {
@@ -31,11 +57,16 @@ async function complete(
   client: ReturnType<typeof groq>,
   base: any,
   models: string[],
+  backendUrl: string,
   tools?: any[]
 ): Promise<any> {
   let lastErr: any;
   for (const m of models) {
     try {
+      if (isNvidiaModel(m)) {
+        if (!backendUrl) continue;
+        return await callNvidia(backendUrl, base, nvidiaModelId(m), tools);
+      }
       return await client.chat.completions.create({
         ...base,
         model: m,
@@ -165,7 +196,7 @@ export async function runAgent(input: RunInput): Promise<RunOutput> {
   // Auto-upgrade to a vision model if the conversation contains image attachments.
   const hasImage = input.history.some((m) => Array.isArray((m as any).content));
   const preferred = agent.model || GROQ_MODEL;
-  const chain = modelChain(preferred, hasImage);
+  const chain = modelChain(preferred, hasImage, backendUrl);
 
   for (let round = 0; round <= MAX_TOOL_ROUNDS; round++) {
     const useTools = tools.length > 0 && round < MAX_TOOL_ROUNDS;
@@ -175,6 +206,7 @@ export async function runAgent(input: RunInput): Promise<RunOutput> {
         client,
         { messages, temperature: 0.6, max_completion_tokens: 4096, top_p: 0.95 },
         chain,
+        backendUrl,
         useTools ? tools : undefined
       );
     } catch (err: any) {
@@ -190,7 +222,8 @@ export async function runAgent(input: RunInput): Promise<RunOutput> {
           temperature: 0.6,
           max_completion_tokens: 2048,
         },
-        chain
+        chain,
+        backendUrl
       );
       return { content: sanitize(plain.choices[0].message.content || ""), activities, steps, createdAgents, generatedImages, tokensIn, tokensOut };
     }
@@ -280,7 +313,8 @@ export async function runAgent(input: RunInput): Promise<RunOutput> {
       temperature: 0.6,
       max_completion_tokens: 2048,
     },
-    chain
+    chain,
+    backendUrl
   );
   return {
     content: sanitize(final.choices[0].message.content || ""),
