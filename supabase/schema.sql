@@ -13,7 +13,7 @@ create table if not exists public.profiles (
 
 create table if not exists public.workspaces (
   id uuid primary key default gen_random_uuid(),
-  name text not null, slug text,
+  name text not null, slug text, avatar_url text,
   owner_id uuid references public.profiles(id) on delete set null,
   created_at timestamptz default now()
 );
@@ -26,18 +26,40 @@ create table if not exists public.workspace_members (
   primary key (workspace_id, user_id)
 );
 
+create table if not exists public.ranks (
+  id uuid primary key default gen_random_uuid(),
+  workspace_id uuid references public.workspaces(id) on delete cascade,
+  name text not null, color text default '#a855f7', badge text default 'star',
+  position int default 100, is_default boolean default false,
+  created_at timestamptz default now()
+);
+create index if not exists idx_ranks_ws on public.ranks(workspace_id, position);
+
 create table if not exists public.agents (
   id uuid primary key default gen_random_uuid(),
   workspace_id uuid references public.workspaces(id) on delete cascade,
   name text not null, handle text, role text, description text, goals text,
-  emoji text default 'robot', avatar_color text default '#a855f7',
-  model text default 'qwen/qwen3.6-27b', system_prompt text,
+  emoji text default 'robot', avatar_color text default '#a855f7', avatar_url text,
+  rank_id uuid references public.ranks(id) on delete set null,
+  model text default 'llama-3.3-70b-versatile', system_prompt text,
   tools jsonb default '[]'::jsonb, schedule text,
   status text default 'active' check (status in ('active','paused','archived')),
   memory_enabled boolean default true, is_supervisor boolean default false,
   created_by uuid references public.profiles(id) on delete set null,
   created_at timestamptz default now(), last_run_at timestamptz
 );
+
+create table if not exists public.mini_apps (
+  id uuid primary key default gen_random_uuid(),
+  workspace_id uuid references public.workspaces(id) on delete cascade,
+  name text not null, description text, html text, prompt text,
+  channel_id uuid references public.channels(id) on delete set null,
+  built_by uuid references public.agents(id) on delete set null,
+  status text default 'ready' check (status in ('building','ready','error')),
+  created_by uuid references public.profiles(id) on delete set null,
+  created_at timestamptz default now(), updated_at timestamptz default now()
+);
+create index if not exists idx_mini_apps_ws on public.mini_apps(workspace_id, created_at desc);
 
 create table if not exists public.channels (
   id uuid primary key default gen_random_uuid(),
@@ -97,7 +119,7 @@ create table if not exists public.integrations (
   workspace_id uuid references public.workspaces(id) on delete cascade,
   provider text not null,
   status text default 'available' check (status in ('available','connected','error')),
-  scopes jsonb default '[]'::jsonb, account_label text,
+  scopes jsonb default '[]'::jsonb, account_label text, secret text,
   connected_by uuid references public.profiles(id) on delete set null,
   created_at timestamptz default now()
 );
@@ -140,6 +162,8 @@ grant execute on function public.is_workspace_member(uuid) to authenticated;
 alter table public.profiles enable row level security;
 alter table public.workspaces enable row level security;
 alter table public.workspace_members enable row level security;
+alter table public.ranks enable row level security;
+alter table public.mini_apps enable row level security;
 alter table public.agents enable row level security;
 alter table public.channels enable row level security;
 alter table public.threads enable row level security;
@@ -162,6 +186,8 @@ create policy "wm_select_member" on public.workspace_members for select using (p
 create policy "wm_insert_self_or_member" on public.workspace_members for insert with check (user_id = auth.uid() or public.is_workspace_member(workspace_id));
 create policy "wm_delete_member" on public.workspace_members for delete using (public.is_workspace_member(workspace_id));
 
+create policy "ranks_rw" on public.ranks for all using (public.is_workspace_member(workspace_id)) with check (public.is_workspace_member(workspace_id));
+create policy "mini_apps_rw" on public.mini_apps for all using (public.is_workspace_member(workspace_id)) with check (public.is_workspace_member(workspace_id));
 create policy "agents_rw" on public.agents for all using (public.is_workspace_member(workspace_id)) with check (public.is_workspace_member(workspace_id));
 create policy "channels_rw" on public.channels for all using (public.is_workspace_member(workspace_id)) with check (public.is_workspace_member(workspace_id));
 create policy "threads_rw" on public.threads for all using (public.is_workspace_member(workspace_id)) with check (public.is_workspace_member(workspace_id));
@@ -245,6 +271,7 @@ alter publication supabase_realtime add table public.messages;
 alter publication supabase_realtime add table public.threads;
 alter publication supabase_realtime add table public.notifications;
 alter publication supabase_realtime add table public.agent_runs;
+alter publication supabase_realtime add table public.mini_apps;
 alter table public.messages replica identity full;
 alter table public.threads replica identity full;
 alter table public.agent_runs replica identity full;
