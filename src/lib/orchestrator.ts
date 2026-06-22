@@ -514,7 +514,9 @@ async function runOneAgent(
         workspace_id: workspaceId,
         agent_id: agent.id,
         kind: "interaction",
-        content: `Asked: "${triggerText.slice(0, 200)}". Responded: ${result.content.slice(0, 300)}`,
+        // Store only what the USER said (facts to remember) — never the agent's own
+        // wording, which made agents parrot their previous replies.
+        content: `User mentioned: "${triggerText.slice(0, 220)}"`,
       });
     }
 

@@ -40,7 +40,7 @@ export function ThreadCard({
         <div className="flex -space-x-1.5">
           <UserAvatar name={userName} color={userColor} size={22} />
           {agent && (
-            <AgentAvatar emoji={agent.emoji} color={agent.avatar_color} size={22} />
+            <AgentAvatar emoji={agent.emoji} color={agent.avatar_color} imageUrl={agent.avatar_url} size={22} />
           )}
         </div>
         <span className="text-xs text-[var(--muted)]">{relativeTime(thread.last_activity_at)}</span>

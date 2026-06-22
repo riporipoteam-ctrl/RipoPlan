@@ -34,7 +34,7 @@ export function JobRow({ job, agent }: { job: Job; agent?: Agent }) {
 
   return (
     <div className="flex items-center gap-3 rounded-2xl border border-[var(--border)] bg-[var(--card)] p-3">
-      <AgentAvatar emoji={agent?.emoji} color={agent?.avatar_color} size={40} />
+      <AgentAvatar emoji={agent?.emoji} color={agent?.avatar_color} imageUrl={agent?.avatar_url} size={40} />
       <div className="min-w-0 flex-1">
         <div className="truncate font-semibold">{job.name}</div>
         <div className="flex items-center gap-2 text-xs text-[var(--muted)]">

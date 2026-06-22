@@ -158,7 +158,7 @@ function MessageItem({
   return (
     <div className="flex gap-3 animate-fade-in">
       {isAgent ? (
-        <AgentAvatar emoji={agent?.emoji} color={agent?.avatar_color} size={30} withDot />
+        <AgentAvatar emoji={agent?.emoji} color={agent?.avatar_color} imageUrl={agent?.avatar_url} size={30} withDot />
       ) : (
         <UserAvatar name={profile.display_name} color={profile.avatar_color} size={30} />
       )}

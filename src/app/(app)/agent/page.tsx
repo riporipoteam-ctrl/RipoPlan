@@ -8,6 +8,7 @@ import { useSession } from "@/lib/session";
 import { TopBar } from "@/components/TopBar";
 import { AgentAvatar } from "@/components/Avatar";
 import { AgentActions } from "@/components/AgentActions";
+import { AgentEditor } from "@/components/AgentEditor";
 import { relativeTime } from "@/lib/format";
 import type { Agent } from "@/lib/types";
 
@@ -53,7 +54,7 @@ function AgentView() {
       <TopBar title={agent.name} subtitle={agent.role || undefined} back="/agents" />
       <div className="flex-1 space-y-4 px-4 py-4">
         <div className="flex items-center gap-3">
-          <AgentAvatar emoji={agent.emoji} color={agent.avatar_color} size={56} withDot={agent.status === "active"} />
+          <AgentAvatar emoji={agent.emoji} color={agent.avatar_color} imageUrl={agent.avatar_url} size={56} withDot={agent.status === "active"} />
           <div className="min-w-0 flex-1">
             <h2 className="text-xl font-bold">{agent.name}</h2>
             <div className="flex items-center gap-2 text-sm text-[var(--muted)]">
@@ -66,6 +67,7 @@ function AgentView() {
         </div>
 
         <AgentActions agent={agent} />
+        <AgentEditor agent={agent} onChange={setAgent} />
 
         {agent.description && (
           <div className="rounded-2xl border border-[var(--border)] bg-[var(--card)] p-4">
