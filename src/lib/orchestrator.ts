@@ -198,15 +198,20 @@ async function getMemories(
     out.push(`${k.title}: ${k.content || ""}`.trim());
   }
 
-  // Agent's own long-term memory
+  // Long-term memory — shared across the WHOLE workspace (every chat, every
+  // agent), so any agent (incl. brand-new ones) remembers what's been discussed.
   if (agent.memory_enabled) {
     const { data } = await supabase
       .from("agent_memories")
       .select("content")
-      .eq("agent_id", agent.id)
+      .eq("workspace_id", workspaceId)
       .order("created_at", { ascending: false })
-      .limit(5);
-    for (const m of (data as { content: string }[]) || []) out.push(m.content);
+      .limit(24);
+    const seen = new Set<string>();
+    for (const m of (data as { content: string }[]) || []) {
+      const c = (m.content || "").trim();
+      if (c && !seen.has(c)) { seen.add(c); out.push(c); }
+    }
   }
   return out;
 }
