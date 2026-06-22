@@ -2,8 +2,8 @@
  * AgentNexus backend — single Cloudflare Worker for the static GitHub Pages app.
  *
  *  /v1/chat/completions  OpenAI-compatible chat. Routes by model name:
- *                          "glm-5.2" (no slash) -> Ollama hosted API
- *                          "vendor/model"       -> NVIDIA (build.nvidia.com)
+ *                          "glm-5.2" / "@cf/..." -> Workers AI (Cloudflare GPUs)
+ *                          "vendor/model"        -> NVIDIA (build.nvidia.com)
  *  /llm                  same, but provider chosen by body.provider
  *  /image/generate,/edit  NVIDIA FLUX image gen
  *  /browse               live browser: real headless Chrome (Browser Rendering)
@@ -13,25 +13,28 @@
  *                          after the app is closed
  *  /oauth/:p/start,/callback  Google sign-in (Gmail)
  *
- * Secrets:  NVIDIA_API_KEY, OLLAMA_API_KEY, GROQ_API_KEY, GOOGLE_CLIENT_ID,
+ * Bindings: AI (Workers AI — runs GLM-5.2)
+ * Secrets:  NVIDIA_API_KEY, GROQ_API_KEY, GOOGLE_CLIENT_ID,
  *           GOOGLE_CLIENT_SECRET, SUPABASE_SERVICE_KEY
- * Vars:     ALLOWED_ORIGIN, APP_REDIRECT, SUPABASE_URL, AGENT_MODEL, OLLAMA_BASE
+ * Vars:     ALLOWED_ORIGIN, APP_REDIRECT, SUPABASE_URL, AGENT_MODEL
  */
 
 interface Env {
+  AI: any; // Workers AI binding (runs GLM-5.2 on Cloudflare's GPUs)
   ALLOWED_ORIGIN: string;
   APP_REDIRECT: string;
   SUPABASE_URL?: string;
   SUPABASE_SERVICE_KEY?: string;
   AGENT_MODEL?: string;
-  OLLAMA_BASE?: string;
   GROQ_API_KEY?: string;
   NVIDIA_API_KEY?: string;
-  OLLAMA_API_KEY?: string;
   GOOGLE_CLIENT_ID?: string;
   GOOGLE_CLIENT_SECRET?: string;
   BROWSER?: any; // Browser Rendering binding (optional, Workers Paid)
 }
+
+// Default chat model: GLM-5.2 on Workers AI.
+const CF_GLM = "@cf/zai-org/glm-5.2";
 
 const NVIDIA_CHAT = "https://integrate.api.nvidia.com/v1/chat/completions";
 const GENAI = "https://ai.api.nvidia.com/v1/genai";
@@ -53,26 +56,55 @@ function cors(env: Env) {
   };
 }
 
-// --------------------------- chat provider routing ---------------------------
-function chatTarget(env: Env, model: string): { url: string; key: string; model: string } {
-  // A bare model name (e.g. "glm-5.2") goes to Ollama's hosted API; a
-  // "vendor/model" name goes to NVIDIA.
-  if (model.includes("/")) {
-    return { url: NVIDIA_CHAT, key: env.NVIDIA_API_KEY || "", model };
-  }
-  const base = (env.OLLAMA_BASE || "https://ollama.com").replace(/\/+$/, "");
-  return { url: `${base}/v1/chat/completions`, key: env.OLLAMA_API_KEY || "", model };
+// --------------------------- chat routing ---------------------------
+// Resolve a requested model name to a concrete provider+id.
+//   "glm-5.2" / "@cf/..."  -> Workers AI (Cloudflare GPUs)
+//   "vendor/model"          -> NVIDIA
+function resolveModel(env: Env, model?: string): { provider: "cf" | "nvidia"; id: string } {
+  const m = model || env.AGENT_MODEL || CF_GLM;
+  if (m.startsWith("@cf/")) return { provider: "cf", id: m };
+  if (/^glm/i.test(m)) return { provider: "cf", id: CF_GLM };
+  if (m.includes("/")) return { provider: "nvidia", id: m };
+  return { provider: "cf", id: CF_GLM };
+}
+
+/** Run a chat completion on Workers AI and normalize to OpenAI shape. */
+async function workersAIChat(env: Env, id: string, body: any): Promise<any> {
+  const out: any = await env.AI.run(id, {
+    messages: body.messages,
+    max_tokens: body.max_tokens || body.max_completion_tokens || 2048,
+    temperature: body.temperature ?? 0.6,
+    ...(body.tools ? { tools: body.tools } : {}),
+  });
+  if (out?.choices) return out; // already OpenAI-shaped
+  const tool_calls = (out?.tool_calls || []).map((t: any, i: number) => ({
+    id: t.id || `call_${i}_${Date.now()}`,
+    type: "function",
+    function: { name: t.name || t.function?.name, arguments: typeof t.arguments === "string" ? t.arguments : JSON.stringify(t.arguments || t.function?.arguments || {}) },
+  }));
+  return {
+    choices: [{ index: 0, message: { role: "assistant", content: out?.response ?? out?.result ?? "", ...(tool_calls.length ? { tool_calls } : {}) }, finish_reason: tool_calls.length ? "tool_calls" : "stop" }],
+    usage: out?.usage || {},
+  };
 }
 
 async function chatCompletion(env: Env, body: any): Promise<Response> {
-  const t = chatTarget(env, body.model || env.AGENT_MODEL || "glm-5.2");
-  if (!t.key) return Response.json({ error: `No API key for model ${t.model}` }, { status: 400, headers: cors(env) });
-  const r = await fetch(t.url, {
-    method: "POST",
-    headers: { Authorization: `Bearer ${t.key}`, "Content-Type": "application/json" },
-    body: JSON.stringify({ ...body, model: t.model }),
-  });
-  return new Response(r.body, { status: r.status, headers: { ...cors(env), "Content-Type": "application/json" } });
+  const r = resolveModel(env, body.model);
+  try {
+    if (r.provider === "cf") {
+      const data = await workersAIChat(env, r.id, body);
+      return Response.json(data, { headers: cors(env) });
+    }
+    if (!env.NVIDIA_API_KEY) return Response.json({ error: "NVIDIA_API_KEY not set" }, { status: 400, headers: cors(env) });
+    const up = await fetch(NVIDIA_CHAT, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${env.NVIDIA_API_KEY}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ ...body, model: r.id }),
+    });
+    return new Response(up.body, { status: up.status, headers: { ...cors(env), "Content-Type": "application/json" } });
+  } catch (e: any) {
+    return Response.json({ error: String(e.message || e) }, { status: 502, headers: cors(env) });
+  }
 }
 
 // ----------------------------- Supabase REST -----------------------------
@@ -231,7 +263,7 @@ export default {
     if (req.method === "OPTIONS") return new Response(null, { headers: cors(env) });
 
     if (url.pathname === "/health") {
-      return Response.json({ ok: true, model: env.AGENT_MODEL || "glm-5.2", ollama: !!env.OLLAMA_API_KEY, nvidia: !!env.NVIDIA_API_KEY, google: !!env.GOOGLE_CLIENT_ID, supabase: !!env.SUPABASE_SERVICE_KEY, browser: !!env.BROWSER }, { headers: cors(env) });
+      return Response.json({ ok: true, model: env.AGENT_MODEL || CF_GLM, workersAI: !!env.AI, nvidia: !!env.NVIDIA_API_KEY, google: !!env.GOOGLE_CLIENT_ID, supabase: !!env.SUPABASE_SERVICE_KEY, browser: !!env.BROWSER }, { headers: cors(env) });
     }
 
     if ((url.pathname === "/v1/chat/completions" || url.pathname === "/chat") && req.method === "POST") {

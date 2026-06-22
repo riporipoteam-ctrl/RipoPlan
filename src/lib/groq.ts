@@ -5,10 +5,10 @@ import Groq from "groq-sdk";
 export const GROQ_MODEL =
   process.env.NEXT_PUBLIC_GROQ_MODEL || "llama-3.3-70b-versatile";
 
-/** Primary chat model when the backend worker is configured: GLM (glm-5.2),
- * served through our worker (proxied to a hosted Ollama-compatible API), just
- * like NVIDIA. Prefixed "ollama:" so the runner routes it to /v1/chat/completions. */
-export const BACKEND_CHAT_MODEL = "ollama:glm-5.2";
+/** Primary chat model when the backend worker is configured: GLM-5.2, running on
+ * Cloudflare Workers AI (their GPUs) via our worker. Prefixed "cf:" so the runner
+ * routes it to the worker's /v1/chat/completions. */
+export const BACKEND_CHAT_MODEL = "cf:glm-5.2";
 
 /** Best NVIDIA chat model — used as a fallback after GLM when a backend is set. */
 export const NVIDIA_MODEL = "nvidia:meta/llama-3.1-405b-instruct";
@@ -19,11 +19,12 @@ export function isNvidiaModel(m: string) {
 export function nvidiaModelId(m: string) {
   return m.replace(/^nvidia:/, "");
 }
-export function isOllamaModel(m: string) {
-  return m.startsWith("ollama:");
+/** A model served through our Cloudflare worker (Workers AI). */
+export function isWorkerModel(m: string) {
+  return m.startsWith("cf:");
 }
-export function ollamaModelId(m: string) {
-  return m.replace(/^ollama:/, "");
+export function workerModelId(m: string) {
+  return m.replace(/^cf:/, "");
 }
 
 /** Vision-capable model used automatically when a message has image attachments. */

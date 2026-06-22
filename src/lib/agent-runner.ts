@@ -1,4 +1,4 @@
-import { groq, GROQ_MODEL, VISION_MODEL, NVIDIA_MODEL, BACKEND_CHAT_MODEL, isReasoningModel, isVisionModel, isNvidiaModel, nvidiaModelId, isOllamaModel, ollamaModelId, type ChatMessage } from "./groq";
+import { groq, GROQ_MODEL, VISION_MODEL, NVIDIA_MODEL, BACKEND_CHAT_MODEL, isReasoningModel, isVisionModel, isNvidiaModel, nvidiaModelId, isWorkerModel, workerModelId, type ChatMessage } from "./groq";
 import { executeTool, schemasForTools, connectorSchemas, toolLabel, IMAGE_TOOL_SCHEMA, RANK_TOOL_SCHEMAS, generateImage } from "./tools";
 import { getBackendUrl } from "./backend";
 import { getUnfiltered } from "./prefs";
@@ -68,10 +68,10 @@ async function complete(
         if (!backendUrl) continue;
         return await callNvidia(backendUrl, base, nvidiaModelId(m), tools);
       }
-      if (isOllamaModel(m)) {
-        // GLM via the worker (proxied to a hosted Ollama-compatible API).
+      if (isWorkerModel(m)) {
+        // GLM-5.2 on Cloudflare Workers AI, via our worker's chat endpoint.
         if (!backendUrl) continue;
-        return await callNvidia(backendUrl, base, ollamaModelId(m), tools);
+        return await callNvidia(backendUrl, base, workerModelId(m), tools);
       }
       return await client.chat.completions.create({
         ...base,

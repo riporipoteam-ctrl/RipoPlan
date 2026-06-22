@@ -15,11 +15,15 @@ run anything after you close the tab. This Worker adds exactly that:
 Add in repo **Settings → Secrets and variables → Actions** (the deploy workflow
 pushes them to the Worker):
 
+The agent brain is **GLM-5.2 on Workers AI** (`@cf/zai-org/glm-5.2`) — it runs on
+Cloudflare's own GPUs via the `AI` binding (no external host, no Ollama, no model
+key; uses your account's Workers AI allowance).
+
 | Secret | Needed for |
 | --- | --- |
 | `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID` | deploying the Worker |
-| `NVIDIA_API_KEY` | agent brain for background tasks + images |
 | `SUPABASE_SERVICE_KEY` | cron reading history & posting replies (Supabase → Settings → API → **service_role** key) |
+| `NVIDIA_API_KEY` | image generation (FLUX) |
 | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | Gmail sign-in |
 | `GROQ_API_KEY` | (optional) proxy Groq |
 
