@@ -83,6 +83,25 @@ export const TOOL_SCHEMAS: Record<string, any> = {
   },
 };
 
+// Publishing a self-contained web app/site to the Mini Apps page.
+TOOL_SCHEMAS.build_app = {
+  type: "function",
+  function: {
+    name: "build_app",
+    description:
+      "Build and PUBLISH a complete website or web app to the Mini Apps page. Provide a full, self-contained single HTML document (inline CSS and JS, no external build step) in `html`. Use this instead of pasting code into chat — the user previews it in Mini Apps. Make it polished, responsive, and actually functional.",
+    parameters: {
+      type: "object",
+      properties: {
+        name: { type: "string", description: "Short app/site name, e.g. 'Auto Repair Shop'" },
+        description: { type: "string", description: "One sentence on what it is" },
+        html: { type: "string", description: "A complete self-contained HTML document (<!doctype html>…), all CSS/JS inline." },
+      },
+      required: ["name", "html"],
+    },
+  },
+};
+
 export function schemasForTools(tools: string[]) {
   const names = new Set(tools);
   return Object.entries(TOOL_SCHEMAS)
@@ -407,6 +426,10 @@ export function toolLabel(name: string, args: any): string {
       return `Creating agent: ${args.name || "new agent"}`;
     case "delegate":
       return `Delegating to @${args.handle}`;
+    case "build_app":
+      return `Building app: ${args.name || "web app"}`;
+    case "generate_image":
+      return `Generating image`;
     default:
       return name;
   }

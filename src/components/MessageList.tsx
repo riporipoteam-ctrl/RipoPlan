@@ -9,7 +9,7 @@ import { AgentAvatar, UserAvatar } from "./Avatar";
 import { Markdown } from "./Markdown";
 import { clockTime } from "@/lib/format";
 import Link from "next/link";
-import { Activity as ActivityIcon, ChevronRight, Check, Loader2, X, Search, Globe, Code2, FileText, Copy } from "lucide-react";
+import { Activity as ActivityIcon, ChevronRight, Check, Loader2, X, Search, Globe, Code2, FileText, Copy, Boxes } from "lucide-react";
 import { AgentAvatar as AvatarBox } from "./Avatar";
 
 function CopyButton({ text }: { text: string }) {
@@ -35,8 +35,21 @@ function CopyButton({ text }: { text: string }) {
 function Attachments({ items }: { items: any[] }) {
   const cards = items.filter((a) => a?.type === "agent_created");
   const media = items.filter((a) => a?.type === "image" || a?.type === "file");
+  const miniApps = items.filter((a) => a?.type === "mini_app");
   return (
     <>
+      {miniApps.map((a, i) => (
+        <Link key={`app-${i}`} href="/mini-apps" className="mt-2 flex items-center gap-3 rounded-xl border border-[var(--border)] bg-[var(--card)] p-2.5 hover:border-nebula-400">
+          <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-nebula-100 text-nebula-600">
+            <Boxes size={18} />
+          </div>
+          <div className="min-w-0 flex-1">
+            <div className="font-semibold leading-tight">{a.name}</div>
+            <div className="text-xs text-emerald-600">Published to Mini Apps · tap to open</div>
+          </div>
+          <Arrow size={16} className="text-[var(--muted)]" />
+        </Link>
+      ))}
       {media.length > 0 && (
         <div className="mt-1.5 flex flex-wrap gap-2">
           {media.map((a, i) =>

@@ -82,7 +82,7 @@ async function complete(
   throw lastErr;
 }
 
-const TOOL_NAMES = ["web_search", "browse", "code", "create_agent", "delegate", "generate_image", "github", "slack"];
+const TOOL_NAMES = ["web_search", "browse", "code", "create_agent", "delegate", "generate_image", "github", "slack", "build_app"];
 
 /** Detect a tool call a model wrote as plain text instead of a real call. */
 function parseLeakedToolCall(content: string): { name: string; args: any } | null {
@@ -160,6 +160,12 @@ export interface RunInput {
   onActivity?: (activities: Activity[]) => Promise<void> | void;
   onCreateAgent?: (spec: any) => Promise<CreatedAgentCard | null>;
   onDelegate?: (handle: string, task: string) => Promise<string>;
+  onBuildApp?: (spec: { name: string; description?: string; html: string }) => Promise<{ id: string; name: string } | null>;
+}
+
+export interface BuiltAppCard {
+  id: string;
+  name: string;
 }
 
 export interface RunOutput {
@@ -168,6 +174,7 @@ export interface RunOutput {
   steps: any[];
   createdAgents: CreatedAgentCard[];
   generatedImages: string[];
+  builtApps: BuiltAppCard[];
   tokensIn: number;
   tokensOut: number;
 }
@@ -238,6 +245,7 @@ export async function runAgent(input: RunInput): Promise<RunOutput> {
   const steps: any[] = [];
   const createdAgents: CreatedAgentCard[] = [];
   const generatedImages: string[] = [];
+  const builtApps: BuiltAppCard[] = [];
   let tokensIn = 0;
   let tokensOut = 0;
 
@@ -305,6 +313,13 @@ export async function runAgent(input: RunInput): Promise<RunOutput> {
       result = reply
         ? { ok: true, output: `Delegated to @${args.handle}. They replied: ${reply.slice(0, 500)}` }
         : { ok: false, output: `Could not delegate to @${args.handle}.` };
+    } else if (name === "build_app") {
+      const card = input.onBuildApp
+        ? await input.onBuildApp({ name: String(args.name || "App"), description: args.description, html: String(args.html || "") })
+        : null;
+      result = card
+        ? (builtApps.push(card), { ok: true, output: `Published "${card.name}" to Mini Apps. Tell the user it's ready to preview there — do NOT paste the code in chat.` })
+        : { ok: false, output: "Could not publish the app." };
     } else {
       result = await executeTool(name, args, connectors);
     }
@@ -330,7 +345,7 @@ export async function runAgent(input: RunInput): Promise<RunOutput> {
       // A model emitted a malformed tool call → recover from its text.
       const failed = err?.error?.error?.failed_generation || err?.failed_generation;
       const recovered = sanitize(typeof failed === "string" ? failed : "");
-      if (recovered) return { content: recovered, activities, steps, createdAgents, generatedImages, tokensIn, tokensOut };
+      if (recovered) return { content: recovered, activities, steps, createdAgents, generatedImages, builtApps, tokensIn, tokensOut };
       // Last resort: plain answer (no tools) across the model chain.
       const plain = await complete(
         client,
@@ -342,7 +357,7 @@ export async function runAgent(input: RunInput): Promise<RunOutput> {
         chain,
         backendUrl
       );
-      return { content: sanitize(plain.choices[0].message.content || ""), activities, steps, createdAgents, generatedImages, tokensIn, tokensOut };
+      return { content: sanitize(plain.choices[0].message.content || ""), activities, steps, createdAgents, generatedImages, builtApps, tokensIn, tokensOut };
     }
 
     const usage: any = (completion as any).usage;
@@ -371,6 +386,7 @@ export async function runAgent(input: RunInput): Promise<RunOutput> {
         steps,
         createdAgents,
         generatedImages,
+        builtApps,
         tokensIn,
         tokensOut,
       };
@@ -415,6 +431,7 @@ export async function runAgent(input: RunInput): Promise<RunOutput> {
     steps,
     createdAgents,
     generatedImages,
+    builtApps,
     tokensIn,
     tokensOut,
   };

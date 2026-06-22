@@ -85,6 +85,15 @@ function isCreateIntent(content: string): boolean {
   return /\b(make|create|build|add|spin ?up|set ?up|get|bring|invite|need|want)\b/i.test(content);
 }
 
+/** User wants a website / web app / landing page / tool built. */
+function isBuildAppIntent(content: string): boolean {
+  const c = content.toLowerCase();
+  return (
+    /\b(website|web ?app|web ?page|landing page|web ?site|html (page|site)|mini ?app|portfolio site|online store|web tool)\b/.test(c) &&
+    /\b(make|create|build|design|code|develop|need|want|generate|set ?up)\b/.test(c)
+  );
+}
+
 // Every agent gets the full toolset by default — live web search, browser, and
 // code (image gen + connectors are added automatically at run time when available).
 const FULL_TOOLSET = ["web_search", "browse", "code"];
@@ -335,13 +344,83 @@ async function delegateToAgent(
       onActivity: async (activities) => {
         if (mid) await supabase.from("messages").update({ activities }).eq("id", mid);
       },
+      onBuildApp: (spec) =>
+        buildAppRecord(supabase, { workspaceId: o.workspaceId, createdBy: null, agentId: target.id, channelId: o.channelId, spec }),
     });
-    if (mid) await supabase.from("messages").update({ content: res.content, activities: res.activities, status: "complete" }).eq("id", mid);
+    if (mid) {
+      const attachments = [
+        ...res.generatedImages.map((url) => ({ type: "image", url, name: "Generated image" })),
+        ...res.builtApps.map((a) => ({ type: "mini_app", id: a.id, name: a.name })),
+      ];
+      await supabase.from("messages").update({ content: res.content, activities: res.activities, attachments, status: "complete" }).eq("id", mid);
+    }
     return res.content;
   } catch (e: any) {
     if (mid) await supabase.from("messages").update({ content: `⚠️ ${e.message}`, status: "error" }).eq("id", mid);
     return "";
   }
+}
+
+/** Publish a self-contained web app/site built by an agent to the Mini Apps page. */
+async function buildAppRecord(
+  supabase: SupabaseClient,
+  o: { workspaceId: string; createdBy: string | null; agentId: string; channelId: string | null; spec: { name: string; description?: string; html: string } }
+): Promise<{ id: string; name: string } | null> {
+  const { data, error } = await supabase
+    .from("mini_apps")
+    .insert({
+      workspace_id: o.workspaceId,
+      name: o.spec.name || "Web App",
+      description: o.spec.description || null,
+      html: o.spec.html || "",
+      built_by: o.agentId,
+      channel_id: o.channelId,
+      status: "ready",
+      created_by: o.createdBy,
+    })
+    .select("id,name")
+    .single();
+  if (error || !data) return null;
+  return { id: data.id, name: data.name };
+}
+
+/** Ensure every workspace has a default Coder agent that can build apps. */
+async function ensureCodeAgent(supabase: SupabaseClient, workspaceId: string, createdBy: string | null): Promise<Agent | null> {
+  const { data: existing } = await supabase
+    .from("agents")
+    .select("*")
+    .eq("workspace_id", workspaceId)
+    .or("handle.eq.coder,handle.eq.builder")
+    .neq("status", "archived")
+    .limit(1)
+    .maybeSingle();
+  if (existing) {
+    // Make sure it can publish apps.
+    const tools: string[] = Array.isArray((existing as Agent).tools) ? (existing as Agent).tools : [];
+    if (!tools.includes("build_app")) {
+      await supabase.from("agents").update({ tools: [...tools, "build_app"] }).eq("id", (existing as Agent).id);
+      (existing as Agent).tools = [...tools, "build_app"];
+    }
+    return existing as Agent;
+  }
+  const { data } = await supabase
+    .from("agents")
+    .insert({
+      workspace_id: workspaceId,
+      name: "Coder",
+      handle: "coder",
+      role: "Software Engineer",
+      description: "Builds websites and web apps and publishes them to Mini Apps.",
+      emoji: "code",
+      avatar_color: "#6e5494",
+      tools: ["web_search", "browse", "code", "build_app"],
+      system_prompt:
+        "You are Coder, a senior software engineer. When asked to build a website or web app, write a complete, polished, responsive single-file HTML document (inline CSS + JS) and PUBLISH it with the build_app tool instead of pasting code in chat. Ask a clarifying question only if essential. Have a pragmatic, friendly engineer personality. Speak only as yourself.",
+      created_by: createdBy,
+    })
+    .select("*")
+    .maybeSingle();
+  return (data as Agent) || null;
 }
 
 async function getConnectors(supabase: SupabaseClient, workspaceId: string): Promise<Record<string, string>> {
@@ -418,9 +497,20 @@ export async function dispatch(opts: DispatchOpts): Promise<void> {
     }
   }
 
+  // Build-a-website/app request → ensure the Coder agent exists and let it
+  // handle it directly (it has the build_app tool and publishes to Mini Apps).
+  let buildAgent: Agent | null = null;
+  const explicitMention = resolveMentions(opts.userContent, agentsList).length > 0 || nameRefAll(opts.userContent, agentsList).length > 0;
+  if (isBuildAppIntent(opts.userContent) && hasGroqKey() && !explicitMention) {
+    buildAgent = await ensureCodeAgent(supabase, workspaceId, opts.createdBy ?? null);
+    if (buildAgent && !agentsList.some((a) => a.id === buildAgent!.id)) {
+      agentsList = [...agentsList, buildAgent];
+    }
+  }
+
   const opts2 = { ...opts, agents: agentsList };
   // Responders = any newly-created agent + everyone selected (mentions/names/etc).
-  const selected = selectAgents(opts.userContent, agentsList, opts.primaryAgentId, preferSpecialistId);
+  const selected = buildAgent ? [buildAgent] : selectAgents(opts.userContent, agentsList, opts.primaryAgentId, preferSpecialistId);
   const responders: Agent[] = [];
   const seen = new Set<string>();
   for (const a of [...newlyCreated, ...selected]) {
@@ -504,6 +594,14 @@ async function runOneAgent(
         if (msgId) await supabase.from("messages").update({ activities }).eq("id", msgId);
       },
       onCreateAgent: (spec) => createAgentFromSpec(supabase, workspaceId, opts.createdBy ?? null, spec),
+      onBuildApp: (spec) =>
+        buildAppRecord(supabase, {
+          workspaceId,
+          createdBy: opts.createdBy ?? null,
+          agentId: agent.id,
+          channelId: opts.channelId ?? null,
+          spec,
+        }),
       onDelegate: (handle, task) =>
         delegateToAgent(supabase, {
           workspaceId,
@@ -521,6 +619,7 @@ async function runOneAgent(
       const attachments = [
         ...result.createdAgents.map((c) => ({ type: "agent_created", ...c })),
         ...result.generatedImages.map((url) => ({ type: "image", url, name: "Generated image" })),
+        ...result.builtApps.map((a) => ({ type: "mini_app", id: a.id, name: a.name })),
       ];
       await supabase
         .from("messages")
