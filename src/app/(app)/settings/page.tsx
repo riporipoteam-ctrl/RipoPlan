@@ -9,6 +9,7 @@ import { TopBar } from "@/components/TopBar";
 import { ProfileActions } from "@/components/ProfileActions";
 import { GroqKeyField } from "@/components/GroqKeyField";
 import { BackendUrlField } from "@/components/BackendUrlField";
+import { UnfilteredToggle } from "@/components/UnfilteredToggle";
 
 export default function SettingsPage() {
   const supabase = createClient();
@@ -74,6 +75,9 @@ export default function SettingsPage() {
           </p>
           <BackendUrlField />
         </div>
+
+        <UnfilteredToggle />
+
         <div className="overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--card)]">
           {links.map((it) => (
             <Link key={it.href} href={it.href} className="flex items-center gap-3 border-b border-[var(--border)] px-4 py-3 last:border-0 hover:bg-black/5">
