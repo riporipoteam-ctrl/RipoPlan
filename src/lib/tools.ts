@@ -268,8 +268,21 @@ async function jinaSearch(query: string): Promise<ToolResult> {
 
 export async function webSearch(query: string): Promise<ToolResult> {
   const jina = await jinaSearch(query);
-  if (jina.ok) return jina;
-  return wikipediaSearch(query);
+  let base = jina.ok ? jina : await wikipediaSearch(query);
+  if (!base.ok) return base;
+  // Deep search: open the top real result and pull its actual content so the
+  // agent gives concrete facts/links, not just a list of site names.
+  const link = (base.output.match(/https?:\/\/(?!(?:html\.)?duckduckgo\.com)[^\s)\]"']+/i) || [])[0];
+  if (link) {
+    const page = await browse(link);
+    if (page.ok && page.output.length > 200) {
+      base = {
+        ok: true,
+        output: `${base.output}\n\n--- Top result content (${link}) ---\n${page.output.slice(0, 3000)}`,
+      };
+    }
+  }
+  return base;
 }
 
 // ------- Browse a page via the Jina reader (CORS-friendly) -------
