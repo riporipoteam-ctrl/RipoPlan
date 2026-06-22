@@ -7,6 +7,7 @@ import { createClient } from "@/lib/supabase/client";
 import { useSession } from "@/lib/session";
 import { TopBar } from "@/components/TopBar";
 import { ProfileActions } from "@/components/ProfileActions";
+import { WorkspaceCard } from "@/components/WorkspaceCard";
 
 export default function SettingsPage() {
   const supabase = createClient();
@@ -42,6 +43,7 @@ export default function SettingsPage() {
     <>
       <TopBar title="Settings" subtitle={ctx?.workspace.name} back="/home" />
       <div className="flex-1 space-y-4 px-4 py-4">
+        <WorkspaceCard />
         <div className="grid grid-cols-3 gap-3">
           {[
             { label: "Agents", value: stats.agents },

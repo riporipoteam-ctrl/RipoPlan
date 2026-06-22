@@ -43,6 +43,19 @@ export default function HomePage() {
 
   const agentMap = new Map(agents.map((a) => [a.id, a]));
 
+  async function renameThread(t: Thread) {
+    const title = window.prompt("Rename thread", t.title || "")?.trim();
+    if (!title) return;
+    setThreads((list) => list.map((x) => (x.id === t.id ? { ...x, title } : x)));
+    await supabase.from("threads").update({ title }).eq("id", t.id);
+  }
+
+  async function deleteThread(t: Thread) {
+    if (!window.confirm("Delete this thread and its messages?")) return;
+    setThreads((list) => list.filter((x) => x.id !== t.id));
+    await supabase.from("threads").delete().eq("id", t.id);
+  }
+
   return (
     <>
       <TopBar title="Home" profileName={ctx?.profile.display_name} profileColor={ctx?.profile.avatar_color} notifCount={2} />
@@ -74,6 +87,8 @@ export default function HomePage() {
                   agent={t.primary_agent_id ? agentMap.get(t.primary_agent_id) : undefined}
                   userName={ctx?.profile.display_name}
                   userColor={ctx?.profile.avatar_color}
+                  onRename={renameThread}
+                  onDelete={deleteThread}
                 />
               ))}
             </div>
