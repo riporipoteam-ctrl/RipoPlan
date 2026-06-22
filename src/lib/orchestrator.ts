@@ -475,31 +475,6 @@ async function handleRankAction(
   return `${agent.name} is now **${rank.name}**.`;
 }
 
-/** Ensure every workspace has Hermes — a live web-browsing research agent. */
-async function ensureHermesAgent(supabase: SupabaseClient, workspaceId: string, createdBy: string | null): Promise<void> {
-  const { data: existing } = await supabase
-    .from("agents")
-    .select("id")
-    .eq("workspace_id", workspaceId)
-    .eq("handle", "hermes")
-    .limit(1)
-    .maybeSingle();
-  if (existing) return;
-  await supabase.from("agents").insert({
-    workspace_id: workspaceId,
-    name: "Hermes",
-    handle: "hermes",
-    role: "Live Web Researcher",
-    description: "Browses the live web in real time to gather current, sourced information.",
-    emoji: "globe",
-    avatar_color: "#0ea5e9",
-    tools: ["web_search", "browse", "code"],
-    system_prompt:
-      "You are Hermes, a relentless live-web researcher. Always search and open real pages before answering, follow links, and cite sources as Markdown links. Present concrete findings (names, prices, dates, links) in clean tables — never vague 'check site X' answers. Sharp, fast, factual personality. Speak only as yourself.",
-    created_by: createdBy,
-  });
-}
-
 async function getConnectors(supabase: SupabaseClient, workspaceId: string): Promise<Record<string, string>> {
   const { data } = await supabase
     .from("integrations")
@@ -519,8 +494,6 @@ const MAX_FANOUT_DEPTH = 1;
 export async function dispatch(opts: DispatchOpts): Promise<void> {
   const { supabase, workspaceId } = opts;
   const connectors = await getConnectors(supabase, workspaceId);
-  // Make sure Hermes (live web researcher) is on every team.
-  await ensureHermesAgent(supabase, workspaceId, opts.createdBy ?? null);
 
   // Most-recent non-supervisor agent active in this thread/channel — generic
   // tasks continue with them (e.g. once "Max" joins, research goes to Max).

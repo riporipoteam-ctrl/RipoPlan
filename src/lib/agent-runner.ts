@@ -1,4 +1,4 @@
-import { groq, GROQ_MODEL, VISION_MODEL, NVIDIA_MODEL, isReasoningModel, isVisionModel, isNvidiaModel, nvidiaModelId, type ChatMessage } from "./groq";
+import { groq, GROQ_MODEL, VISION_MODEL, NVIDIA_MODEL, BACKEND_CHAT_MODEL, isReasoningModel, isVisionModel, isNvidiaModel, nvidiaModelId, isOllamaModel, ollamaModelId, type ChatMessage } from "./groq";
 import { executeTool, schemasForTools, connectorSchemas, toolLabel, IMAGE_TOOL_SCHEMA, RANK_TOOL_SCHEMAS, generateImage } from "./tools";
 import { getBackendUrl } from "./backend";
 import { getUnfiltered } from "./prefs";
@@ -18,13 +18,13 @@ const VISION_FALLBACK = ["meta-llama/llama-4-scout-17b-16e-instruct"];
 
 function modelChain(preferred: string, hasImage: boolean, backendUrl: string): string[] {
   if (hasImage) return VISION_FALLBACK;
-  // When a Cloudflare NVIDIA backend is configured, use the top NVIDIA model as
-  // the main brain, then fall back to the Groq chain on any error/limit.
-  const head = backendUrl ? [NVIDIA_MODEL] : [];
+  // When the backend worker is configured, GLM (glm-5.2) is the main brain, with
+  // NVIDIA then the Groq chain as automatic fallback on any error/limit.
+  const head = backendUrl ? [BACKEND_CHAT_MODEL, NVIDIA_MODEL] : [];
   return [...head, preferred, ...FALLBACK_MODELS.filter((m) => m !== preferred)];
 }
 
-/** Call NVIDIA chat (OpenAI-compatible) through the Cloudflare worker. */
+/** Call a model (OpenAI-compatible) through the Cloudflare worker's chat endpoint. */
 async function callNvidia(backendUrl: string, base: any, model: string, tools?: any[]): Promise<any> {
   const { max_completion_tokens, ...rest } = base;
   const res = await fetch(`${backendUrl.replace(/\/+$/, "")}/v1/chat/completions`, {
@@ -67,6 +67,11 @@ async function complete(
       if (isNvidiaModel(m)) {
         if (!backendUrl) continue;
         return await callNvidia(backendUrl, base, nvidiaModelId(m), tools);
+      }
+      if (isOllamaModel(m)) {
+        // GLM via the worker (proxied to a hosted Ollama-compatible API).
+        if (!backendUrl) continue;
+        return await callNvidia(backendUrl, base, ollamaModelId(m), tools);
       }
       return await client.chat.completions.create({
         ...base,
