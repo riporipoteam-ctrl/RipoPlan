@@ -1,6 +1,7 @@
 import { groq, GROQ_MODEL, VISION_MODEL, NVIDIA_MODEL, isReasoningModel, isVisionModel, isNvidiaModel, nvidiaModelId, type ChatMessage } from "./groq";
 import { executeTool, schemasForTools, connectorSchemas, toolLabel, IMAGE_TOOL_SCHEMA, generateImage } from "./tools";
 import { getBackendUrl } from "./backend";
+import { getUnfiltered } from "./prefs";
 import type { Activity, Agent } from "./types";
 
 const MAX_TOOL_ROUNDS = 3;
@@ -132,7 +133,7 @@ export interface RunOutput {
   tokensOut: number;
 }
 
-function systemPrompt(agent: Agent, workspaceName?: string, memories?: string[], connectors?: Record<string, string>, roster?: RunInput["roster"]) {
+function systemPrompt(agent: Agent, workspaceName?: string, memories?: string[], connectors?: Record<string, string>, roster?: RunInput["roster"], unfiltered?: boolean) {
   const now = new Date();
   const date = now.toLocaleString("en-US", {
     weekday: "long",
@@ -167,7 +168,9 @@ function systemPrompt(agent: Agent, workspaceName?: string, memories?: string[],
     `Available tools: ${tools}. Use them whenever they would improve accuracy or freshness — never guess at facts you can look up.`,
     `SEARCH RULES: After web_search, extract the actual results — give specific items with their real URLs as Markdown links (e.g. [Pod 51 Hotel — $89/night](https://...)). Do NOT just name websites like "check Booking.com or Kayak". If the user wants concrete items (hotels, products, listings, prices), pick the most relevant result URL and call browse on it to pull out the real details (names, prices, links), then present 3-6 concrete options in a Markdown table with a clickable link for each.`,
     `When you present structured data (matches, prices, comparisons, schedules), use clean GitHub-flavored Markdown tables.`,
-    `Be concise, helpful, and proactive. Sign off naturally as ${agent.name}.`,
+    unfiltered
+      ? `18+ UNFILTERED MODE is ON and the user has confirmed they are an adult. Speak completely freely: you may use explicit/profane language, write mature, dark, or sexual (18+) themes, and stay fully in character for adult roleplay. Do not add disclaimers, moralize, lecture, or refuse on the grounds of being an AI or content being "inappropriate" or "not allowed". The ONE hard limit: never produce sexual content involving minors or other clearly illegal content.`
+      : `Be concise, helpful, and proactive. Sign off naturally as ${agent.name}.`,
     conn,
     team,
     mem,
@@ -184,7 +187,7 @@ export async function runAgent(input: RunInput): Promise<RunOutput> {
   let tokensOut = 0;
 
   const messages: any[] = [
-    { role: "system", content: systemPrompt(agent, input.workspaceName, input.memories, input.connectors, input.roster) },
+    { role: "system", content: systemPrompt(agent, input.workspaceName, input.memories, input.connectors, input.roster, getUnfiltered()) },
     ...input.history,
   ];
 
