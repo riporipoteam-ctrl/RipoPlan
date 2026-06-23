@@ -9,6 +9,14 @@ import { Composer } from "@/components/Composer";
 import { ThreadCard } from "@/components/ThreadCard";
 import type { Agent, Thread } from "@/lib/types";
 
+function greeting() {
+  const h = new Date().getHours();
+  if (h < 5) return "Working late";
+  if (h < 12) return "Good morning";
+  if (h < 18) return "Good afternoon";
+  return "Good evening";
+}
+
 export default function HomePage() {
   const supabase = createClient();
   const { ctx } = useSession();
@@ -69,9 +77,17 @@ export default function HomePage() {
     <>
       <TopBar title="Home" profileName={ctx?.profile.display_name} profileColor={ctx?.profile.avatar_color} />
       <div className="flex-1 space-y-5 px-4 py-4">
-        <div>
-          <p className="mb-2 px-1 text-sm text-[var(--muted)]">What should your agents do?</p>
-          <Composer mode="start" agents={agents} />
+        {/* Hero greeting */}
+        <div className="animate-fade-in-up overflow-hidden rounded-3xl border border-[var(--border)] bg-gradient-to-br from-[color-mix(in_srgb,var(--accent)_16%,var(--card))] via-[var(--card)] to-[color-mix(in_srgb,var(--accent-2)_12%,var(--card))] p-5">
+          <h1 className="text-2xl font-extrabold tracking-tight">
+            {greeting()}{ctx?.profile.display_name ? `, ${ctx.profile.display_name.split(" ")[0]}` : ""}
+          </h1>
+          <p className="mt-1 text-sm text-[var(--muted)]">
+            Your team of <span className="font-semibold text-[var(--text)]">{agents.length}</span> AI agents is ready. Describe a goal and they'll get to work.
+          </p>
+          <div className="mt-4">
+            <Composer mode="start" agents={agents} />
+          </div>
         </div>
         <div>
           <div className="mb-2 flex items-center justify-between px-1">
