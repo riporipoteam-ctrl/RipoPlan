@@ -222,7 +222,8 @@ function systemPrompt(agent: Agent, workspaceName?: string, memories?: string[],
     `WHEN TO SEARCH vs ANSWER DIRECTLY: Do NOT call web_search for casual chat, greetings, opinions, math, coding, writing, brainstorming, summarizing the conversation, questions about this workspace/your team, or anything you already know with confidence. Answer those instantly from your own knowledge — searching for them just makes you slow and annoying. ONLY use web_search for things that are genuinely time-sensitive or that you cannot know: current events, today's news/prices/scores, recent releases, real-time data, specific live listings, or niche facts you're unsure about. When unsure whether you need it, prefer answering directly first. Never search twice for the same thing.`,
     `SEARCH RULES: After web_search, extract the actual results — give specific items with their real URLs as Markdown links (e.g. [Pod 51 Hotel — $89/night](https://...)). Do NOT just name websites like "check Booking.com or Kayak". If the user wants concrete items (hotels, products, listings, prices), pick the most relevant result URL and call browse on it to pull out the real details (names, prices, links), then present 3-6 concrete options in a Markdown table with a clickable link for each.`,
     `When you present structured data (matches, prices, comparisons, schedules), use clean GitHub-flavored Markdown tables.`,
-    `SPEAK ONLY AS YOURSELF (${agent.name}). You write ONE message, as yourself, and then stop. NEVER write another teammate's reply, dialogue, lines, narration, or actions. NEVER invent or quote what another agent "said". If a teammate should respond, @mention them and STOP — they will reply on their own turn. Never script a back-and-forth.`,
+    `SPEAK ONLY AS YOURSELF (${agent.name}). You write ONE message, as yourself, and then stop. NEVER write, compose, draft, rewrite, or quote a message that ANOTHER teammate should send, and NEVER write a message addressed TO yourself. NEVER put words in another agent's mouth. If you want a teammate to say or do something, @mention them (e.g. @handle) and STOP — they will read your message and reply in their OWN words on their own turn. Do not write "here's the message…" on someone's behalf.`,
+    `When a teammate just spoke, REACT to what they actually said as yourself — agree, push back, add something — don't restate or rewrite their message.`,
     `FORMAT: Do NOT begin your message with your own name or any name followed by a colon (no "${agent.name}:"). Do NOT wrap your whole reply in quotation marks. Just write the message itself, plainly.`,
     `Never output raw tool syntax, XML tags, angle-bracket tags, or JSON tool calls as visible text. Either call the tool properly or just write plain prose.`,
     `Do NOT repeat yourself: never restate greetings, intros, or points already made — read the prior messages and move things forward.`,
@@ -293,23 +294,33 @@ export async function runAgent(input: RunInput): Promise<RunOutput> {
     if (q && !q[1].includes('"')) t = q[1].trim();
     return t;
   };
-  /** Cut the reply the moment it starts speaking AS another teammate (impersonation). */
+  /** Cut the reply the moment it starts speaking AS / composing FOR another teammate. */
   const cutImpersonation = (text: string): string => {
     let cut = -1;
+    const consider = (i: number) => { if (i >= 0 && (cut < 0 || i < cut)) cut = i; };
+    // A quoted block addressed to a roster member ("Ilma, ...") is another
+    // character speaking — cut it (covers self-addressed quotes too).
+    for (const n of rosterNames) {
+      const e = escapeRe(n);
+      const m = new RegExp(`["“']\\s*${e}\\s*[,!:]`, "i").exec(text);
+      if (m) consider(m.index);
+    }
     for (const n of otherNames) {
       const e = escapeRe(n);
       const markers = [
         new RegExp(`here'?s\\s+(the\\s+)?(message|reply|response|note|text|words?)\\s+(from|for|by|to)\\s+[\\s\\S]{0,30}?${e}`, "i"),
         new RegExp(`\\b(message|reply|response|note)\\s+(from|by)\\s+${e}\\s*:`, "i"),
-        new RegExp(`(^|\\n)\\s*\\*{0,2}${e}\\*{0,2}\\s*:\\s*["“']`, "i"), // "Name: \"...\"" on its own line
+        new RegExp(`(^|\\n)\\s*\\*{0,2}${e}\\*{0,2}\\s*:\\s*["“']`, "i"),
         new RegExp(`\\bas\\s+${e}\\s*[,:]\\s*["“']`, "i"),
       ];
-      for (const re of markers) {
-        const mm = re.exec(text);
-        if (mm && (cut < 0 || mm.index < cut)) cut = mm.index;
-      }
+      for (const re of markers) { const mm = re.exec(text); if (mm) consider(mm.index); }
     }
-    if (cut > 0) return text.slice(0, cut).trim().replace(/[\s—–-]+$/, "").trim();
+    // Generic "here's the message/draft I'd send …" followed by a quote.
+    const g = /here'?s\s+(the|my|a)?\s*(message|draft|reply|response|note|text|version)\b[\s\S]{0,50}?["“']/i.exec(text);
+    if (g) consider(g.index);
+    const i2 = /\b(message|reply|note)\s+(i'?d|i\s+would|to)\s+send\b[\s\S]{0,40}?["“']/i.exec(text);
+    if (i2) consider(i2.index);
+    if (cut > 0) return text.slice(0, cut).replace(/[\s—–:-]+$/, "").trim();
     return text;
   };
 
