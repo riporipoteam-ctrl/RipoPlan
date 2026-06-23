@@ -252,10 +252,60 @@ async function genImage(env: Env, input: any): Promise<Response> {
   return Response.json({ error: "Image generation failed." }, { status: 502, headers: cors(env) });
 }
 
+// ----------------------------- scheduled jobs -----------------------------
+async function sendGmail(token: string, to: string, subject: string, body: string) {
+  const raw = btoa(`To: ${to}\r\nSubject: ${subject}\r\nContent-Type: text/plain; charset=UTF-8\r\n\r\n${body}`)
+    .replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+  await fetch("https://gmail.googleapis.com/gmail/v1/users/me/messages/send", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ raw }),
+  }).catch(() => {});
+}
+
+/** Run any due jobs (run-anytime/scheduled), email on start if Gmail connected. */
+async function processJobs(env: Env, limit = 5): Promise<number> {
+  const db = sb(env);
+  if (!db.ok) return 0;
+  const now = Date.now();
+  const jobs = await db.get(`jobs?enabled=eq.true&order=created_at.asc&limit=25`);
+  let done = 0;
+  for (const j of jobs as any[]) {
+    if (done >= limit) break;
+    const last = j.last_run_at ? Date.parse(j.last_run_at) : 0;
+    let due = false;
+    if (j.schedule === "hourly") due = now - last >= 3600e3;
+    else if (j.schedule === "daily") due = now - last >= 86400e3;
+    else if (j.schedule === "weekly") due = now - last >= 7 * 86400e3;
+    else if (j.run_at) due = Date.parse(j.run_at) <= now && !j.last_run_at;
+    if (!due) continue;
+    try {
+      if (j.email_on_start) {
+        const integ = await db.get(`integrations?workspace_id=eq.${j.workspace_id}&provider=eq.gmail&status=eq.connected&select=secret`);
+        const tok = (integ as any[])?.[0]?.secret;
+        if (tok) {
+          const prof = await fetch("https://gmail.googleapis.com/gmail/v1/users/me/profile", { headers: { Authorization: `Bearer ${tok}` } }).then((r) => r.json()).catch(() => null);
+          const email = (prof as any)?.emailAddress;
+          if (email) await sendGmail(tok, email, `Job started: ${j.name}`, `Your AskAI job "${j.name}" has started.\n\nTask: ${j.prompt || ""}`);
+        }
+      }
+      const agentRows = j.agent_id ? await db.get(`agents?id=eq.${j.agent_id}`) : [];
+      const agent = (agentRows as any[])[0] || { name: "Agent", system_prompt: "You are a helpful AI agent." };
+      const reply = await runServerAgent(env, `${agent.system_prompt || `You are ${agent.name}.`}\nYou are running a scheduled job. Be thorough and finish the task. Answer in Markdown.`, [{ role: "user", content: j.prompt || j.name }]);
+      await db.insert("messages", { workspace_id: j.workspace_id, channel_id: j.channel_id, sender_type: "agent", agent_id: j.agent_id, content: reply, status: "complete" });
+      await db.patch(`jobs?id=eq.${j.id}`, { last_run_at: new Date().toISOString(), last_status: "done" });
+      done++;
+    } catch (e: any) {
+      await db.patch(`jobs?id=eq.${j.id}`, { last_status: `error: ${String(e.message).slice(0, 200)}` });
+    }
+  }
+  return done;
+}
+
 // ----------------------------- worker -----------------------------
 export default {
   async scheduled(_e: ScheduledEvent, env: Env, ctx: ExecutionContext): Promise<void> {
-    ctx.waitUntil(processTasks(env, 5));
+    ctx.waitUntil(Promise.all([processTasks(env, 5), processJobs(env, 5)]).then(() => undefined));
   },
 
   async fetch(req: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
@@ -286,7 +336,7 @@ export default {
     }
 
     if (url.pathname === "/tasks/run" && req.method === "POST") {
-      ctx.waitUntil(processTasks(env, 5));
+      ctx.waitUntil(Promise.all([processTasks(env, 5), processJobs(env, 5)]).then(() => undefined));
       return Response.json({ ok: true }, { headers: cors(env) });
     }
 

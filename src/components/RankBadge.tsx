@@ -12,7 +12,12 @@ export function RankBadge({ rank, size = "sm" }: { rank?: Rank | null; size?: "s
       style={{ background: `${color}1f`, color, border: `1px solid ${color}55` }}
       title={rank.name}
     >
-      <span>{emojiFor(rank.badge)}</span>
+      {rank.badge_url ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img src={rank.badge_url} alt="" className="h-3 w-3 rounded-full object-cover" />
+      ) : (
+        <span>{emojiFor(rank.badge)}</span>
+      )}
       <span className="max-w-[120px] truncate">{rank.name}</span>
     </span>
   );
