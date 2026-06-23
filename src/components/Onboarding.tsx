@@ -25,7 +25,7 @@ export function Onboarding() {
         <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-nebula-500 to-nebula-pink shadow-lg shadow-nebula-600/30">
           <Sparkles className="text-white" />
         </div>
-        <h2 className="text-xl font-bold">Welcome to AgentNexus</h2>
+        <h2 className="text-xl font-bold">Welcome to AskAI</h2>
         <p className="mt-2 text-sm text-[var(--muted)]">
           Build a team of autonomous AI agents that chat with you, use real tools, and get work done.
         </p>
@@ -43,7 +43,7 @@ export function Onboarding() {
           ))}
         </div>
         <p className="mt-4 text-xs text-[var(--muted)]">
-          Tip: tell AgentNexus a goal in the chat and it&apos;ll set up the right agents for you.
+          Tip: tell AskAI a goal in the chat and it&apos;ll set up the right agents for you.
         </p>
         <button
           onClick={finish}

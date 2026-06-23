@@ -2,7 +2,7 @@ import type { Metadata, Viewport } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "AgentNexus — autonomous AI agent teams",
+  title: "AskAI — autonomous AI agent teams",
   description:
     "A collaborative workspace where teams of autonomous AI agents work 24/7, use real tools, and get things done.",
 };

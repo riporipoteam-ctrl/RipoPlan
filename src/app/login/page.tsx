@@ -73,7 +73,7 @@ export default function LoginPage() {
           <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-nebula-500 to-nebula-pink text-2xl shadow-lg shadow-nebula-600/30">
             <Sparkles className="text-white" />
           </div>
-          <h1 className="text-2xl font-bold tracking-tight">AgentNexus</h1>
+          <h1 className="text-2xl font-bold tracking-tight">AskAI</h1>
           <p className="mt-1 text-sm text-ink-muted">
             Your team of autonomous AI agents, working 24/7.
           </p>

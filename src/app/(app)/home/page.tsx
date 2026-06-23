@@ -14,17 +14,26 @@ export default function HomePage() {
   const { ctx } = useSession();
   const [agents, setAgents] = useState<Agent[]>([]);
   const [threads, setThreads] = useState<Thread[]>([]);
+  const [participants, setParticipants] = useState<Record<string, string[]>>({});
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     if (!ctx) return;
     let active = true;
     async function load() {
-      const [{ data: a }, { data: t }] = await Promise.all([
+      const [{ data: a }, { data: t }, { data: msgs }] = await Promise.all([
         supabase.from("agents").select("*").eq("workspace_id", ctx!.workspace.id).neq("status", "archived").order("created_at"),
         supabase.from("threads").select("*").eq("workspace_id", ctx!.workspace.id).order("last_activity_at", { ascending: false }).limit(50),
+        supabase.from("messages").select("thread_id,agent_id").eq("workspace_id", ctx!.workspace.id).eq("sender_type", "agent").not("thread_id", "is", null).not("agent_id", "is", null).order("created_at", { ascending: false }).limit(600),
       ]);
       if (!active) return;
+      // Map each thread → ordered unique list of agent ids that spoke in it.
+      const byThread: Record<string, string[]> = {};
+      for (const m of (msgs as any[]) || []) {
+        const arr = (byThread[m.thread_id] ||= []);
+        if (!arr.includes(m.agent_id)) arr.push(m.agent_id);
+      }
+      setParticipants(byThread);
       setAgents((a as Agent[]) || []);
       setThreads((t as Thread[]) || []);
       setLoading(false);
@@ -58,7 +67,7 @@ export default function HomePage() {
 
   return (
     <>
-      <TopBar title="Home" profileName={ctx?.profile.display_name} profileColor={ctx?.profile.avatar_color} notifCount={2} />
+      <TopBar title="Home" profileName={ctx?.profile.display_name} profileColor={ctx?.profile.avatar_color} />
       <div className="flex-1 space-y-5 px-4 py-4">
         <div>
           <p className="mb-2 px-1 text-sm text-[var(--muted)]">What should your agents do?</p>
@@ -85,6 +94,7 @@ export default function HomePage() {
                   key={t.id}
                   thread={t}
                   agent={t.primary_agent_id ? agentMap.get(t.primary_agent_id) : undefined}
+                  participants={(participants[t.id] || []).map((id) => agentMap.get(id)).filter(Boolean) as Agent[]}
                   userName={ctx?.profile.display_name}
                   userColor={ctx?.profile.avatar_color}
                   onRename={renameThread}
