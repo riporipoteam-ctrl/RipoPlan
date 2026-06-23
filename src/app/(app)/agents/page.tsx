@@ -54,7 +54,7 @@ export default function AgentsPage() {
         title="Agents"
         profileName={ctx?.profile.display_name}
         profileColor={ctx?.profile.avatar_color}
-        notifCount={2}
+       
         leading={
           <Link href="/agents/new" className="-ml-1 mr-1 flex h-7 w-7 items-center justify-center rounded-md text-[var(--muted)] hover:bg-black/5">
             <Plus size={20} />

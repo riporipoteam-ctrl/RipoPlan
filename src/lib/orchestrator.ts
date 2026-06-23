@@ -75,7 +75,7 @@ function nameRefAll(content: string, agents: Agent[]): Agent[] {
   const out: Agent[] = [];
   for (const a of agents) {
     const aliases = [a.name.toLowerCase(), (a.handle || "").toLowerCase().replace(/-/g, " ")];
-    if (a.is_supervisor) aliases.push("nexus", "agent nexus", "agentnexus");
+    if (a.is_supervisor) aliases.push("askai", "ask ai", "nexus", "agent nexus", "agentnexus");
     const hit = aliases.some((al) => {
       if (al.length < 3) return false;
       return new RegExp(`(^|[^a-z0-9])${al.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}([^a-z0-9]|$)`).test(lc);
@@ -96,6 +96,12 @@ function isBuildAppIntent(content: string): boolean {
     /\b(website|web ?app|web ?page|landing page|web ?site|html (page|site)|mini ?app|portfolio site|online store|web tool)\b/.test(c) &&
     /\b(make|create|build|design|code|develop|need|want|generate|set ?up)\b/.test(c)
   );
+}
+
+/** User wants EVERY agent to respond (e.g. "get every agent to say hi"). */
+function isAllAgentsIntent(content: string): boolean {
+  const c = content.toLowerCase();
+  return /\b(every|all|each)\s+(agent|one|bot)\b|\beveryone\b|\ball of (you|them|the agents)\b|\bwhole team\b|\bentire team\b/.test(c);
 }
 
 // Every agent gets the full toolset by default — live web search, browser, and
@@ -146,7 +152,7 @@ function nameRef(content: string, agents: Agent[]): Agent | null {
   let best: { a: Agent; idx: number } | null = null;
   for (const a of agents) {
     const aliases = [a.name.toLowerCase(), (a.handle || "").toLowerCase().replace(/-/g, " ")];
-    if (a.is_supervisor) aliases.push("nexus", "agent nexus", "agentnexus");
+    if (a.is_supervisor) aliases.push("askai", "ask ai", "nexus", "agent nexus", "agentnexus");
     for (const al of aliases) {
       if (al.length < 3) continue;
       const re = new RegExp(`(^|[^a-z0-9])${al.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}([^a-z0-9]|$)`);
@@ -708,16 +714,23 @@ export async function dispatch(opts: DispatchOpts): Promise<void> {
 
   const opts2 = { ...opts, agents: agentsList };
 
-  // Build-a-website/app request → AgentNexus runs the full build flow: research →
-  // brief → dedicated channel → Coder builds → published to Mini Apps.
-  const explicitMention = resolveMentions(opts.userContent, agentsList).length > 0 || nameRefAll(opts.userContent, agentsList).length > 0;
-  if (isBuildAppIntent(opts.userContent) && hasGroqKey() && !explicitMention) {
+  // Build-a-website/app request → AskAI runs the full build flow: research →
+  // brief → dedicated channel → Coder builds → published to Mini Apps. Trigger
+  // it unless a specific NON-supervisor agent was named (then let them handle it).
+  const mentionedNonSup = [
+    ...resolveMentions(opts.userContent, agentsList),
+    ...nameRefAll(opts.userContent, agentsList),
+  ].filter((a) => !a.is_supervisor);
+  if (isBuildAppIntent(opts.userContent) && hasGroqKey() && mentionedNonSup.length === 0) {
     await runBuildFlow(opts2, connectors);
     return;
   }
 
-  // Responders = any newly-created agent + everyone selected (mentions/names/etc).
-  const selected = selectAgents(opts.userContent, agentsList, opts.primaryAgentId, preferSpecialistId);
+  // "Get every agent to ..." → every agent responds (each on its own).
+  const broadcast = isAllAgentsIntent(opts.userContent);
+  const selected = broadcast
+    ? agentsList.filter((a) => a.status !== "archived")
+    : selectAgents(opts.userContent, agentsList, opts.primaryAgentId, preferSpecialistId);
   const responders: Agent[] = [];
   const seen = new Set<string>();
   for (const a of [...newlyCreated, ...selected]) {
@@ -756,7 +769,9 @@ export async function dispatch(opts: DispatchOpts): Promise<void> {
     if (ph?.id) await supabase.from("messages").delete().eq("id", ph.id);
   }
 
-  const budget = { left: MAX_AGENT_TURNS };
+  // Broadcasts give each agent its own turn; normal chats use the smaller budget
+  // (which still allows agent-to-agent back-and-forth).
+  const budget = { left: broadcast ? responders.length + 1 : MAX_AGENT_TURNS };
   for (const agent of responders) {
     if (budget.left <= 0) break;
     await runOneAgent(opts2, connectors, agent, opts.userContent, budget);

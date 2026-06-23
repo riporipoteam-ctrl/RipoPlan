@@ -27,7 +27,7 @@ export function Sidebar({ className }: { className?: string }) {
         <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-nebula-500 to-nebula-pink shadow-md shadow-nebula-600/30">
           <Sparkles size={18} className="text-white" />
         </span>
-        <span className="text-lg font-bold tracking-tight">AgentNexus</span>
+        <span className="gradient-text text-lg font-bold tracking-tight">AskAI</span>
       </Link>
 
       <nav className="flex flex-1 flex-col gap-1">

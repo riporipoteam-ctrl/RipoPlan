@@ -10,6 +10,7 @@ import { relativeTime } from "@/lib/format";
 export function ThreadCard({
   thread,
   agent,
+  participants,
   userName,
   userColor,
   badge,
@@ -18,12 +19,15 @@ export function ThreadCard({
 }: {
   thread: Thread;
   agent?: Agent;
+  participants?: Agent[];
   userName?: string | null;
   userColor?: string | null;
   badge?: number;
   onRename?: (t: Thread) => void;
   onDelete?: (t: Thread) => void;
 }) {
+  // Avatars of everyone who took part: the user plus each agent that spoke.
+  const agentList = (participants && participants.length ? participants : agent ? [agent] : []).slice(0, 4);
   const router = useRouter();
   const [menu, setMenu] = useState(false);
   const hasMenu = onRename || onDelete;
@@ -36,7 +40,9 @@ export function ThreadCard({
       <div className="flex items-center gap-2">
         <div className="flex -space-x-1.5">
           <UserAvatar name={userName} color={userColor} size={20} />
-          {agent && <AgentAvatar emoji={agent.emoji} color={agent.avatar_color} imageUrl={agent.avatar_url} size={20} />}
+          {agentList.map((a) => (
+            <AgentAvatar key={a.id} emoji={a.emoji} color={a.avatar_color} imageUrl={a.avatar_url} size={20} />
+          ))}
         </div>
         <div className="min-w-0 flex-1">
           <h3 className="truncate text-sm font-semibold leading-tight">{thread.title || "Untitled thread"}</h3>
