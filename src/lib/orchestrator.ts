@@ -89,6 +89,26 @@ function isCreateIntent(content: string): boolean {
   return /\b(make|create|build|add|spin ?up|set ?up|get|bring|invite|need|want)\b/i.test(content);
 }
 
+/** Who should reply next: a single teammate addressed by @mention, or by name at
+ * the very start of the message ("Ilma, …" / "Hey Ilma!"). Null if none/ambiguous. */
+function handoffTarget(content: string, agents: Agent[], selfId: string): Agent | null {
+  const mentioned = resolveMentions(content, agents).filter((a) => a.id !== selfId);
+  if (mentioned.length === 1) return mentioned[0];
+  if (mentioned.length > 1) return null;
+  const lead = content.replace(/^[\s>*_#-]+/, "").slice(0, 48).toLowerCase();
+  let best: Agent | null = null;
+  for (const a of agents) {
+    if (a.id === selfId || a.is_supervisor) continue;
+    const name = a.name.toLowerCase();
+    if (name.length < 3) continue;
+    if (new RegExp(`^(hey |ok |okay |alright |yo |so )?${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*[,!:]`).test(lead)) {
+      if (best) return null; // more than one → ambiguous
+      best = a;
+    }
+  }
+  return best;
+}
+
 /** User wants a website / web app / landing page / tool built. */
 function isBuildAppIntent(content: string): boolean {
   const c = content.toLowerCase();
@@ -1021,13 +1041,13 @@ async function runOneAgent(
       });
     }
 
-    // Conversation: if this agent @mentioned exactly ONE teammate (a real
-    // hand-off, not a roster list), that teammate replies next — enabling a
-    // bounded back-and-forth (A→B→A…) until the turn budget runs out.
+    // Conversation hand-off: if this agent addressed exactly ONE teammate — by
+    // @mention OR by name at the start ("Ilma, listen up…") — that teammate
+    // reads this message and replies next, in their OWN words. Bounded by budget.
     if (budget.left > 0) {
-      const mentioned = resolveMentions(result.content, opts.agents).filter((m) => m.id !== agent.id);
-      if (mentioned.length === 1) {
-        await runOneAgent(opts, connectors, mentioned[0], `[${agent.name}]: ${result.content}`, budget);
+      const next = handoffTarget(result.content, opts.agents, agent.id);
+      if (next) {
+        await runOneAgent(opts, connectors, next, `[${agent.name}]: ${result.content}`, budget);
       }
     }
   } catch (e: any) {
