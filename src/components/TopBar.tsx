@@ -57,7 +57,7 @@ export function TopBar({
   }
 
   return (
-    <header className="sticky top-0 z-20 flex items-center gap-3 border-b border-[var(--border)] bg-[var(--bg)]/85 px-4 py-3 backdrop-blur-xl">
+    <header className="sticky top-0 z-20 flex items-center gap-3 border-b border-[var(--border)] bg-[var(--bg)]/95 px-4 py-3 backdrop-blur">
       {back ? (
         <Link href={back} className="-ml-1 rounded-lg p-1 text-[var(--text)] transition hover:bg-black/5 active:scale-90">
           <ArrowLeft size={22} />

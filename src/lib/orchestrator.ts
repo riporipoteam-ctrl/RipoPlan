@@ -230,22 +230,22 @@ async function buildHistory(
   return rows
     .filter((m) => m.status !== "thinking" && (m.content || (m.attachments && m.attachments.length)))
     .map<ChatMessage>((m) => {
-      const role = m.sender_type === "user" ? "user" : "assistant";
-      // Label every line with WHO said it so the agent can follow a multi-party
-      // conversation and reply to the right person — without impersonating them.
-      let text = (m.content as string) || "";
-      if (m.sender_type === "user") {
-        text = `[${userName || "User"}]: ${text}`;
-      } else if (m.sender_type === "agent" && m.agent_id !== selfAgentId) {
-        text = `[${nameOf.get(m.agent_id || "") || "Teammate"}]: ${text}`;
-      }
+      // Only THIS agent's own past messages are "assistant" (its own voice, plain).
+      // Everyone else — the human AND other agents — appears as an incoming "user"
+      // turn labelled with their name, so the model RESPONDS to them and never
+      // continues/echoes/impersonates them.
+      const isSelf = m.sender_type === "agent" && m.agent_id === selfAgentId;
+      const who = m.sender_type === "user" ? (userName || "User") : nameOf.get(m.agent_id || "") || "Teammate";
+      const body = (m.content as string) || "";
+      const role: "assistant" | "user" = isSelf ? "assistant" : "user";
+      const text = isSelf ? body : `${who}: ${body}`;
       // Multimodal: include image attachments so vision-capable models can see them.
       const images = (m.attachments || []).filter((a: any) => a?.type === "image" && a.url);
       if (role === "user" && images.length) {
         return {
           role,
           content: [
-            { type: "text", text: text || "(see attached image)" },
+            { type: "text", text: text || `${who}: (see attached image)` },
             ...images.map((img: any) => ({ type: "image_url", image_url: { url: img.url } })),
           ],
         } as any;
