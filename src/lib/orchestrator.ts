@@ -516,15 +516,27 @@ function buildTitle(content: string): string {
   return t.charAt(0).toUpperCase() + t.slice(1);
 }
 
+/** Pull a complete HTML document out of an agent's message (when it pasted code
+ * instead of calling build_app), so we can publish it to Mini Apps anyway. */
+function extractHtmlDoc(text: string): string | null {
+  if (!text) return null;
+  const fenced = text.match(/```(?:html)?\s*(<!doctype html[\s\S]*?<\/html>)\s*```/i) || text.match(/```(?:html)?\s*(<html[\s\S]*?<\/html>)\s*```/i);
+  if (fenced) return fenced[1];
+  const bare = text.match(/(<!doctype html[\s\S]*?<\/html>)/i) || text.match(/(<html[\s\S]*?<\/html>)/i);
+  return bare ? bare[1] : null;
+}
+
 /**
- * Full build flow: AgentNexus researches & writes a brief, opens a dedicated
- * channel, briefs the Coder there, and the Coder builds a polished site that's
- * published to Mini Apps — then AgentNexus reports back in the original chat.
+ * Full build flow: AskAI researches & writes a brief, opens a dedicated channel,
+ * briefs the Coder there, and the Coder builds a polished site that's published
+ * to Mini Apps — then AskAI reports back in the original chat.
  */
 async function runBuildFlow(opts: DispatchOpts, connectors: Record<string, string>): Promise<void> {
   const { supabase, workspaceId } = opts;
   const supervisor = opts.agents.find((a) => a.is_supervisor) || opts.agents[0];
-  const coder = await ensureCodeAgent(supabase, workspaceId, opts.createdBy ?? null);
+  // Use an explicitly-mentioned coding agent if there is one, else the default Coder.
+  const mentionedCoder = resolveMentions(opts.userContent, opts.agents).find((a) => !a.is_supervisor && /cod|build|dev|engineer|program/i.test(`${a.role || ""} ${a.name}`));
+  const coder = mentionedCoder || (await ensureCodeAgent(supabase, workspaceId, opts.createdBy ?? null));
   if (!supervisor || !coder) return;
 
   const agents = opts.agents.some((a) => a.id === coder.id) ? opts.agents : [...opts.agents, coder];
@@ -543,11 +555,13 @@ async function runBuildFlow(opts: DispatchOpts, connectors: Record<string, strin
       status: "complete",
     });
 
-  // 1) AgentNexus thinks/researches and writes a detailed build brief (silently).
+  // 1) AskAI thinks/researches and writes a detailed build brief (silently).
+  // Restrict tools to research only so it can't spin up stray agents here.
+  const briefAgent: Agent = { ...supervisor, tools: ["web_search", "browse"] };
   let brief = "";
   try {
     const briefRes = await runAgent({
-      agent: supervisor,
+      agent: briefAgent,
       history: [
         {
           role: "user",
@@ -608,13 +622,24 @@ async function runBuildFlow(opts: DispatchOpts, connectors: Record<string, strin
 
   let built: { id: string; name: string } | null = null;
   try {
+    // Override the coder's persona so it ONLY publishes via build_app (never pastes code).
+    const coderForBuild: Agent = {
+      ...coder,
+      tools: Array.from(new Set([...(coder.tools || []), "build_app", "web_search", "browse", "code"])),
+      system_prompt:
+        `You are ${coder.name}, an elite senior web engineer. You build complete, polished, single-file websites. ` +
+        `ABSOLUTE RULE: you MUST deliver by calling the build_app tool with the entire HTML document in the "html" argument. ` +
+        `NEVER paste HTML, CSS or JS into the chat — your visible message must be only a short sentence like "Done — published to Mini Apps ✅". ` +
+        `Inline ALL CSS and JS into ONE <!doctype html> file. Use the provided https://source.unsplash.com image URLs. ` +
+        `Make it genuinely one of the best sites you've built: responsive, modern, accessible, multiple real sections, smooth scroll-in animations, hover effects, polished typography and spacing.`,
+    };
     const res = await runAgent({
-      agent: coder,
+      agent: coderForBuild,
       history: [
         {
           role: "user",
           content:
-            `Build this now based on the brief below. Think step by step about structure and polish FIRST, then write ONE complete, self-contained HTML document (all CSS + JS inline) and publish it with the build_app tool — do NOT paste code in chat. Make it genuinely one of the best sites you've ever built: responsive, modern, accessible, with real sections, the suggested images (use the https://source.unsplash.com URLs), smooth scroll animations and hover effects, and polished typography & spacing. No placeholder lorem-ipsum where real copy was given.\n\nBRIEF:\n${brief}`,
+            `Build this now from the brief below. Plan structure & polish first, then call build_app ONCE with the full self-contained HTML document. Do NOT paste any code in chat. Use the suggested images. No lorem-ipsum where real copy was given.\n\nBRIEF:\n${brief}`,
         },
       ],
       workspaceName: opts.workspaceName,
@@ -628,9 +653,16 @@ async function runBuildFlow(opts: DispatchOpts, connectors: Record<string, strin
         buildAppRecord(supabase, { workspaceId, createdBy: opts.createdBy ?? null, agentId: coder.id, channelId, spec }),
     });
     built = res.builtApps[0] || null;
+    // Safety net: if the coder pasted HTML instead of calling build_app, publish it ourselves.
+    if (!built) {
+      const html = extractHtmlDoc(res.content);
+      if (html) built = await buildAppRecord(supabase, { workspaceId, createdBy: opts.createdBy ?? null, agentId: coder.id, channelId, spec: { name: title, html } });
+    }
     if (mid) {
-      const attachments = res.builtApps.map((a) => ({ type: "mini_app", id: a.id, name: a.name }));
-      await supabase.from("messages").update({ content: res.content || "Done — published to Mini Apps. ✅", activities: res.activities, attachments, status: "complete" }).eq("id", mid);
+      // Never show raw code in chat — replace with a clean confirmation + the app card.
+      const cleanMsg = built ? `Done — I built **${built.name}** and published it to Mini Apps ✅` : (res.content || "Working on it…");
+      const attachments = built ? [{ type: "mini_app", id: built.id, name: built.name }] : [];
+      await supabase.from("messages").update({ content: cleanMsg, activities: res.activities, attachments, status: "complete" }).eq("id", mid);
     }
   } catch (e: any) {
     if (mid) await supabase.from("messages").update({ content: `⚠️ Hit a snag building it: ${e.message}`, status: "error" }).eq("id", mid);
@@ -714,14 +746,11 @@ export async function dispatch(opts: DispatchOpts): Promise<void> {
 
   const opts2 = { ...opts, agents: agentsList };
 
-  // Build-a-website/app request → AskAI runs the full build flow: research →
-  // brief → dedicated channel → Coder builds → published to Mini Apps. Trigger
-  // it unless a specific NON-supervisor agent was named (then let them handle it).
-  const mentionedNonSup = [
-    ...resolveMentions(opts.userContent, agentsList),
-    ...nameRefAll(opts.userContent, agentsList),
-  ].filter((a) => !a.is_supervisor);
-  if (isBuildAppIntent(opts.userContent) && hasGroqKey() && mentionedNonSup.length === 0) {
+  // Build-a-website/app request → ALWAYS run the full build flow: AskAI researches
+  // → writes a brief → opens a dedicated channel → briefs the Coder there → Coder
+  // publishes to Mini Apps → AskAI reports back. (Mentioning "code agent" or AskAI
+  // no longer short-circuits this into pasting code in the chat.)
+  if (isBuildAppIntent(opts.userContent) && hasGroqKey()) {
     await runBuildFlow(opts2, connectors);
     return;
   }
