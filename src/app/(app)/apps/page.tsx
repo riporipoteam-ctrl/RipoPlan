@@ -2,6 +2,7 @@
 
 import { Globe, Search, Code2, ImageIcon, Users, Brain, Github, Zap } from "lucide-react";
 import { TopBar } from "@/components/TopBar";
+import { GmailConnect } from "@/components/GmailConnect";
 import { useSession } from "@/lib/session";
 
 // Capabilities that work right now, with no keys and no sign-in. These are the
@@ -40,6 +41,11 @@ export default function AppsPage() {
             </span>
           </div>
         ))}
+
+        <div className="pt-2">
+          <h2 className="mb-2 px-1 text-sm font-semibold">Account connections</h2>
+          <GmailConnect />
+        </div>
       </div>
     </>
   );

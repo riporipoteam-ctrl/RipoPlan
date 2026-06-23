@@ -1,3 +1,5 @@
+import { getBackendUrl } from "./backend";
+
 export interface ToolResult {
   ok: boolean;
   output: string;
@@ -109,6 +111,58 @@ export function schemasForTools(tools: string[]) {
     .map(([, v]) => v);
 }
 
+// ---- Rank management tools (exposed only to the supervisor / AgentNexus) ----
+export const RANK_TOOL_SCHEMAS = [
+  {
+    type: "function",
+    function: {
+      name: "create_rank",
+      description: "Create a new rank (a titled badge) in this workspace. Use when the user asks to make a rank/role/title for agents.",
+      parameters: {
+        type: "object",
+        properties: {
+          name: { type: "string", description: "Rank name, e.g. 'Senior Engineer'" },
+          badge: { type: "string", description: "One badge keyword: crown, star, shield, medal, gem, fire, trophy, flag, diamond, bolt, rocket, brain" },
+          color: { type: "string", description: "Hex color like #a855f7 (optional)" },
+        },
+        required: ["name"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "assign_rank",
+      description: "Assign (or remove) a rank to an agent by name. Use when the user asks to give an agent a rank/title/badge.",
+      parameters: {
+        type: "object",
+        properties: {
+          agent: { type: "string", description: "The agent's name or handle" },
+          rank: { type: "string", description: "The rank name to assign, or empty string to remove the agent's rank" },
+        },
+        required: ["agent", "rank"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "edit_rank",
+      description: "Rename a rank or change its badge/color. Use when the user asks to edit/recolor/rename a rank.",
+      parameters: {
+        type: "object",
+        properties: {
+          rank: { type: "string", description: "The current rank name to edit" },
+          name: { type: "string", description: "New name (optional)" },
+          badge: { type: "string", description: "New badge keyword (optional)" },
+          color: { type: "string", description: "New hex color (optional)" },
+        },
+        required: ["rank"],
+      },
+    },
+  },
+];
+
 // ---- Connector tools (enabled when the matching integration is connected) ----
 export const CONNECTOR_TOOL_SCHEMAS: Record<string, any> = {
   github: {
@@ -142,7 +196,45 @@ export const CONNECTOR_TOOL_SCHEMAS: Record<string, any> = {
       },
     },
   },
+  gmail: {
+    type: "function",
+    function: {
+      name: "gmail",
+      description:
+        "Read the connected Gmail inbox. action 'list' (recent emails, optional search query 'q'), or 'read' a specific message by 'id'.",
+      parameters: {
+        type: "object",
+        properties: {
+          action: { type: "string", enum: ["list", "read"] },
+          q: { type: "string", description: "Gmail search query, e.g. 'from:boss is:unread'" },
+          id: { type: "string", description: "Message id to read" },
+        },
+        required: ["action"],
+      },
+    },
+  },
 };
+
+async function gmailTool(args: any, token: string): Promise<ToolResult> {
+  const base = getBackendUrl();
+  if (!base) return { ok: false, output: "Gmail needs the backend worker to be configured." };
+  try {
+    const res = await fetch(`${base}/gmail`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ token, action: args.action || "list", q: args.q, id: args.id }),
+    });
+    const d = await res.json();
+    if (args.action === "read" && d.message) {
+      const headers = (d.message.payload?.headers || []).reduce((a: any, h: any) => ((a[h.name] = h.value), a), {});
+      return { ok: true, output: `From: ${headers.From}\nSubject: ${headers.Subject}\nDate: ${headers.Date}\n\n${d.message.snippet || ""}` };
+    }
+    const items = (d.items || []).map((m: any) => `- **${m.subject}** — ${m.from} (${m.date})\n  ${m.snippet}  [id: ${m.id}]`);
+    return { ok: items.length > 0, output: items.join("\n") || "No emails found." };
+  } catch (e: any) {
+    return { ok: false, output: `Gmail request failed: ${e.message}` };
+  }
+}
 
 /** Tool schemas for providers the workspace has connected. */
 export function connectorSchemas(connectors: Record<string, string>) {
@@ -308,7 +400,26 @@ async function proxyDdgSearch(query: string): Promise<ToolResult> {
   }
 }
 
+/** When the backend worker is configured, search/browse server-side (no CORS,
+ * more reliable). Falls back to the in-browser methods on any failure. */
+async function backendBrowse(opts: { url?: string; query?: string }): Promise<ToolResult | null> {
+  const base = getBackendUrl();
+  if (!base) return null;
+  try {
+    const res = await fetch(`${base}/browse`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(opts),
+    });
+    const d = await res.json();
+    if (d?.content && String(d.content).length > 80) return { ok: true, output: String(d.content).slice(0, 6000) };
+  } catch {}
+  return null;
+}
+
 export async function webSearch(query: string): Promise<ToolResult> {
+  const viaBackend = await backendBrowse({ query });
+  if (viaBackend) return viaBackend;
   let base = await jinaSearch(query);
   if (!base.ok || base.output.length < 120) {
     const ddg = await proxyDdgSearch(query);
@@ -333,6 +444,8 @@ export async function webSearch(query: string): Promise<ToolResult> {
 
 // ------- Browse a page via the Jina reader (CORS-friendly) -------
 export async function browse(url: string): Promise<ToolResult> {
+  const viaBackend = await backendBrowse({ url });
+  if (viaBackend) return viaBackend;
   const target = url.startsWith("http") ? url : `https://${url}`;
   try {
     const res = await fetch(`https://r.jina.ai/${target}`);
@@ -405,6 +518,10 @@ export async function executeTool(
       return connectors.slack
         ? slackTool(args, connectors.slack)
         : { ok: false, output: "Slack is not connected." };
+    case "gmail":
+      return connectors.gmail
+        ? gmailTool(args, connectors.gmail)
+        : { ok: false, output: "Gmail is not connected." };
     default:
       return { ok: false, output: `Unknown tool: ${name}` };
   }
@@ -428,6 +545,12 @@ export function toolLabel(name: string, args: any): string {
       return `Delegating to @${args.handle}`;
     case "build_app":
       return `Building app: ${args.name || "web app"}`;
+    case "create_rank":
+      return `Creating rank: ${args.name || "rank"}`;
+    case "assign_rank":
+      return `Assigning ${args.agent} → ${args.rank || "no rank"}`;
+    case "edit_rank":
+      return `Editing rank: ${args.rank}`;
     case "generate_image":
       return `Generating image`;
     default:

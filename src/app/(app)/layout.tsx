@@ -39,8 +39,9 @@ function Shell({ children }: { children: React.ReactNode }) {
   }
 
   // Chat pages have their own bottom composer, so the mobile tab bar is hidden
-  // there (a back button handles navigation).
-  const hideNav = pathname.startsWith("/thread") || pathname.startsWith("/channel");
+  // there (a back button handles navigation). Match the singular chat routes
+  // exactly — NOT the "/channels" list page.
+  const hideNav = pathname === "/thread" || pathname === "/channel";
 
   return (
     <div className="mx-auto flex min-h-dvh w-full max-w-6xl bg-[var(--bg)]">

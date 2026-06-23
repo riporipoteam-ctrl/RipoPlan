@@ -1,13 +1,35 @@
 # AgentNexus backend (Cloudflare Worker)
 
-The app on GitHub Pages is fully static, so it can't hide API keys or do OAuth
-token exchange. This optional Worker adds exactly that:
+The app on GitHub Pages is fully static, so it can't hide API keys, do OAuth, or
+run anything after you close the tab. This Worker adds exactly that:
 
-- **`POST /llm`** — proxy to **NVIDIA** (`build.nvidia.com`) and optionally **Groq**,
-  keeping the keys server-side. This is what lets the app use the free NVIDIA models.
-- **`GET /oauth/:provider/start` + `/callback`** — real **Sign in with Google**
-  for Gmail / Calendar / Drive / Sheets (no key pasting). The callback posts the
-  token back to the app, which stores it as a connected integration.
+- **cron + `POST /tasks/run`** — runs queued `background_tasks` server-side every
+  minute, so **agents keep working after you close the app**. Needs
+  `SUPABASE_SERVICE_KEY` + `NVIDIA_API_KEY`.
+- **`POST /browse`** — server-side fetch/search (no CORS): the agents' "live browser".
+- **`POST /gmail`** — proxy the Gmail API with the user's OAuth token.
+- **`POST /llm`** — proxy **NVIDIA** / **Groq** with the key server-side.
+- **`/oauth/:provider/start` + `/callback`** — real **Sign in with Google** for Gmail.
+
+## Required secrets
+Add in repo **Settings → Secrets and variables → Actions** (the deploy workflow
+pushes them to the Worker):
+
+The agent brain is **GLM-5.2 on Workers AI** (`@cf/zai-org/glm-5.2`) — it runs on
+Cloudflare's own GPUs via the `AI` binding (no external host, no Ollama, no model
+key; uses your account's Workers AI allowance).
+
+| Secret | Needed for |
+| --- | --- |
+| `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID` | deploying the Worker |
+| `SUPABASE_SERVICE_KEY` | cron reading history & posting replies (Supabase → Settings → API → **service_role** key) |
+| `NVIDIA_API_KEY` | image generation (FLUX) |
+| `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | Gmail sign-in |
+| `GROQ_API_KEY` | (optional) proxy Groq |
+
+Then set the **`BACKEND_URL`** repo *Variable* to the deployed
+`https://agentnexus-backend.<you>.workers.dev`, and set the Google OAuth
+**Authorized redirect URI** to `<worker-url>/oauth/gmail/callback`.
 
 ## Easiest: auto-deploy via GitHub Actions (recommended)
 There's a workflow at `.github/workflows/worker.yml` that deploys this Worker to

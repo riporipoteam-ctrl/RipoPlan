@@ -1,14 +1,31 @@
 name = "agentnexus-backend"
 main = "src/index.ts"
 compatibility_date = "2024-11-01"
+compatibility_flags = ["nodejs_compat"]
 
-# Set these with: wrangler secret put <NAME>
-#   GROQ_API_KEY            - (optional) proxy Groq so the key isn't in the client bundle
-#   NVIDIA_API_KEY          - from https://build.nvidia.com  (enables NVIDIA models)
-#   GOOGLE_CLIENT_ID        - Google OAuth client (Web application)
-#   GOOGLE_CLIENT_SECRET    - Google OAuth client secret
+# GLM-5.2 runs on Cloudflare's own GPUs via Workers AI — no external host, no
+# Ollama, no extra API key. Uses your account's Workers AI allowance.
+[ai]
+binding = "AI"
+
+# Run the background task queue every minute so agents keep working with the app closed.
+[triggers]
+crons = ["* * * * *"]
+
+# Secrets (set via the deploy workflow or `wrangler secret put <NAME>`):
+#   NVIDIA_API_KEY          - https://build.nvidia.com (image generation)
+#   SUPABASE_SERVICE_KEY    - Supabase service role key (cron reads/writes, bypassing RLS)
+#   GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET - Gmail sign-in
+#   GROQ_API_KEY            - (optional)
 #
 # Vars below are safe to commit:
 [vars]
-ALLOWED_ORIGIN = "https://riporipoteam-ctrl.github.io"
+ALLOWED_ORIGIN = "*"
 APP_REDIRECT = "https://riporipoteam-ctrl.github.io/RipoPlan/oauth/"
+SUPABASE_URL = "https://xbwhvkzgbnyqsjplbyox.supabase.co"
+AGENT_MODEL = "@cf/zai-org/glm-5.2"
+
+# Real headless-Chrome live browser for every agent (optional, Workers Paid).
+# Uncomment, run `npm i @cloudflare/puppeteer`, swap liveBrowse(), then redeploy.
+# [browser]
+# binding = "BROWSER"

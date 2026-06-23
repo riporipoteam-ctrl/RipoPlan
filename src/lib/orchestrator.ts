@@ -3,6 +3,8 @@ import { runAgent } from "./agent-runner";
 import type { Agent, Message } from "./types";
 import { hasGroqKey, type ChatMessage } from "./groq";
 import { AGENT_COLORS } from "./emoji";
+import { hasBackend } from "./backend";
+import { isBackgroundIntent, enqueueBackgroundTask } from "./background";
 
 /** Agents explicitly @mentioned (by handle or name) in the text. */
 export function resolveMentions(content: string, agents: Agent[]): Agent[] {
@@ -45,6 +47,8 @@ function isSupervisorIntent(content: string): boolean {
 const NAME_STOP = new Set([
   "agent", "an", "a", "the", "new", "another", "that", "this", "it", "one", "bot",
   "ai", "assistant", "please", "can", "you", "me", "my", "us", "here", "in", "to", "some",
+  "her", "him", "them", "they", "he", "she", "his", "hers", "their", "everyone", "someone",
+  "anybody", "somebody", "out", "back", "up", "over", "all", "guys", "everybody",
 ]);
 
 /** Parse the agent name from a create/add request, if any. */
@@ -187,21 +191,28 @@ export function selectAgents(
 async function buildHistory(
   supabase: SupabaseClient,
   opts: { threadId?: string | null; channelId?: string | null },
-  selfAgentId: string
+  selfAgentId: string,
+  agents: Agent[],
+  userName?: string
 ): Promise<ChatMessage[]> {
   let q = supabase.from("messages").select("*").order("created_at", { ascending: true }).limit(30);
   if (opts.threadId) q = q.eq("thread_id", opts.threadId);
   else if (opts.channelId) q = q.eq("channel_id", opts.channelId).is("thread_id", null);
   const { data } = await q;
   const rows = (data as Message[]) || [];
+  const nameOf = new Map(agents.map((a) => [a.id, a.name]));
   return rows
     .filter((m) => m.status !== "thinking" && (m.content || (m.attachments && m.attachments.length)))
     .map<ChatMessage>((m) => {
       const role = m.sender_type === "user" ? "user" : "assistant";
-      const text =
-        m.sender_type === "agent" && m.agent_id !== selfAgentId
-          ? `[from another agent] ${m.content || ""}`
-          : (m.content as string) || "";
+      // Label every line with WHO said it so the agent can follow a multi-party
+      // conversation and reply to the right person — without impersonating them.
+      let text = (m.content as string) || "";
+      if (m.sender_type === "user") {
+        text = `[${userName || "User"}]: ${text}`;
+      } else if (m.sender_type === "agent" && m.agent_id !== selfAgentId) {
+        text = `[${nameOf.get(m.agent_id || "") || "Teammate"}]: ${text}`;
+      }
       // Multimodal: include image attachments so vision-capable models can see them.
       const images = (m.attachments || []).filter((a: any) => a?.type === "image" && a.url);
       if (role === "user" && images.length) {
@@ -263,6 +274,7 @@ export interface DispatchOpts {
   agents: Agent[];
   primaryAgentId?: string | null;
   createdBy?: string | null;
+  userName?: string | null;
 }
 
 const SPEC_TOOLS = ["web_search", "browse", "code"];
@@ -423,6 +435,56 @@ async function ensureCodeAgent(supabase: SupabaseClient, workspaceId: string, cr
   return (data as Agent) || null;
 }
 
+const RANK_BADGE_WORDS = ["crown","star","shield","medal","gem","fire","trophy","flag","diamond","bolt","rocket","brain"];
+
+/** AgentNexus manages ranks from chat: create / assign / edit. */
+async function handleRankAction(
+  supabase: SupabaseClient,
+  o: { workspaceId: string; agents: Agent[] },
+  action: string,
+  args: any
+): Promise<string> {
+  const ws = o.workspaceId;
+  const badge = RANK_BADGE_WORDS.includes(String(args.badge || "").toLowerCase()) ? String(args.badge).toLowerCase() : undefined;
+  const findRank = async (name: string) => {
+    const { data } = await supabase.from("ranks").select("*").eq("workspace_id", ws);
+    return ((data as any[]) || []).find((r) => r.name.toLowerCase() === String(name || "").toLowerCase()) || null;
+  };
+  if (action === "create_rank") {
+    const { data, error } = await supabase
+      .from("ranks")
+      .insert({ workspace_id: ws, name: args.name || "New Rank", badge: badge || "star", color: args.color || "#a855f7", position: 100 })
+      .select("name,badge")
+      .single();
+    if (error || !data) return "";
+    return `Created the **${data.name}** rank.`;
+  }
+  if (action === "edit_rank") {
+    const rank = await findRank(args.rank);
+    if (!rank) return `I couldn't find a rank called "${args.rank}".`;
+    const patch: any = {};
+    if (args.name) patch.name = args.name;
+    if (badge) patch.badge = badge;
+    if (args.color) patch.color = args.color;
+    if (!Object.keys(patch).length) return `Nothing to change on "${rank.name}".`;
+    await supabase.from("ranks").update(patch).eq("id", rank.id);
+    return `Updated the **${patch.name || rank.name}** rank.`;
+  }
+  // assign_rank
+  const agent = o.agents.find(
+    (a) => a.name.toLowerCase() === String(args.agent || "").toLowerCase() || (a.handle || "").toLowerCase() === String(args.agent || "").toLowerCase()
+  );
+  if (!agent) return `I couldn't find an agent called "${args.agent}".`;
+  if (!String(args.rank || "").trim()) {
+    await supabase.from("agents").update({ rank_id: null }).eq("id", agent.id);
+    return `Removed ${agent.name}'s rank.`;
+  }
+  const rank = await findRank(args.rank);
+  if (!rank) return `I couldn't find a rank called "${args.rank}". Create it first.`;
+  await supabase.from("agents").update({ rank_id: rank.id }).eq("id", agent.id);
+  return `${agent.name} is now **${rank.name}**.`;
+}
+
 async function getConnectors(supabase: SupabaseClient, workspaceId: string): Promise<Record<string, string>> {
   const { data } = await supabase
     .from("integrations")
@@ -436,7 +498,154 @@ async function getConnectors(supabase: SupabaseClient, workspaceId: string): Pro
   return out;
 }
 
-const MAX_FANOUT_DEPTH = 1;
+/** Derive a short channel/task title from the user's build request. */
+function buildTitle(content: string): string {
+  let t = content
+    .replace(/^.*?\b(build|make|create|design|code|develop|generate|set ?up)\b\s+(me\s+)?(a|an|the)?\s*/i, "")
+    .replace(/\b(website|web ?app|web ?site|web ?page|landing page|app|site|page)\b.*$/i, "$1")
+    .replace(/[^\w\s-]/g, "")
+    .trim();
+  if (!t) t = "New Website";
+  t = t.split(/\s+/).slice(0, 5).join(" ");
+  return t.charAt(0).toUpperCase() + t.slice(1);
+}
+
+/**
+ * Full build flow: AgentNexus researches & writes a brief, opens a dedicated
+ * channel, briefs the Coder there, and the Coder builds a polished site that's
+ * published to Mini Apps — then AgentNexus reports back in the original chat.
+ */
+async function runBuildFlow(opts: DispatchOpts, connectors: Record<string, string>): Promise<void> {
+  const { supabase, workspaceId } = opts;
+  const supervisor = opts.agents.find((a) => a.is_supervisor) || opts.agents[0];
+  const coder = await ensureCodeAgent(supabase, workspaceId, opts.createdBy ?? null);
+  if (!supervisor || !coder) return;
+
+  const agents = opts.agents.some((a) => a.id === coder.id) ? opts.agents : [...opts.agents, coder];
+  const roster = agents.map((a) => ({ name: a.name, role: a.role, handle: a.handle, isSupervisor: a.is_supervisor }));
+  const title = buildTitle(opts.userContent);
+
+  const postHere = (agentId: string, content: string, attachments: any[] = []) =>
+    supabase.from("messages").insert({
+      workspace_id: workspaceId,
+      thread_id: opts.threadId ?? null,
+      channel_id: opts.channelId ?? null,
+      sender_type: "agent",
+      agent_id: agentId,
+      content,
+      attachments,
+      status: "complete",
+    });
+
+  // 1) AgentNexus thinks/researches and writes a detailed build brief (silently).
+  let brief = "";
+  try {
+    const briefRes = await runAgent({
+      agent: supervisor,
+      history: [
+        {
+          role: "user",
+          content:
+            `The user asked: "${opts.userContent}". You are the project lead. Research anything useful (search the web if it helps), then write a DETAILED build brief for our coding agent to build a top-tier single-page website/web app. Include: goal & audience; the sections/pages in order; concrete copy/text for each section; a colour palette (hex) and font pairing; layout & visual style; key interactions/animations; and 4-8 specific royalty-free image URLs using the form https://source.unsplash.com/1600x900/?KEYWORD (pick good keywords). Be concrete and opinionated. Output ONLY the brief in Markdown.`,
+        },
+      ],
+      workspaceName: opts.workspaceName,
+      roster,
+      connectors,
+      maxTokens: 2200,
+    });
+    brief = briefRes.content;
+  } catch {
+    brief = `Build a polished, modern single-page site for: "${opts.userContent}". Clean responsive layout, strong hero, multiple sections, royalty-free imagery from https://source.unsplash.com, subtle animations.`;
+  }
+
+  // 2) Open a dedicated channel for the task.
+  const { data: ch } = await supabase
+    .from("channels")
+    .insert({ workspace_id: workspaceId, name: title, description: `Build task — ${opts.userContent.slice(0, 120)}`, created_by: opts.createdBy ?? null })
+    .select("id,name")
+    .single();
+  const channelId = (ch as any)?.id as string;
+  const channelName = (ch as any)?.name as string;
+
+  // 3) Tell the user (in the original chat) what's happening.
+  await postHere(
+    supervisor.id,
+    `On it! 🛠️ I dug into this and put together a full brief, then opened a dedicated channel **#${channelName || title}** and handed it to **${coder.name}** to build. I'll drop the finished site here the moment it's live — you can also follow along in the channel.`
+  );
+
+  // 4) Post the brief in the new channel and @mention the coder.
+  if (channelId) {
+    await supabase.from("messages").insert({
+      workspace_id: workspaceId,
+      channel_id: channelId,
+      sender_type: "agent",
+      agent_id: supervisor.id,
+      content: `Hey @${coder.handle} — new build for us. Here's the full brief:\n\n${brief}\n\nMake it genuinely excellent. Ask me here if anything's unclear, otherwise ship it and publish to Mini Apps.`,
+      status: "complete",
+    });
+  }
+
+  // 5) Coder builds it (more room to think + write a big, high-quality file).
+  const placeholder = channelId
+    ? (await supabase.from("messages").insert({
+        workspace_id: workspaceId,
+        channel_id: channelId,
+        sender_type: "agent",
+        agent_id: coder.id,
+        content: "",
+        status: "thinking",
+        activities: [{ label: "Designing & coding the site", status: "running" }],
+      }).select("id").single()).data
+    : null;
+  const mid = (placeholder as any)?.id as string | undefined;
+
+  let built: { id: string; name: string } | null = null;
+  try {
+    const res = await runAgent({
+      agent: coder,
+      history: [
+        {
+          role: "user",
+          content:
+            `Build this now based on the brief below. Think step by step about structure and polish FIRST, then write ONE complete, self-contained HTML document (all CSS + JS inline) and publish it with the build_app tool — do NOT paste code in chat. Make it genuinely one of the best sites you've ever built: responsive, modern, accessible, with real sections, the suggested images (use the https://source.unsplash.com URLs), smooth scroll animations and hover effects, and polished typography & spacing. No placeholder lorem-ipsum where real copy was given.\n\nBRIEF:\n${brief}`,
+        },
+      ],
+      workspaceName: opts.workspaceName,
+      roster,
+      connectors,
+      maxTokens: 8000,
+      onActivity: async (activities) => {
+        if (mid) await supabase.from("messages").update({ activities }).eq("id", mid);
+      },
+      onBuildApp: (spec) =>
+        buildAppRecord(supabase, { workspaceId, createdBy: opts.createdBy ?? null, agentId: coder.id, channelId, spec }),
+    });
+    built = res.builtApps[0] || null;
+    if (mid) {
+      const attachments = res.builtApps.map((a) => ({ type: "mini_app", id: a.id, name: a.name }));
+      await supabase.from("messages").update({ content: res.content || "Done — published to Mini Apps. ✅", activities: res.activities, attachments, status: "complete" }).eq("id", mid);
+    }
+  } catch (e: any) {
+    if (mid) await supabase.from("messages").update({ content: `⚠️ Hit a snag building it: ${e.message}`, status: "error" }).eq("id", mid);
+  }
+
+  // 6) Report back in the original chat.
+  if (built) {
+    await postHere(
+      supervisor.id,
+      `✅ Done! **${built.name}** is live — open it in **Mini Apps** to preview, view or tweak the code. ${coder.name} and I built it over in #${channelName || title}.`,
+      [{ type: "mini_app", id: built.id, name: built.name }]
+    );
+  } else {
+    await postHere(supervisor.id, `We ran into trouble finishing the build — take a look in #${channelName || title} and let me know how you'd like to proceed.`);
+  }
+}
+
+// Total agent turns allowed per user message (bounds back-and-forth between
+// agents so a conversation can flow A→B→A→… without running away or burning
+// through rate limits).
+const MAX_AGENT_TURNS = 6;
 
 /** Run the selected agent(s) for a freshly-posted user message. Awaits completion. */
 export async function dispatch(opts: DispatchOpts): Promise<void> {
@@ -497,29 +706,60 @@ export async function dispatch(opts: DispatchOpts): Promise<void> {
     }
   }
 
-  // Build-a-website/app request → ensure the Coder agent exists and let it
-  // handle it directly (it has the build_app tool and publishes to Mini Apps).
-  let buildAgent: Agent | null = null;
+  const opts2 = { ...opts, agents: agentsList };
+
+  // Build-a-website/app request → AgentNexus runs the full build flow: research →
+  // brief → dedicated channel → Coder builds → published to Mini Apps.
   const explicitMention = resolveMentions(opts.userContent, agentsList).length > 0 || nameRefAll(opts.userContent, agentsList).length > 0;
   if (isBuildAppIntent(opts.userContent) && hasGroqKey() && !explicitMention) {
-    buildAgent = await ensureCodeAgent(supabase, workspaceId, opts.createdBy ?? null);
-    if (buildAgent && !agentsList.some((a) => a.id === buildAgent!.id)) {
-      agentsList = [...agentsList, buildAgent];
-    }
+    await runBuildFlow(opts2, connectors);
+    return;
   }
 
-  const opts2 = { ...opts, agents: agentsList };
   // Responders = any newly-created agent + everyone selected (mentions/names/etc).
-  const selected = buildAgent ? [buildAgent] : selectAgents(opts.userContent, agentsList, opts.primaryAgentId, preferSpecialistId);
+  const selected = selectAgents(opts.userContent, agentsList, opts.primaryAgentId, preferSpecialistId);
   const responders: Agent[] = [];
   const seen = new Set<string>();
   for (const a of [...newlyCreated, ...selected]) {
     if (!seen.has(a.id)) { seen.add(a.id); responders.push(a); }
   }
 
-  const triggered = new Set<string>();
+  // "Keep working even if I close the app" → hand off to the Cloudflare Worker,
+  // which runs the agent on a cron server-side and fills in the reply later.
+  if (isBackgroundIntent(opts.userContent) && hasBackend() && hasGroqKey() && responders.length) {
+    const responder = responders[0];
+    const { data: ph } = await supabase
+      .from("messages")
+      .insert({
+        workspace_id: workspaceId,
+        thread_id: opts.threadId ?? null,
+        channel_id: opts.channelId ?? null,
+        sender_type: "agent",
+        agent_id: responder.id,
+        content: "",
+        status: "thinking",
+        activities: [{ label: "Working in the background — you can close the app", status: "running" }],
+      })
+      .select("id")
+      .single();
+    const ok = await enqueueBackgroundTask(supabase, {
+      workspaceId,
+      agentId: responder.id,
+      threadId: opts.threadId ?? null,
+      channelId: opts.channelId ?? null,
+      messageId: ph?.id ?? null,
+      prompt: opts.userContent,
+      createdBy: opts.createdBy ?? null,
+    });
+    if (ok) return;
+    // Couldn't enqueue → fall through to running inline.
+    if (ph?.id) await supabase.from("messages").delete().eq("id", ph.id);
+  }
+
+  const budget = { left: MAX_AGENT_TURNS };
   for (const agent of responders) {
-    await runOneAgent(opts2, connectors, agent, opts.userContent, 0, triggered);
+    if (budget.left <= 0) break;
+    await runOneAgent(opts2, connectors, agent, opts.userContent, budget);
   }
 }
 
@@ -528,12 +768,11 @@ async function runOneAgent(
   connectors: Record<string, string>,
   agent: Agent,
   triggerText: string,
-  depth: number,
-  triggered: Set<string>
+  budget: { left: number }
 ): Promise<void> {
   const { supabase, workspaceId } = opts;
-  if (triggered.has(agent.id)) return;
-  triggered.add(agent.id);
+  if (budget.left <= 0) return;
+  budget.left--;
 
   // No API key yet → post a friendly nudge instead of a raw 401.
   if (!hasGroqKey()) {
@@ -580,7 +819,7 @@ async function runOneAgent(
     .single();
 
   try {
-    const history = await buildHistory(supabase, { threadId: opts.threadId, channelId: opts.channelId }, agent.id);
+    const history = await buildHistory(supabase, { threadId: opts.threadId, channelId: opts.channelId }, agent.id, opts.agents, opts.userName ?? undefined);
     const memories = await getMemories(supabase, agent, workspaceId);
 
     const result = await runAgent({
@@ -594,6 +833,7 @@ async function runOneAgent(
         if (msgId) await supabase.from("messages").update({ activities }).eq("id", msgId);
       },
       onCreateAgent: (spec) => createAgentFromSpec(supabase, workspaceId, opts.createdBy ?? null, spec),
+      onRankAction: (action, args) => handleRankAction(supabase, { workspaceId, agents: opts.agents }, action, args),
       onBuildApp: (spec) =>
         buildAppRecord(supabase, {
           workspaceId,
@@ -654,14 +894,13 @@ async function runOneAgent(
       });
     }
 
-    // Fan-out: only when this agent @mentioned exactly ONE other agent (a real
-    // handoff). Multiple mentions = a list/summary (e.g. the team roster) → skip.
-    if (depth < MAX_FANOUT_DEPTH) {
-      const mentioned = resolveMentions(result.content, opts.agents).filter(
-        (m) => m.id !== agent.id && !triggered.has(m.id)
-      );
+    // Conversation: if this agent @mentioned exactly ONE teammate (a real
+    // hand-off, not a roster list), that teammate replies next — enabling a
+    // bounded back-and-forth (A→B→A…) until the turn budget runs out.
+    if (budget.left > 0) {
+      const mentioned = resolveMentions(result.content, opts.agents).filter((m) => m.id !== agent.id);
       if (mentioned.length === 1) {
-        await runOneAgent(opts, connectors, mentioned[0], result.content, depth + 1, triggered);
+        await runOneAgent(opts, connectors, mentioned[0], `[${agent.name}]: ${result.content}`, budget);
       }
     }
   } catch (e: any) {
