@@ -24,6 +24,7 @@ export interface Rank {
   name: string;
   color: string | null;
   badge: string | null;
+  badge_url?: string | null;
   position: number;
   is_default: boolean;
   created_at?: string;
@@ -105,6 +106,10 @@ export interface Job {
   enabled: boolean;
   last_run_at: string | null;
   next_run_at: string | null;
+  run_at?: string | null;
+  email_on_start?: boolean;
+  status?: string | null;
+  last_status?: string | null;
 }
 
 export interface Integration {

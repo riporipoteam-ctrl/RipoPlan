@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { Plus, Loader2, Trash2, Check } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { Plus, Loader2, Trash2, Check, Upload } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { useSession } from "@/lib/session";
 import { TopBar } from "@/components/TopBar";
@@ -9,6 +9,7 @@ import { AgentAvatar } from "@/components/Avatar";
 import { RankBadge } from "@/components/RankBadge";
 import { emojiFor, RANK_BADGES, RANK_COLORS } from "@/lib/emoji";
 import { fetchRanks, ensureDefaultRank } from "@/lib/ranks";
+import { uploadFile } from "@/lib/actions";
 import type { Agent, Rank } from "@/lib/types";
 
 export default function RanksPage() {
@@ -56,7 +57,7 @@ export default function RanksPage() {
   }
 
   async function saveRank(r: Rank) {
-    await supabase.from("ranks").update({ name: r.name, color: r.color, badge: r.badge }).eq("id", r.id);
+    await supabase.from("ranks").update({ name: r.name, color: r.color, badge: r.badge, badge_url: r.badge_url ?? null }).eq("id", r.id);
     setRanks((list) => list.map((x) => (x.id === r.id ? r : x)));
     setEditing(null);
   }
@@ -134,6 +135,21 @@ export default function RanksPage() {
 }
 
 function RankEditor({ rank, onChange, onSave, onCancel }: { rank: Rank; onChange: (r: Rank) => void; onSave: () => void; onCancel: () => void }) {
+  const supabase = createClient();
+  const { ctx } = useSession();
+  const [uploading, setUploading] = useState(false);
+  const fileRef = useRef<HTMLInputElement>(null);
+
+  async function uploadBadge(file: File | null) {
+    if (!file || !ctx) return;
+    setUploading(true);
+    try {
+      const att = await uploadFile(supabase, ctx, file);
+      onChange({ ...rank, badge_url: att.url });
+    } catch (e) { console.error(e); }
+    finally { setUploading(false); }
+  }
+
   return (
     <div className="space-y-3 rounded-2xl border border-nebula-300 bg-[var(--card)] p-3">
       <input
@@ -143,7 +159,23 @@ function RankEditor({ rank, onChange, onSave, onCancel }: { rank: Rank; onChange
         className="w-full rounded-lg border border-[var(--border)] bg-transparent px-3 py-2 text-sm outline-none focus:border-nebula-500"
       />
       <div>
-        <div className="mb-1 text-xs text-[var(--muted)]">Badge</div>
+        <div className="mb-1 flex items-center justify-between text-xs text-[var(--muted)]">
+          <span>Custom badge image</span>
+          {rank.badge_url && <button onClick={() => onChange({ ...rank, badge_url: null })} className="text-red-500">remove</button>}
+        </div>
+        <div className="flex items-center gap-2">
+          {rank.badge_url && (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={rank.badge_url} alt="" className="h-9 w-9 rounded-lg object-cover ring-1 ring-[var(--border)]" />
+          )}
+          <button onClick={() => fileRef.current?.click()} className="flex items-center gap-1.5 rounded-lg border border-[var(--border)] px-3 py-2 text-xs hover:bg-black/5">
+            {uploading ? <Loader2 size={13} className="animate-spin" /> : <Upload size={13} />} Upload image
+          </button>
+          <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={(e) => uploadBadge(e.target.files?.[0] || null)} />
+        </div>
+      </div>
+      <div>
+        <div className="mb-1 text-xs text-[var(--muted)]">Or pick a badge emoji</div>
         <div className="flex flex-wrap gap-1.5">
           {RANK_BADGES.map((b) => (
             <button key={b} onClick={() => onChange({ ...rank, badge: b })} className={`flex h-8 w-8 items-center justify-center rounded-lg border ${rank.badge === b ? "border-nebula-500 bg-nebula-50" : "border-[var(--border)]"}`}>
