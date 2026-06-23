@@ -89,6 +89,21 @@ function isCreateIntent(content: string): boolean {
   return /\b(make|create|build|add|spin ?up|set ?up|get|bring|invite|need|want)\b/i.test(content);
 }
 
+/** Decide if a user message contains a durable fact worth remembering, and return
+ * the concise fact to store — otherwise null (so we don't save every message). */
+function extractMemorable(text: string): string | null {
+  const t = (text || "").trim();
+  if (t.length < 4) return null;
+  // Explicit "remember ..." request.
+  const rem = t.match(/\bremember(?:\s+that)?\s*:?\s*(.+)/i);
+  if (rem && rem[1].trim().length > 2) return rem[1].trim().slice(0, 240);
+  // Personal facts / preferences that are useful long-term.
+  if (/\b(my name is|call me|i am |i'?m |i live|i'?m from|i work|i'?m a |my (job|role|company|email|number|birthday|favou?rite|goal|budget|timezone)|i (like|love|prefer|hate|always|never|usually)|we (use|prefer|need))\b/i.test(t)) {
+    return t.replace(/\s+/g, " ").slice(0, 240);
+  }
+  return null;
+}
+
 /** Who should reply next: a single teammate addressed by @mention, or by name at
  * the very start of the message ("Ilma, …" / "Hey Ilma!"). Null if none/ambiguous. */
 function handoffTarget(content: string, agents: Agent[], selfId: string): Agent | null {
@@ -540,10 +555,31 @@ function buildTitle(content: string): string {
  * instead of calling build_app), so we can publish it to Mini Apps anyway. */
 function extractHtmlDoc(text: string): string | null {
   if (!text) return null;
-  const fenced = text.match(/```(?:html)?\s*(<!doctype html[\s\S]*?<\/html>)\s*```/i) || text.match(/```(?:html)?\s*(<html[\s\S]*?<\/html>)\s*```/i);
-  if (fenced) return fenced[1];
-  const bare = text.match(/(<!doctype html[\s\S]*?<\/html>)/i) || text.match(/(<html[\s\S]*?<\/html>)/i);
-  return bare ? bare[1] : null;
+  // Prefer a complete document.
+  const closed = text.match(/(<!doctype html[\s\S]*?<\/html>)/i) || text.match(/(<html[\s\S]*?<\/html>)/i);
+  if (closed) return closed[1];
+  // Truncated output (model ran out of tokens, no </html>): take from the start
+  // marker to the end and auto-close so it still renders.
+  const startIdx = (() => {
+    const a = text.search(/<!doctype html/i);
+    if (a >= 0) return a;
+    const b = text.search(/<html[\s>]/i);
+    return b;
+  })();
+  if (startIdx >= 0) {
+    let html = text.slice(startIdx).replace(/```[\s\S]*$/, "").trim();
+    if (!/<\/html>/i.test(html)) {
+      if (!/<\/body>/i.test(html)) html += "\n</body>";
+      html += "\n</html>";
+    }
+    return html;
+  }
+  // A big fenced code block with CSS/markup but no <html> wrapper → wrap it.
+  const fence = text.match(/```(?:html|css|js)?\s*([\s\S]{200,})```/i) || text.match(/```(?:html|css|js)?\s*([\s\S]{200,})$/i);
+  if (fence && /<\w+[\s>]|{[\s\S]*}/.test(fence[1])) {
+    return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head><body>${fence[1]}</body></html>`;
+  }
+  return null;
 }
 
 /**
@@ -700,6 +736,93 @@ async function runBuildFlow(opts: DispatchOpts, connectors: Record<string, strin
   }
 }
 
+/** User wants to change/fix/expand an EXISTING site (a follow-up after a build). */
+function isEditAppIntent(content: string): boolean {
+  const c = content.toLowerCase();
+  const change = /\b(fix|expand|improve|update|change|edit|redo|tweak|polish|add (to|more|another)|continue (on|with)|make (it|the site|the website)|more (updates|features|sections))\b/.test(c);
+  const target = /\b(website|web ?app|web ?site|web ?page|landing page|the site|the page|the app|mini ?app|it)\b/.test(c);
+  return change && target;
+}
+
+/** Re-run the Coder to UPDATE the most recent published site, in its channel. */
+async function runUpdateFlow(opts: DispatchOpts, connectors: Record<string, string>): Promise<boolean> {
+  const { supabase, workspaceId } = opts;
+  const { data: apps } = await supabase
+    .from("mini_apps")
+    .select("id,name,html,channel_id")
+    .eq("workspace_id", workspaceId)
+    .order("created_at", { ascending: false })
+    .limit(1);
+  const app = (apps as any[])?.[0];
+  if (!app) return false; // nothing built yet → let normal chat handle it
+
+  const supervisor = opts.agents.find((a) => a.is_supervisor) || opts.agents[0];
+  const coder = await ensureCodeAgent(supabase, workspaceId, opts.createdBy ?? null);
+  if (!supervisor || !coder) return false;
+  const roster = opts.agents.map((a) => ({ name: a.name, role: a.role, handle: a.handle, isSupervisor: a.is_supervisor }));
+
+  // Reuse the app's channel (or create one).
+  let channelId: string | null = app.channel_id;
+  let channelName = app.name;
+  if (!channelId) {
+    const { data: ch } = await supabase.from("channels").insert({ workspace_id: workspaceId, name: app.name, description: `Updates — ${app.name}`, created_by: opts.createdBy ?? null }).select("id,name").single();
+    channelId = (ch as any)?.id; channelName = (ch as any)?.name;
+  }
+
+  await supabase.from("messages").insert({
+    workspace_id: workspaceId, thread_id: opts.threadId ?? null, channel_id: opts.channelId ?? null,
+    sender_type: "agent", agent_id: supervisor.id, status: "complete",
+    content: `Got it — I'll have **${coder.name}** update **${app.name}** with that over in #${channelName}. I'll post the new version here when it's ready.`,
+  });
+  await supabase.from("messages").insert({
+    workspace_id: workspaceId, channel_id: channelId, sender_type: "agent", agent_id: supervisor.id, status: "complete",
+    content: `@${coder.handle} — the user wants changes to **${app.name}**:\n\n"${opts.userContent}"\n\nUpdate the current site and republish the COMPLETE updated HTML.`,
+  });
+
+  const { data: ph } = await supabase.from("messages").insert({
+    workspace_id: workspaceId, channel_id: channelId, sender_type: "agent", agent_id: coder.id,
+    content: "", status: "thinking", activities: [{ label: "Updating the site", status: "running" }],
+  }).select("id").single();
+  const mid = (ph as any)?.id as string | undefined;
+
+  const updateApp = async (html: string) => {
+    await supabase.from("mini_apps").update({ html, updated_at: new Date().toISOString() }).eq("id", app.id);
+    return { id: app.id as string, name: app.name as string };
+  };
+
+  let done: { id: string; name: string } | null = null;
+  try {
+    const coderForBuild: Agent = {
+      ...coder,
+      tools: Array.from(new Set([...(coder.tools || []), "build_app", "web_search", "browse", "code"])),
+      system_prompt: `You are ${coder.name}, an elite web engineer. Update the user's existing single-file website and republish the COMPLETE updated HTML via build_app (full <!doctype html> document, all CSS/JS inline). NEVER paste code in chat — your visible message is just a short "Updated ✅". Keep everything that worked, apply the requested changes, and make sure the file is complete and valid.`,
+    };
+    const res = await runAgent({
+      agent: coderForBuild,
+      history: [{ role: "user", content: `Current site HTML:\n\n${String(app.html || "").slice(0, 20000)}\n\nApply these changes and republish the FULL updated HTML via build_app:\n"${opts.userContent}"` }],
+      workspaceName: opts.workspaceName, roster, connectors, maxTokens: 8000,
+      onActivity: async (a) => { if (mid) await supabase.from("messages").update({ activities: a }).eq("id", mid); },
+      onBuildApp: (spec) => updateApp(spec.html),
+    });
+    done = res.builtApps[0] || null;
+    if (!done) { const html = extractHtmlDoc(res.content); if (html) done = await updateApp(html); }
+    if (mid) {
+      const cleanMsg = done ? `Updated **${done.name}** ✅ — refresh it in Mini Apps.` : (res.content || "Working on it…");
+      await supabase.from("messages").update({ content: cleanMsg, activities: res.activities, attachments: done ? [{ type: "mini_app", id: done.id, name: done.name }] : [], status: "complete" }).eq("id", mid);
+    }
+  } catch (e: any) {
+    if (mid) await supabase.from("messages").update({ content: `⚠️ Couldn't finish the update: ${e.message}`, status: "error" }).eq("id", mid);
+  }
+
+  await supabase.from("messages").insert({
+    workspace_id: workspaceId, thread_id: opts.threadId ?? null, channel_id: opts.channelId ?? null,
+    sender_type: "agent", agent_id: supervisor.id, status: "complete",
+    content: done ? `✅ Updated **${done.name}** — open it in **Mini Apps** to see the changes.` : `We hit a snag updating it — check #${channelName}.`,
+    attachments: done ? [{ type: "mini_app", id: done.id, name: done.name }] : [],
+  });
+  return true;
+}
+
 // Total agent turns allowed per user message (bounds back-and-forth between
 // agents so a conversation can flow A→B→A→… without running away or burning
 // through rate limits).
@@ -848,6 +971,12 @@ export async function dispatch(opts: DispatchOpts): Promise<void> {
   }
 
   const opts2 = { ...opts, agents: agentsList };
+
+  // Follow-up "fix / expand / update the website" → update the existing app in
+  // its channel (don't just reply in chat). Falls through if nothing's been built.
+  if (isEditAppIntent(opts.userContent) && !isBuildAppIntent(opts.userContent) && hasGroqKey()) {
+    if (await runUpdateFlow(opts2, connectors)) return;
+  }
 
   // Build-a-website/app request → ALWAYS run the full build flow: AskAI researches
   // → writes a brief → opens a dedicated channel → briefs the Coder there → Coder
@@ -1030,15 +1159,22 @@ async function runOneAgent(
 
     await supabase.from("agents").update({ last_run_at: new Date().toISOString() }).eq("id", agent.id);
 
+    // Only remember things that actually matter (durable facts / preferences /
+    // explicit "remember this") — not every passing message. Keeps memory small
+    // and useful instead of a transcript dump.
     if (agent.memory_enabled) {
-      await supabase.from("agent_memories").insert({
-        workspace_id: workspaceId,
-        agent_id: agent.id,
-        kind: "interaction",
-        // Store only what the USER said (facts to remember) — never the agent's own
-        // wording, which made agents parrot their previous replies.
-        content: `User mentioned: "${triggerText.slice(0, 220)}"`,
-      });
+      const fact = extractMemorable(triggerText);
+      if (fact) {
+        const { data: dupe } = await supabase
+          .from("agent_memories")
+          .select("id")
+          .eq("workspace_id", workspaceId)
+          .eq("content", fact)
+          .limit(1);
+        if (!dupe || !dupe.length) {
+          await supabase.from("agent_memories").insert({ workspace_id: workspaceId, agent_id: agent.id, kind: "fact", content: fact });
+        }
+      }
     }
 
     // Conversation hand-off: if this agent addressed exactly ONE teammate — by

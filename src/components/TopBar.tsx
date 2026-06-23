@@ -42,11 +42,11 @@ export function TopBar({
       if (active) setUnread(count || 0);
     };
     load();
-    const ch = supabase
-      .channel(`notif-${ctx.userId}`)
-      .on("postgres_changes", { event: "*", schema: "public", table: "notifications", filter: `user_id=eq.${ctx.userId}` }, load)
-      .subscribe();
-    return () => { active = false; supabase.removeChannel(ch); };
+    // Refresh when the tab regains focus (no realtime channel — a shared channel
+    // name across every page caused reconnection churn / UI lag).
+    const onFocus = () => load();
+    window.addEventListener("focus", onFocus);
+    return () => { active = false; window.removeEventListener("focus", onFocus); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ctx?.userId]);
 

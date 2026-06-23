@@ -1,5 +1,17 @@
 import { emojiFor } from "@/lib/emoji";
 import clsx from "clsx";
+import {
+  Sparkles, Pencil, Search, Wrench, Globe, Bot, Rocket, Brain, BarChart3, Mail,
+  Code2, Camera, Calendar, Bell, Zap, Crown, Star, Shield, Gem, Flame, Trophy, type LucideIcon,
+} from "lucide-react";
+
+// Clean line-icons instead of OS emoji glyphs for a polished, custom look.
+const ICONS: Record<string, LucideIcon> = {
+  sparkles: Sparkles, pencil: Pencil, magnifier: Search, wrench: Wrench, globe: Globe,
+  robot: Bot, rocket: Rocket, brain: Brain, chart: BarChart3, mail: Mail, code: Code2,
+  camera: Camera, calendar: Calendar, bell: Bell, bolt: Zap, crown: Crown, star: Star,
+  shield: Shield, gem: Gem, fire: Flame, trophy: Trophy,
+};
 
 export function AgentAvatar({
   emoji,
@@ -32,9 +44,12 @@ export function AgentAvatar({
             "flex items-center justify-center text-white",
             rounded === "lg" ? "rounded-xl" : "rounded-full"
           )}
-          style={{ width: size, height: size, background: color || "#a855f7", fontSize: size * 0.5 }}
+          style={{ width: size, height: size, background: `linear-gradient(135deg, ${color || "#a855f7"}, ${color || "#a855f7"}cc)`, fontSize: size * 0.5 }}
         >
-          <span>{emojiFor(emoji)}</span>
+          {(() => {
+            const Icon = emoji ? ICONS[emoji] : undefined;
+            return Icon ? <Icon size={Math.round(size * 0.5)} strokeWidth={2.2} /> : <span>{emojiFor(emoji)}</span>;
+          })()}
         </div>
       )}
       {withDot && (
