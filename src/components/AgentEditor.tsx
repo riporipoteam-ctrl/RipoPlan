@@ -77,10 +77,10 @@ export function AgentEditor({ agent, onChange }: { agent: Agent; onChange: (a: A
         )}
       </div>
 
-      <Field label="Name"><input value={name} onChange={(e) => setName(e.target.value)} className="inp" /></Field>
-      <Field label="Role"><input value={role} onChange={(e) => setRole(e.target.value)} className="inp" /></Field>
-      <Field label="Description"><textarea value={description} onChange={(e) => setDescription(e.target.value)} rows={2} className="inp" /></Field>
-      <Field label="Personality / system prompt"><textarea value={prompt} onChange={(e) => setPrompt(e.target.value)} rows={4} className="inp" /></Field>
+      <Field label="Name"><input value={name} onChange={(e) => setName(e.target.value)} className={INP} /></Field>
+      <Field label="Role"><input value={role} onChange={(e) => setRole(e.target.value)} className={INP} /></Field>
+      <Field label="Description"><textarea value={description} onChange={(e) => setDescription(e.target.value)} rows={2} className={INP} /></Field>
+      <Field label="Personality / system prompt"><textarea value={prompt} onChange={(e) => setPrompt(e.target.value)} rows={4} className={INP} /></Field>
 
       <label className="flex items-center justify-between text-sm">
         <span>Long-term memory</span>
@@ -92,22 +92,11 @@ export function AgentEditor({ agent, onChange }: { agent: Agent; onChange: (a: A
       <button onClick={save} disabled={busy} className="flex w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-br from-nebula-600 to-nebula-pink py-2.5 text-sm font-semibold text-white disabled:opacity-60">
         {busy ? <Loader2 size={16} className="animate-spin" /> : <Check size={16} />} Save changes
       </button>
-
-      <style jsx>{`
-        :global(.inp) {
-          width: 100%;
-          border-radius: 0.6rem;
-          border: 1px solid var(--border);
-          background: transparent;
-          padding: 0.5rem 0.7rem;
-          font-size: 0.875rem;
-          outline: none;
-        }
-        :global(.inp:focus) { border-color: #a855f7; }
-      `}</style>
     </div>
   );
 }
+
+const INP = "w-full rounded-lg border border-[var(--border)] bg-transparent px-3 py-2 text-sm outline-none focus:border-nebula-500";
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
