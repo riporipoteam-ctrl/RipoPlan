@@ -28,6 +28,17 @@ export function GmailConnect() {
   async function connect() {
     if (!ctx || !backend) return;
     setBusy(true);
+    // Probe the backend first so we don't open a dead 404 popup.
+    try {
+      const h = await fetch(`${backend}/health`, { method: "GET" }).then((r) => (r.ok ? r.json() : null)).catch(() => null);
+      if (!h || !h.google) {
+        setBusy(false);
+        window.alert(
+          "Gmail isn't ready on the backend yet.\n\nThe worker at your BACKEND_URL needs Google OAuth configured:\n• Deploy the agentnexus-backend worker\n• Add GOOGLE_CLIENT_ID + GOOGLE_CLIENT_SECRET secrets\n• Point BACKEND_URL at that worker\n\n(/health currently reports Google = off.)"
+        );
+        return;
+      }
+    } catch {}
     const popup = window.open(`${backend}/oauth/gmail/start`, "gmail-oauth", "width=480,height=640");
     const onMsg = async (e: MessageEvent) => {
       if (e.data?.type !== "agentnexus-oauth" || e.data?.provider !== "gmail") return;
