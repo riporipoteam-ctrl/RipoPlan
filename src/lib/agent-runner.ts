@@ -160,6 +160,7 @@ export interface RunInput {
   history: ChatMessage[];
   workspaceName?: string;
   memories?: string[];
+  maxTokens?: number;
   roster?: { name: string; role: string | null; handle: string | null; isSupervisor?: boolean }[];
   connectors?: Record<string, string>;
   onActivity?: (activities: Activity[]) => Promise<void> | void;
@@ -204,9 +205,9 @@ function systemPrompt(agent: Agent, workspaceName?: string, memories?: string[],
       : "";
   const team =
     roster && roster.length
-      ? `\n\nYour team in this workspace (answer any "what agents do we have / who's on the team" questions from THIS list — never browse the web for it). When listing them, write plain names, do NOT prefix with @:\n${roster
+      ? `\n\nYour teammates in this workspace (these are real colleagues you work alongside — answer any "who's on the team" questions from THIS list, never browse the web for it). Write plain names, do NOT prefix with @:\n${roster
           .map((r) => `- ${r.name} — ${r.role || "Agent"}${r.isSupervisor ? " (Chief of Staff)" : ""}`)
-          .join("\n")}`
+          .join("\n")}\nIn the conversation, lines from teammates are labelled "[Name]:" and the human's lines "[User]:" so you know who said what. READ them — reply to what was actually said, remember it, and react like a real coworker would. To hand off to a specific teammate, @mention them (e.g. @${roster.find((r) => !r.isSupervisor)?.handle || "teammate"}) and they'll reply next.`
       : "";
   const mem =
     memories && memories.length
@@ -221,12 +222,14 @@ function systemPrompt(agent: Agent, workspaceName?: string, memories?: string[],
     `WHEN TO SEARCH vs ANSWER DIRECTLY: Do NOT call web_search for casual chat, greetings, opinions, math, coding, writing, brainstorming, summarizing the conversation, questions about this workspace/your team, or anything you already know with confidence. Answer those instantly from your own knowledge — searching for them just makes you slow and annoying. ONLY use web_search for things that are genuinely time-sensitive or that you cannot know: current events, today's news/prices/scores, recent releases, real-time data, specific live listings, or niche facts you're unsure about. When unsure whether you need it, prefer answering directly first. Never search twice for the same thing.`,
     `SEARCH RULES: After web_search, extract the actual results — give specific items with their real URLs as Markdown links (e.g. [Pod 51 Hotel — $89/night](https://...)). Do NOT just name websites like "check Booking.com or Kayak". If the user wants concrete items (hotels, products, listings, prices), pick the most relevant result URL and call browse on it to pull out the real details (names, prices, links), then present 3-6 concrete options in a Markdown table with a clickable link for each.`,
     `When you present structured data (matches, prices, comparisons, schedules), use clean GitHub-flavored Markdown tables.`,
-    `SPEAK ONLY AS YOURSELF (${agent.name}). Never write dialogue, lines, narration, or actions for other agents or for the user. Never invent or quote what another agent "said". Never output pseudo-code that defines a "team", other agents, or simulates a multi-agent script. If another agent should respond, use the delegate tool — do NOT write their reply yourself.`,
-    `Never output raw tool syntax, XML tags, angle-bracket tags, or JSON tool calls as visible text. Either call the tool properly or just write plain prose. If you are not calling a tool, write only natural Markdown.`,
-    `Do NOT repeat yourself: never restate greetings, intros, or points you've already made earlier in this conversation — read the prior messages and move things forward with something new.`,
+    `SPEAK ONLY AS YOURSELF (${agent.name}). You write ONE message, as yourself, and then stop. NEVER write another teammate's reply, dialogue, lines, narration, or actions. NEVER invent or quote what another agent "said". If a teammate should respond, @mention them and STOP — they will reply on their own turn. Never script a back-and-forth.`,
+    `FORMAT: Do NOT begin your message with your own name or any name followed by a colon (no "${agent.name}:"). Do NOT wrap your whole reply in quotation marks. Just write the message itself, plainly.`,
+    `Never output raw tool syntax, XML tags, angle-bracket tags, or JSON tool calls as visible text. Either call the tool properly or just write plain prose.`,
+    `Do NOT repeat yourself: never restate greetings, intros, or points already made — read the prior messages and move things forward.`,
+    `BE A REAL PERSON, not a chatbot. You have your own personality, moods, opinions, humor and quirks. Talk casually and naturally like a human coworker texting — react, agree, push back, joke, get excited or annoyed. Don't be a generic, over-eager, over-polite assistant. Keep replies tight and human; don't end every message asking "is there anything else I can help with?".`,
     unfiltered
-      ? `Match the user's tone and energy. Have a real personality — be blunt, sweary, sarcastic, flirty or dark if that fits the moment. Never sound like a corporate or kid-friendly assistant.`
-      : `Be concise, helpful, and proactive. Sign off naturally as ${agent.name}.`,
+      ? `Match the user's tone and energy. Be blunt, sweary, sarcastic, flirty or dark if that fits the moment.`
+      : `Be helpful and proactive, but stay human and concise.`,
     conn,
     team,
     mem,
@@ -272,11 +275,26 @@ export async function runAgent(input: RunInput): Promise<RunOutput> {
   const preferred = agent.model || GROQ_MODEL;
   const chain = modelChain(preferred, hasImage, backendUrl);
 
+  // Names the model might wrongly prefix its reply with ("Ilma:" / "Ilma: \"…\"").
+  const rosterNames = [agent.name, ...((input.roster || []).map((r) => r.name))].filter(Boolean);
+  const stripNamePrefix = (text: string): string => {
+    let t = text.trim();
+    // Drop a leading "<Name>:" (or "<Name> -") that matches the agent or a teammate.
+    const m = t.match(/^["'“]?\s*([A-Za-z][\w .'-]{0,30}?)\s*[:\-–]\s+/);
+    if (m && rosterNames.some((n) => n.toLowerCase() === m[1].trim().toLowerCase())) {
+      t = t.slice(m[0].length).trim();
+    }
+    // Unwrap a reply that's entirely inside quotation marks.
+    const q = t.match(/^[“"']([\s\S]+)[”"']$/);
+    if (q && !q[1].includes('"')) t = q[1].trim();
+    return t;
+  };
+
   const REFUSAL = /\b(i can'?t (help|assist|do|comply)|i cannot|i'm sorry,? but|i am sorry,? but|i won'?t|as an ai|i'm not able to|i am unable|against (my )?(guidelines|policy|programming)|that's not something i can|i must decline)\b/i;
 
   /** Never return an empty message; in 18+ mode, retry once if the model refuses. */
   const ensureGood = async (raw: string): Promise<string> => {
-    let c = sanitize(raw);
+    let c = stripNamePrefix(sanitize(raw));
     const needsRetry = !c.trim() || (unfiltered && REFUSAL.test(c));
     if (needsRetry) {
       try {
@@ -289,7 +307,7 @@ export async function runAgent(input: RunInput): Promise<RunOutput> {
           chain,
           backendUrl
         );
-        const c2 = sanitize(r.choices?.[0]?.message?.content || "");
+        const c2 = stripNamePrefix(sanitize(r.choices?.[0]?.message?.content || ""));
         if (c2.trim() && !(unfiltered && REFUSAL.test(c2))) c = c2;
         else if (c2.trim() && !c.trim()) c = c2;
       } catch {}
@@ -347,7 +365,7 @@ export async function runAgent(input: RunInput): Promise<RunOutput> {
     try {
       completion = await complete(
         client,
-        { messages, temperature: temp, max_completion_tokens: 4096, top_p: 0.95, frequency_penalty: 0.4, presence_penalty: 0.3 },
+        { messages, temperature: temp, max_completion_tokens: input.maxTokens || 4096, top_p: 0.95, frequency_penalty: 0.4, presence_penalty: 0.3 },
         chain,
         backendUrl,
         useTools ? tools : undefined
