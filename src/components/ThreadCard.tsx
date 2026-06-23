@@ -35,7 +35,7 @@ export function ThreadCard({
   return (
     <div
       onClick={() => router.push(`/thread?id=${thread.id}`)}
-      className="group relative cursor-pointer rounded-xl border border-[var(--border)] bg-[var(--card)] p-3 transition-colors hover:border-nebula-400/60"
+      className="group lift relative cursor-pointer rounded-xl border border-[var(--border)] bg-[var(--card)] p-3 hover:border-nebula-400/60"
     >
       <div className="flex items-center gap-2">
         <div className="flex -space-x-1.5">

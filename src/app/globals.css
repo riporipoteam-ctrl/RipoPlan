@@ -3,18 +3,24 @@
 @tailwind utilities;
 
 :root {
-  --bg: #f7f4ef;
+  --bg: #f6f3ee;
   --card: #ffffff;
   --border: #e7e2d9;
-  --text: #1a1a1f;
-  --muted: #8a8578;
+  --text: #17171c;
+  --muted: #87826f;
+  --accent: #a855f7;
+  --accent-2: #ec4899;
+  --shadow: 0 10px 30px -16px rgba(20, 12, 40, 0.28);
 }
 .dark {
-  --bg: #0b0b10;
-  --card: #15151c;
-  --border: #26262f;
+  --bg: #0a0a0f;
+  --card: #14141b;
+  --border: #262630;
   --text: #ececf1;
   --muted: #9a9aa8;
+  --accent: #b06bff;
+  --accent-2: #ff5ea8;
+  --shadow: 0 12px 36px -16px rgba(0, 0, 0, 0.6);
 }
 
 html,
@@ -115,8 +121,62 @@ button:active, a:active, [role="button"]:active { transform: scale(0.97); }
   animation: gradient-shift 6s ease infinite;
 }
 /* Cards lift slightly on hover for a tactile feel */
-.lift { transition: transform 0.18s cubic-bezier(0.22,1,0.36,1), box-shadow 0.18s ease; }
-.lift:hover { transform: translateY(-2px); box-shadow: 0 8px 24px -12px rgba(0,0,0,0.25); }
+.lift { transition: transform 0.18s cubic-bezier(0.22,1,0.36,1), box-shadow 0.18s ease, border-color 0.18s ease; }
+.lift:hover { transform: translateY(-2px); box-shadow: var(--shadow); }
+
+/* ---- Extended animation library ---- */
+@keyframes slide-up { from { opacity:0; transform: translateY(16px) } to { opacity:1; transform: translateY(0) } }
+@keyframes slide-down { from { opacity:0; transform: translateY(-12px) } to { opacity:1; transform: translateY(0) } }
+@keyframes slide-in-left { from { opacity:0; transform: translateX(-14px) } to { opacity:1; transform: translateX(0) } }
+@keyframes zoom-in { from { opacity:0; transform: scale(0.8) } to { opacity:1; transform: scale(1) } }
+@keyframes bounce-in { 0%{opacity:0;transform:scale(0.7)} 55%{opacity:1;transform:scale(1.08)} 100%{transform:scale(1)} }
+@keyframes wiggle { 0%,100%{transform:rotate(0)} 25%{transform:rotate(-6deg)} 75%{transform:rotate(6deg)} }
+@keyframes spin-slow { to { transform: rotate(360deg) } }
+@keyframes pulse-soft { 0%,100%{opacity:1} 50%{opacity:0.55} }
+@keyframes shimmer-sweep { 0%{transform:translateX(-120%)} 100%{transform:translateX(120%)} }
+@keyframes ring { 0%,100%{transform:rotate(0)} 10%,30%{transform:rotate(-12deg)} 20%,40%{transform:rotate(12deg)} }
+@keyframes rise-fade { from{opacity:0;transform:translateY(6px)} to{opacity:1;transform:translateY(0)} }
+@keyframes flip-in { from{opacity:0;transform:perspective(600px) rotateX(-18deg)} to{opacity:1;transform:perspective(600px) rotateX(0)} }
+@keyframes blur-in { from{opacity:0;filter:blur(8px)} to{opacity:1;filter:blur(0)} }
+@keyframes float { 0%,100%{transform:translateY(0)} 50%{transform:translateY(-5px)} }
+@keyframes border-glow { 0%,100%{border-color:var(--border)} 50%{border-color:color-mix(in srgb,var(--accent) 60%,transparent)} }
+
+.animate-slide-up{animation:slide-up .4s cubic-bezier(.22,1,.36,1) both}
+.animate-slide-down{animation:slide-down .3s cubic-bezier(.22,1,.36,1) both}
+.animate-slide-in-left{animation:slide-in-left .32s cubic-bezier(.22,1,.36,1) both}
+.animate-zoom-in{animation:zoom-in .3s cubic-bezier(.22,1,.36,1) both}
+.animate-bounce-in{animation:bounce-in .42s cubic-bezier(.22,1,.36,1) both}
+.animate-wiggle{animation:wiggle .4s ease}
+.animate-spin-slow{animation:spin-slow 8s linear infinite}
+.animate-pulse-soft{animation:pulse-soft 1.8s ease-in-out infinite}
+.animate-ring{animation:ring 1.4s ease both}
+.animate-flip-in{animation:flip-in .42s cubic-bezier(.22,1,.36,1) both}
+.animate-blur-in{animation:blur-in .4s ease both}
+.animate-float{animation:float 3.4s ease-in-out infinite}
+.hover-glow{transition:box-shadow .2s ease,transform .18s ease}
+.hover-glow:hover{box-shadow:0 0 22px -6px color-mix(in srgb,var(--accent) 55%,transparent);transform:translateY(-1px)}
+
+/* Staggered list entrance — set on a container; children rise in sequence */
+.stagger > * { animation: rise-fade .4s cubic-bezier(.22,1,.36,1) both; }
+.stagger > *:nth-child(1){animation-delay:.02s}
+.stagger > *:nth-child(2){animation-delay:.06s}
+.stagger > *:nth-child(3){animation-delay:.10s}
+.stagger > *:nth-child(4){animation-delay:.14s}
+.stagger > *:nth-child(5){animation-delay:.18s}
+.stagger > *:nth-child(6){animation-delay:.22s}
+.stagger > *:nth-child(7){animation-delay:.26s}
+.stagger > *:nth-child(8){animation-delay:.30s}
+.stagger > *:nth-child(n+9){animation-delay:.34s}
+
+/* Shimmer sweep overlay for buttons / cards */
+.sweep{position:relative;overflow:hidden}
+.sweep::after{content:"";position:absolute;inset:0;background:linear-gradient(110deg,transparent 30%,rgba(255,255,255,.25) 50%,transparent 70%);transform:translateX(-120%)}
+.sweep:hover::after{animation:shimmer-sweep .9s ease}
+
+/* Gradient accent button */
+.btn-accent{background:linear-gradient(120deg,var(--accent),var(--accent-2));background-size:160% auto;transition:background-position .4s ease,transform .12s ease,box-shadow .2s ease}
+.btn-accent:hover{background-position:right center;box-shadow:0 8px 22px -10px color-mix(in srgb,var(--accent) 70%,transparent)}
+.btn-accent:active{transform:scale(.97)}
 
 /* Markdown */
 .md h1,

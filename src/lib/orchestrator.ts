@@ -685,10 +685,93 @@ async function runBuildFlow(opts: DispatchOpts, connectors: Record<string, strin
 // through rate limits).
 const MAX_AGENT_TURNS = 6;
 
+/** User sent an image and asked to use it as a badge / profile picture. */
+function isApplyImageIntent(content: string): boolean {
+  const c = content.toLowerCase();
+  return /\b(badge|icon|logo|avatar|profile|pfp|picture|photo|image)\b/.test(c) &&
+    /\b(use|set|make|apply|change|update|put|this|that|as)\b/.test(c);
+}
+
+/** Apply an attached image as a rank badge / agent avatar / workspace picture. */
+async function tryApplyImageFromChat(opts: DispatchOpts): Promise<boolean> {
+  const { supabase, workspaceId } = opts;
+  const text = opts.userContent.toLowerCase();
+  if (!isApplyImageIntent(text)) return false;
+
+  // Most recent image the user attached in this conversation.
+  let q = supabase.from("messages").select("attachments").eq("sender_type", "user").order("created_at", { ascending: false }).limit(3);
+  if (opts.threadId) q = q.eq("thread_id", opts.threadId);
+  else if (opts.channelId) q = q.eq("channel_id", opts.channelId);
+  const { data } = await q;
+  let imageUrl = "";
+  for (const m of (data as any[]) || []) {
+    const img = (m.attachments || []).find((a: any) => a?.type === "image" && a.url);
+    if (img) { imageUrl = img.url; break; }
+  }
+  if (!imageUrl) return false;
+
+  const supervisor = opts.agents.find((a) => a.is_supervisor) || opts.agents[0];
+  const say = (content: string) =>
+    supabase.from("messages").insert({
+      workspace_id: workspaceId,
+      thread_id: opts.threadId ?? null,
+      channel_id: opts.channelId ?? null,
+      sender_type: "agent",
+      agent_id: supervisor?.id,
+      content,
+      status: "complete",
+    });
+
+  const wantsBadge = /\b(badge|icon|logo)\b/.test(text);
+
+  // Workspace picture.
+  if (/\bworkspace\b/.test(text)) {
+    await supabase.from("workspaces").update({ avatar_url: imageUrl }).eq("id", workspaceId);
+    await say("Done — updated the workspace picture. 🎉");
+    return true;
+  }
+
+  // A named rank → its badge image.
+  const { data: ranks } = await supabase.from("ranks").select("id,name").eq("workspace_id", workspaceId);
+  const rank = ((ranks as any[]) || []).find((r) => text.includes(r.name.toLowerCase()));
+  if (rank && wantsBadge) {
+    await supabase.from("ranks").update({ badge_url: imageUrl }).eq("id", rank.id);
+    await say(`Done — set that image as the **${rank.name}** rank badge. ✅`);
+    return true;
+  }
+
+  // A named agent → badge image or profile picture.
+  const agent = opts.agents.find((a) => text.includes(a.name.toLowerCase()) || (a.handle && text.includes(a.handle.toLowerCase())));
+  if (agent) {
+    if (wantsBadge) {
+      await supabase.from("agents").update({ badge_url: imageUrl }).eq("id", agent.id);
+      await say(`Done — gave **${agent.name}** that badge. ✅`);
+    } else {
+      await supabase.from("agents").update({ avatar_url: imageUrl }).eq("id", agent.id);
+      await say(`Done — updated **${agent.name}**'s profile picture. ✅`);
+    }
+    return true;
+  }
+
+  // Only one rank in the workspace + a badge request → apply to it.
+  if (wantsBadge && (ranks as any[])?.length === 1) {
+    await supabase.from("ranks").update({ badge_url: imageUrl }).eq("id", (ranks as any[])[0].id);
+    await say(`Done — set that as the **${(ranks as any[])[0].name}** badge. ✅`);
+    return true;
+  }
+
+  await say("I've got the image! Which one should I apply it to — a rank badge (tell me the rank name), a specific agent's picture, or the workspace photo?");
+  return true;
+}
+
+
 /** Run the selected agent(s) for a freshly-posted user message. Awaits completion. */
 export async function dispatch(opts: DispatchOpts): Promise<void> {
   const { supabase, workspaceId } = opts;
   const connectors = await getConnectors(supabase, workspaceId);
+
+  // "Use this image as the badge / picture for X" → apply it directly.
+  if (await tryApplyImageFromChat(opts)) return;
 
   // Most-recent non-supervisor agent active in this thread/channel — generic
   // tasks continue with them (e.g. once "Max" joins, research goes to Max).
