@@ -191,7 +191,7 @@ export function Composer({
             <button
               onClick={send}
               disabled={(!text.trim() && attachments.length === 0) || sending || uploading > 0}
-              className="flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br from-nebula-600 to-nebula-pink text-white disabled:opacity-40"
+              className="btn-accent flex h-8 w-8 items-center justify-center rounded-lg text-white disabled:opacity-40"
             >
               {sending ? <Loader2 size={16} className="animate-spin" /> : <ArrowUp size={18} />}
             </button>

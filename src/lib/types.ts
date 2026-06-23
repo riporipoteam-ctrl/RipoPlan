@@ -41,6 +41,7 @@ export interface Agent {
   emoji: string | null;
   avatar_color: string | null;
   avatar_url: string | null;
+  badge_url?: string | null;
   rank_id: string | null;
   model: string | null;
   system_prompt: string | null;

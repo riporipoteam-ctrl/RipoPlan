@@ -203,6 +203,10 @@ function MessageItem({
       <div className="min-w-0 flex-1">
         <div className="flex items-baseline gap-2">
           <span className="text-sm font-bold">{name}</span>
+          {isAgent && agent?.badge_url && (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={agent.badge_url} alt="" className="h-4 w-4 rounded-full object-cover ring-1 ring-[var(--border)]" title="Badge" />
+          )}
           {rank && <RankBadge rank={rank} />}
           <span className="text-xs text-[var(--muted)]">{clockTime(m.created_at)}</span>
           {isAgent && m.status !== "thinking" && display && (

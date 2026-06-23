@@ -111,6 +111,73 @@ export function schemasForTools(tools: string[]) {
     .map(([, v]) => v);
 }
 
+// ---- Utility skills: keyless, always available to every agent ----
+export const UTILITY_TOOL_SCHEMAS = [
+  { type: "function", function: { name: "weather", description: "Get the current weather and a short forecast for a place.", parameters: { type: "object", properties: { location: { type: "string", description: "City / place name" } }, required: ["location"] } } },
+  { type: "function", function: { name: "currency", description: "Convert an amount between two currencies (live rates).", parameters: { type: "object", properties: { amount: { type: "number" }, from: { type: "string", description: "ISO code e.g. USD" }, to: { type: "string", description: "ISO code e.g. EUR" } }, required: ["from", "to"] } } },
+  { type: "function", function: { name: "crypto_price", description: "Get the current price of a cryptocurrency in USD.", parameters: { type: "object", properties: { coin: { type: "string", description: "Coin id/name e.g. bitcoin, ethereum, solana" } }, required: ["coin"] } } },
+  { type: "function", function: { name: "dictionary", description: "Define a word and give synonyms.", parameters: { type: "object", properties: { word: { type: "string" } }, required: ["word"] } } },
+  { type: "function", function: { name: "qr_code", description: "Generate a QR code image for any text or URL. Returns a Markdown image to show the user.", parameters: { type: "object", properties: { data: { type: "string" } }, required: ["data"] } } },
+  { type: "function", function: { name: "datetime", description: "Get the current date and time (optionally for an IANA timezone).", parameters: { type: "object", properties: { timezone: { type: "string", description: "e.g. America/New_York" } } } } },
+];
+
+async function weatherTool(location: string): Promise<ToolResult> {
+  try {
+    const g = await fetch(`https://geocoding-api.open-meteo.com/v1/search?count=1&name=${encodeURIComponent(location)}`).then((r) => r.json());
+    const loc = g?.results?.[0];
+    if (!loc) return { ok: false, output: `Couldn't find "${location}".` };
+    const w = await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${loc.latitude}&longitude=${loc.longitude}&current=temperature_2m,apparent_temperature,relative_humidity_2m,wind_speed_10m,weather_code&daily=temperature_2m_max,temperature_2m_min&timezone=auto&forecast_days=3`).then((r) => r.json());
+    const c = w.current;
+    const d = w.daily;
+    const days = (d?.time || []).map((t: string, i: number) => `${t}: ${d.temperature_2m_min[i]}–${d.temperature_2m_max[i]}°C`).join("; ");
+    return { ok: true, output: `Weather in ${loc.name}, ${loc.country}: ${c.temperature_2m}°C (feels ${c.apparent_temperature}°C), humidity ${c.relative_humidity_2m}%, wind ${c.wind_speed_10m} km/h.\nNext days: ${days}` };
+  } catch (e: any) { return { ok: false, output: `Weather failed: ${e.message}` }; }
+}
+
+async function currencyTool(args: any): Promise<ToolResult> {
+  try {
+    const amt = Number(args.amount) || 1;
+    const r = await fetch(`https://api.frankfurter.app/latest?amount=${amt}&from=${encodeURIComponent(args.from)}&to=${encodeURIComponent(args.to)}`).then((x) => x.json());
+    const val = r?.rates?.[String(args.to).toUpperCase()];
+    if (val == null) return { ok: false, output: "Couldn't convert those currencies." };
+    return { ok: true, output: `${amt} ${String(args.from).toUpperCase()} = ${val} ${String(args.to).toUpperCase()} (as of ${r.date}).` };
+  } catch (e: any) { return { ok: false, output: `Currency failed: ${e.message}` }; }
+}
+
+async function cryptoTool(coin: string): Promise<ToolResult> {
+  try {
+    const id = coin.toLowerCase().replace(/\s+/g, "-");
+    const r = await fetch(`https://api.coingecko.com/api/v3/simple/price?ids=${encodeURIComponent(id)}&vs_currencies=usd&include_24hr_change=true`).then((x) => x.json());
+    const d = r?.[id];
+    if (!d) return { ok: false, output: `Couldn't find "${coin}".` };
+    return { ok: true, output: `${coin}: $${d.usd} (24h ${d.usd_24h_change?.toFixed(2)}%).` };
+  } catch (e: any) { return { ok: false, output: `Crypto failed: ${e.message}` }; }
+}
+
+async function dictionaryTool(word: string): Promise<ToolResult> {
+  try {
+    const r = await fetch(`https://api.dictionaryapi.dev/api/v2/entries/en/${encodeURIComponent(word)}`).then((x) => x.json());
+    const e = Array.isArray(r) ? r[0] : null;
+    if (!e) return { ok: false, output: `No definition for "${word}".` };
+    const defs = (e.meanings || []).slice(0, 3).map((m: any) => `(${m.partOfSpeech}) ${m.definitions?.[0]?.definition}`).join("\n");
+    const syn = (e.meanings || []).flatMap((m: any) => m.synonyms || []).slice(0, 6).join(", ");
+    return { ok: true, output: `**${e.word}**\n${defs}${syn ? `\nSynonyms: ${syn}` : ""}` };
+  } catch (e: any) { return { ok: false, output: `Dictionary failed: ${e.message}` }; }
+}
+
+function qrTool(data: string): ToolResult {
+  const url = `https://api.qrserver.com/v1/create-qr-code/?size=320x320&data=${encodeURIComponent(data)}`;
+  return { ok: true, output: `QR code generated. Show it to the user with this Markdown:\n![QR code](${url})` };
+}
+
+function datetimeTool(tz?: string): ToolResult {
+  try {
+    const now = new Date();
+    const s = now.toLocaleString("en-US", { dateStyle: "full", timeStyle: "long", timeZone: tz || undefined });
+    return { ok: true, output: `Current date & time${tz ? ` (${tz})` : ""}: ${s}` };
+  } catch { return { ok: true, output: `Current date & time: ${new Date().toString()}` }; }
+}
+
 // ---- Rank management tools (exposed only to the supervisor / AgentNexus) ----
 export const RANK_TOOL_SCHEMAS = [
   {
@@ -522,6 +589,18 @@ export async function executeTool(
       return connectors.gmail
         ? gmailTool(args, connectors.gmail)
         : { ok: false, output: "Gmail is not connected." };
+    case "weather":
+      return weatherTool(String(args.location || ""));
+    case "currency":
+      return currencyTool(args);
+    case "crypto_price":
+      return cryptoTool(String(args.coin || ""));
+    case "dictionary":
+      return dictionaryTool(String(args.word || ""));
+    case "qr_code":
+      return qrTool(String(args.data || ""));
+    case "datetime":
+      return datetimeTool(args.timezone);
     default:
       return { ok: false, output: `Unknown tool: ${name}` };
   }
@@ -553,6 +632,18 @@ export function toolLabel(name: string, args: any): string {
       return `Editing rank: ${args.rank}`;
     case "generate_image":
       return `Generating image`;
+    case "weather":
+      return `Checking weather: ${args.location || ""}`;
+    case "currency":
+      return `Converting ${args.from} → ${args.to}`;
+    case "crypto_price":
+      return `Checking ${args.coin} price`;
+    case "dictionary":
+      return `Looking up "${args.word}"`;
+    case "qr_code":
+      return `Generating QR code`;
+    case "datetime":
+      return `Checking the time`;
     default:
       return name;
   }

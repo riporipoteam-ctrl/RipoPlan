@@ -83,7 +83,7 @@ export default function HomePage() {
           {loading ? (
             <div className="flex justify-center py-10 text-[var(--muted)]"><Loader2 className="animate-spin" /></div>
           ) : (
-            <div className="space-y-3">
+            <div className="stagger space-y-2.5">
               {threads.length === 0 && (
                 <p className="rounded-2xl border border-dashed border-[var(--border)] p-6 text-center text-sm text-[var(--muted)]">
                   No threads yet. Describe a goal above and your agents will get to work.
