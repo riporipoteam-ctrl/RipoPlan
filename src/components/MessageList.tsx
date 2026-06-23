@@ -195,11 +195,13 @@ function MessageItem({
 
   return (
     <div className="group flex gap-3 animate-fade-in-up">
-      {isAgent ? (
-        <AgentAvatar emoji={agent?.emoji} color={agent?.avatar_color} imageUrl={agent?.avatar_url} size={30} withDot />
-      ) : (
-        <UserAvatar name={profile.display_name} color={profile.avatar_color} size={30} />
-      )}
+      <div className="rounded-full ring-2 ring-[var(--card)] shadow-sm">
+        {isAgent ? (
+          <AgentAvatar emoji={agent?.emoji} color={agent?.avatar_color} imageUrl={agent?.avatar_url} size={32} rounded="full" withDot />
+        ) : (
+          <UserAvatar name={profile.display_name} color={profile.avatar_color} size={32} />
+        )}
+      </div>
       <div className="min-w-0 flex-1">
         <div className="flex items-baseline gap-2">
           <span className="text-sm font-bold">{name}</span>
@@ -213,13 +215,23 @@ function MessageItem({
             <span className="ml-auto"><CopyButton text={display} /></span>
           )}
         </div>
-        <div className="mt-0.5">
+        <div className="mt-1">
           {m.status === "thinking" ? (
             <Thinking activities={m.activities} onCancel={() => onCancel(m.id)} />
           ) : (
             <>
               {isAgent && <ActivityTrail activities={m.activities} />}
-              {display && <Markdown>{display}</Markdown>}
+              {display && (
+                <div
+                  className={`inline-block max-w-full rounded-2xl px-3.5 py-2.5 text-[15px] leading-relaxed transition ${
+                    isAgent
+                      ? "rounded-tl-md border border-[var(--border)] bg-[var(--card)] shadow-sm"
+                      : "rounded-tl-md bg-[color-mix(in_srgb,var(--accent)_12%,var(--card))]"
+                  }`}
+                >
+                  <Markdown>{display}</Markdown>
+                </div>
+              )}
               {m.attachments && m.attachments.length > 0 && <Attachments items={m.attachments} />}
             </>
           )}

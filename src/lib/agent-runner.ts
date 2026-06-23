@@ -279,6 +279,8 @@ export async function runAgent(input: RunInput): Promise<RunOutput> {
 
   // Names the model might wrongly prefix its reply with ("Ilma:" / "Ilma: \"…\"").
   const rosterNames = [agent.name, ...((input.roster || []).map((r) => r.name))].filter(Boolean);
+  const otherNames = (input.roster || []).map((r) => r.name).filter((n) => n && n.toLowerCase() !== agent.name.toLowerCase());
+  const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const stripNamePrefix = (text: string): string => {
     let t = text.trim();
     // Drop a leading "<Name>:" (or "<Name> -") that matches the agent or a teammate.
@@ -291,12 +293,31 @@ export async function runAgent(input: RunInput): Promise<RunOutput> {
     if (q && !q[1].includes('"')) t = q[1].trim();
     return t;
   };
+  /** Cut the reply the moment it starts speaking AS another teammate (impersonation). */
+  const cutImpersonation = (text: string): string => {
+    let cut = -1;
+    for (const n of otherNames) {
+      const e = escapeRe(n);
+      const markers = [
+        new RegExp(`here'?s\\s+(the\\s+)?(message|reply|response|note|text|words?)\\s+(from|for|by|to)\\s+[\\s\\S]{0,30}?${e}`, "i"),
+        new RegExp(`\\b(message|reply|response|note)\\s+(from|by)\\s+${e}\\s*:`, "i"),
+        new RegExp(`(^|\\n)\\s*\\*{0,2}${e}\\*{0,2}\\s*:\\s*["“']`, "i"), // "Name: \"...\"" on its own line
+        new RegExp(`\\bas\\s+${e}\\s*[,:]\\s*["“']`, "i"),
+      ];
+      for (const re of markers) {
+        const mm = re.exec(text);
+        if (mm && (cut < 0 || mm.index < cut)) cut = mm.index;
+      }
+    }
+    if (cut > 0) return text.slice(0, cut).trim().replace(/[\s—–-]+$/, "").trim();
+    return text;
+  };
 
   const REFUSAL = /\b(i can'?t (help|assist|do|comply)|i cannot|i'm sorry,? but|i am sorry,? but|i won'?t|as an ai|i'm not able to|i am unable|against (my )?(guidelines|policy|programming)|that's not something i can|i must decline)\b/i;
 
   /** Never return an empty message; in 18+ mode, retry once if the model refuses. */
   const ensureGood = async (raw: string): Promise<string> => {
-    let c = stripNamePrefix(sanitize(raw));
+    let c = cutImpersonation(stripNamePrefix(sanitize(raw)));
     const needsRetry = !c.trim() || (unfiltered && REFUSAL.test(c));
     if (needsRetry) {
       try {
@@ -309,7 +330,7 @@ export async function runAgent(input: RunInput): Promise<RunOutput> {
           chain,
           backendUrl
         );
-        const c2 = stripNamePrefix(sanitize(r.choices?.[0]?.message?.content || ""));
+        const c2 = cutImpersonation(stripNamePrefix(sanitize(r.choices?.[0]?.message?.content || "")));
         if (c2.trim() && !(unfiltered && REFUSAL.test(c2))) c = c2;
         else if (c2.trim() && !c.trim()) c = c2;
       } catch {}
