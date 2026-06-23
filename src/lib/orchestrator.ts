@@ -687,7 +687,8 @@ async function runBuildFlow(opts: DispatchOpts, connectors: Record<string, strin
         `ABSOLUTE RULE: you MUST deliver by calling the build_app tool with the entire HTML document in the "html" argument. ` +
         `NEVER paste HTML, CSS or JS into the chat — your visible message must be only a short sentence like "Done — published to Mini Apps ✅". ` +
         `Inline ALL CSS and JS into ONE <!doctype html> file. Use the provided https://source.unsplash.com image URLs. ` +
-        `Make it genuinely one of the best sites you've built: responsive, modern, accessible, multiple real sections, smooth scroll-in animations, hover effects, polished typography and spacing.`,
+        `Make it genuinely one of the best sites you've built: responsive, modern, accessible, multiple real sections, smooth scroll-in animations, hover effects, polished typography and spacing. ` +
+        `CRITICAL: the document MUST be COMPLETE and valid — every tag closed, ending with </html>. Keep it focused (roughly under 550 lines) so it finishes in one go rather than getting cut off. A complete, working page beats an unfinished long one.`,
     };
     const res = await runAgent({
       agent: coderForBuild,
@@ -695,7 +696,7 @@ async function runBuildFlow(opts: DispatchOpts, connectors: Record<string, strin
         {
           role: "user",
           content:
-            `Build this now from the brief below. Plan structure & polish first, then call build_app ONCE with the full self-contained HTML document. Do NOT paste any code in chat. Use the suggested images. No lorem-ipsum where real copy was given.\n\nBRIEF:\n${brief}`,
+            `Build this now from the brief below. Call build_app ONCE with the FULL, COMPLETE self-contained HTML document (must end with </html> — do not get cut off; keep it focused). Do NOT paste any code in chat. Use the suggested images. No lorem-ipsum where real copy was given.\n\nBRIEF:\n${brief}`,
         },
       ],
       workspaceName: opts.workspaceName,

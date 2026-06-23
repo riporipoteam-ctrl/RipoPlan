@@ -73,7 +73,7 @@ export default function AgentsPage() {
         {loading ? (
           <div className="flex justify-center py-10 text-[var(--muted)]"><Loader2 className="animate-spin" /></div>
         ) : (
-          <>
+          <div className="stagger">
             {groups.map((g, gi) => (
               <div key={g.rank?.id || `unranked-${gi}`}>
                 <div className="flex items-center gap-2 bg-black/[0.02] px-4 py-1.5 dark:bg-white/[0.03]">
@@ -92,7 +92,7 @@ export default function AgentsPage() {
             <Link href="/agents/new" className="m-4 flex items-center justify-center gap-2 rounded-2xl border border-dashed border-[var(--border)] py-4 text-sm font-medium text-nebula-600 hover:bg-nebula-50">
               <Plus size={18} /> Create a new agent
             </Link>
-          </>
+          </div>
         )}
       </div>
     </>
