@@ -148,6 +148,10 @@ async function liveBrowse(env: Env, url: string): Promise<string> {
 
 async function serverSearch(query: string): Promise<string> {
   try {
+    const r = await fetch(`https://s.jina.ai/${encodeURIComponent(query)}`, { headers: { "X-Return-Format": "markdown", Accept: "text/plain" } });
+    if (r.ok) { const md = (await r.text()).trim(); if (md.length > 120) return md.slice(0, 6000); }
+  } catch {}
+  try {
     const r = await fetch(`https://r.jina.ai/https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`, { headers: { "X-Return-Format": "markdown" } });
     if (r.ok) {
       let md = await r.text();
