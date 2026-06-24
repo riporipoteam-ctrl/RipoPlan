@@ -6,7 +6,7 @@
     "dev": "wrangler dev"
   },
   "devDependencies": {
-    "wrangler": "^4.20.0"
+    "wrangler": "3.114.1"
   },
   "//": "To enable the real headless-Chrome live browser, run: npm i @cloudflare/puppeteer, uncomment the [browser] binding in wrangler.toml, and redeploy."
 }
