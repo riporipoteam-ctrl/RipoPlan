@@ -547,9 +547,24 @@ async function wikipediaSearch(query: string): Promise<ToolResult> {
 }
 
 async function jinaSearch(query: string): Promise<ToolResult> {
-  // s.jina.ai is a real search engine that returns the top results already
-  // fetched & rendered to markdown (titles, URLs, and page content) — far better
-  // than scraping a results page. This is what gives agents real, current info.
+  // Primary (verified keyless): r.jina.ai renders DuckDuckGo Lite server-side and
+  // returns real result links as markdown. We decode the uddg= redirects to real
+  // URLs. This is the most reliable keyless search from the browser — no API key.
+  try {
+    const ddgUrl = `https://lite.duckduckgo.com/lite/?q=${encodeURIComponent(query)}`;
+    const res = await fetch(`https://r.jina.ai/${ddgUrl}`, {
+      headers: { "X-Return-Format": "markdown", "X-No-Cache": "true" },
+    });
+    if (res.ok) {
+      let md = await res.text();
+      md = md.replace(/https?:\/\/(?:[a-z]+\.)?duckduckgo\.com\/l\/\?[^)\s]*uddg=([^)&\s]+)[^)\s]*/gi, (_m, u) => {
+        try { return decodeURIComponent(u); } catch { return _m; }
+      });
+      md = md.replace(/\n{3,}/g, "\n\n").trim();
+      if (md.length > 120) return { ok: true, output: md.slice(0, 6000) };
+    }
+  } catch {}
+  // Fallback: s.jina.ai search (returns top results already rendered to markdown).
   try {
     const res = await fetch(`https://s.jina.ai/${encodeURIComponent(query)}`, {
       headers: { "X-Return-Format": "markdown", Accept: "text/plain" },
@@ -559,21 +574,7 @@ async function jinaSearch(query: string): Promise<ToolResult> {
       if (md.length > 120) return { ok: true, output: md.slice(0, 6000) };
     }
   } catch {}
-  // Fallback: read DuckDuckGo's results page through the reader.
-  try {
-    const res = await fetch(`https://r.jina.ai/https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`, {
-      headers: { "X-Return-Format": "markdown", "X-No-Cache": "true" },
-    });
-    if (!res.ok) return { ok: false, output: "" };
-    let md = await res.text();
-    md = md.replace(/https?:\/\/(?:html\.)?duckduckgo\.com\/l\/\?uddg=([^)&\s]+)[^)\s]*/g, (_m, u) => {
-      try { return decodeURIComponent(u); } catch { return _m; }
-    });
-    md = md.replace(/\n{3,}/g, "\n\n").trim();
-    return { ok: md.length > 80, output: md.slice(0, 6000) };
-  } catch {
-    return { ok: false, output: "" };
-  }
+  return { ok: false, output: "" };
 }
 
 // Fetch a URL's raw text through whichever CORS proxy works (browser-safe).

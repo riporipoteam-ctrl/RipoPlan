@@ -149,62 +149,62 @@ async function liveBrowse(env: Env, url: string): Promise<string> {
 
 const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36";
 
-// Brave Search API (free tier) — the only reliable real web search from a
-// datacenter IP. Set BRAVE_API_KEY secret to enable it.
-async function braveSearch(env: Env, query: string): Promise<string> {
-  if (!env.BRAVE_API_KEY) return "";
-  try {
-    const r = await fetch(`https://api.search.brave.com/res/v1/web/search?q=${encodeURIComponent(query)}&count=8`, {
-      headers: { Accept: "application/json", "X-Subscription-Token": env.BRAVE_API_KEY },
-    });
-    if (!r.ok) return "";
-    const d = await r.json<any>();
-    const results = d?.web?.results || [];
-    if (!results.length) return "";
-    const lines = results.slice(0, 8).map((x: any) => `- [${x.title}](${x.url})\n  ${(x.description || "").replace(/<[^>]+>/g, "")}`);
-    let out = lines.join("\n");
-    const top = results[0]?.url;
-    if (top) { const page = await serverFetch(top); if (page && page.length > 200) out += `\n\n--- Top result (${top}) ---\n${page.slice(0, 3500)}`; }
-    return out.slice(0, 6000);
-  } catch { return ""; }
+// Decode a DuckDuckGo redirect link (…/l/?uddg=<encoded real url>) to the real URL.
+function unwrapDdg(url: string): string {
+  const m = url.match(/[?&]uddg=([^&]+)/);
+  if (m) { try { return decodeURIComponent(m[1]); } catch {} }
+  if (url.startsWith("//")) return "https:" + url;
+  return url;
 }
 
+// Parse DuckDuckGo Lite markdown/text (as returned by r.jina.ai) into result lines.
+function parseDdgLite(text: string, max = 8): { title: string; url: string }[] {
+  const out: { title: string; url: string }[] = [];
+  // r.jina.ai returns markdown links: [title](https://duckduckgo.com/l/?uddg=...)
+  const re = /\[([^\]]+)\]\((https?:\/\/[^)]*uddg=[^)]+)\)/gi;
+  let m: RegExpExecArray | null;
+  const seen = new Set<string>();
+  while ((m = re.exec(text)) && out.length < max) {
+    const title = m[1].replace(/\s+/g, " ").trim();
+    const url = unwrapDdg(m[2]);
+    if (!url.startsWith("http") || url.includes("duckduckgo.com")) continue;
+    if (!title || title.length < 2 || seen.has(url)) continue;
+    seen.add(url);
+    out.push({ title, url });
+  }
+  return out;
+}
+
+// Keyless real web search. Primary path: r.jina.ai renders DuckDuckGo Lite
+// server-side (no API key, not IP-blocked from Cloudflare's edge) and returns
+// real result links; we decode the uddg= redirects and open the top result for
+// details. Falls back to s.jina.ai then Wikipedia. No BRAVE_API_KEY needed.
 async function serverSearch(env: Env, query: string): Promise<string> {
-  const brave = await braveSearch(env, query);
-  if (brave) return brave;
-  // 1) DuckDuckGo HTML directly from the edge (server-side, real browser UA) —
-  // returns real result links + snippets; then open the top result for details.
+  // 1) DuckDuckGo Lite via r.jina.ai — verified keyless, returns real results.
   try {
-    const r = await fetch(`https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`, {
-      method: "POST",
-      headers: { "User-Agent": UA, "Content-Type": "application/x-www-form-urlencoded", Accept: "text/html" },
-      body: `q=${encodeURIComponent(query)}`,
+    const ddgUrl = `https://lite.duckduckgo.com/lite/?q=${encodeURIComponent(query)}`;
+    const r = await fetch(`https://r.jina.ai/${ddgUrl}`, {
+      headers: { "X-Return-Format": "markdown", Accept: "text/plain", "User-Agent": UA },
     });
     if (r.ok) {
-      const html = await r.text();
-      const out: string[] = [];
-      const re = /<a[^>]*class="result__a"[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/gi;
-      let m: RegExpExecArray | null;
-      while ((m = re.exec(html)) && out.length < 6) {
-        let url = m[1];
-        const um = url.match(/uddg=([^&]+)/);
-        if (um) try { url = decodeURIComponent(um[1]); } catch {}
-        const title = m[2].replace(/<[^>]+>/g, "").trim();
-        if (title && url.startsWith("http")) out.push(`- [${title}](${url})`);
-      }
-      if (out.length) {
-        let result = out.join("\n");
-        const top = out[0].match(/\((https?:\/\/[^)]+)\)/)?.[1];
-        if (top) { const page = await serverFetch(top); if (page && page.length > 200) result += `\n\n--- Top result (${top}) ---\n${page.slice(0, 3500)}`; }
-        return result.slice(0, 6000);
+      const text = await r.text();
+      const results = parseDdgLite(text);
+      if (results.length) {
+        const lines = results.map((x) => `- [${x.title}](${x.url})`);
+        let out = lines.join("\n");
+        const top = results[0].url;
+        const page = await serverFetch(top);
+        if (page && page.length > 200) out += `\n\n--- Top result (${top}) ---\n${page.slice(0, 3500)}`;
+        return out.slice(0, 6000);
       }
     }
   } catch {}
-  // 2) Jina search (may be rate-limited from CF IPs).
+  // 2) s.jina.ai search (may be rate-limited from CF IPs).
   try {
     const r = await fetch(`https://s.jina.ai/${encodeURIComponent(query)}`, { headers: { "X-Return-Format": "markdown", Accept: "text/plain", "User-Agent": UA } });
     if (r.ok) { const md = (await r.text()).trim(); if (md.length > 120) return md.slice(0, 6000); }
   } catch {}
+  // 3) Last resort: Wikipedia search page (always reachable).
   return serverFetch(`https://en.wikipedia.org/wiki/Special:Search?search=${encodeURIComponent(query)}`);
 }
 
