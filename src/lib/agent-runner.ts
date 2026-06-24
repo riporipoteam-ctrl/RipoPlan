@@ -1,5 +1,5 @@
 import { groq, GROQ_MODEL, VISION_MODEL, NVIDIA_MODEL, BACKEND_CHAT_MODEL, isReasoningModel, isVisionModel, isNvidiaModel, nvidiaModelId, isWorkerModel, workerModelId, type ChatMessage } from "./groq";
-import { executeTool, schemasForTools, connectorSchemas, toolLabel, IMAGE_TOOL_SCHEMA, RANK_TOOL_SCHEMAS, UTILITY_TOOL_SCHEMAS, generateImage } from "./tools";
+import { executeTool, schemasForTools, connectorSchemas, toolLabel, IMAGE_TOOL_SCHEMA, RANK_TOOL_SCHEMAS, UTILITY_TOOL_SCHEMAS, renderSite, generateImage } from "./tools";
 import { getBackendUrl } from "./backend";
 import { getUnfiltered } from "./prefs";
 import type { Activity, Agent } from "./types";
@@ -87,7 +87,7 @@ async function complete(
   throw lastErr;
 }
 
-const TOOL_NAMES = ["web_search", "browse", "code", "create_agent", "delegate", "generate_image", "github", "slack", "build_app"];
+const TOOL_NAMES = ["web_search", "browse", "code", "create_agent", "delegate", "generate_image", "github", "slack", "build_app", "build_site"];
 
 /** Detect a tool call a model wrote as plain text instead of a real call. */
 function parseLeakedToolCall(content: string): { name: string; args: any } | null {
@@ -398,6 +398,13 @@ export async function runAgent(input: RunInput): Promise<RunOutput> {
       result = reply
         ? { ok: true, output: `Delegated to @${args.handle}. They replied: ${reply.slice(0, 500)}` }
         : { ok: false, output: `Could not delegate to @${args.handle}.` };
+    } else if (name === "build_site") {
+      // Structured content → rendered into a polished template (never unstyled).
+      const html = renderSite(args);
+      const card = input.onBuildApp ? await input.onBuildApp({ name: String(args.name || "Website"), description: args.tagline, html }) : null;
+      result = card
+        ? (builtApps.push(card), { ok: true, output: `Published "${card.name}" to Mini Apps with a full styled design. Tell the user it's ready to preview there.` })
+        : { ok: false, output: "Could not publish the site." };
     } else if (name === "build_app") {
       const card = input.onBuildApp
         ? await input.onBuildApp({ name: String(args.name || "App"), description: args.description, html: String(args.html || "") })
