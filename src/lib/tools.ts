@@ -453,12 +453,31 @@ async function jinaSearch(query: string): Promise<ToolResult> {
   }
 }
 
+// Fetch a URL's raw text through whichever CORS proxy works (browser-safe).
+async function corsGet(url: string): Promise<string> {
+  const proxies = [
+    (u: string) => `https://api.allorigins.win/raw?url=${encodeURIComponent(u)}`,
+    (u: string) => `https://corsproxy.io/?url=${encodeURIComponent(u)}`,
+    (u: string) => `https://thingproxy.freeboard.io/fetch/${u}`,
+  ];
+  for (const p of proxies) {
+    try {
+      const res = await fetch(p(url));
+      if (res.ok) {
+        const t = await res.text();
+        if (t && t.length > 60) return t;
+      }
+    } catch {}
+  }
+  return "";
+}
+
 // CORS proxy fallback: fetch DuckDuckGo HTML and parse real result links.
 async function proxyDdgSearch(query: string): Promise<ToolResult> {
   try {
     const target = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`;
-    const res = await fetch(`https://api.allorigins.win/raw?url=${encodeURIComponent(target)}`);
-    const html = await res.text();
+    const html = await corsGet(target);
+    if (!html) return { ok: false, output: "" };
     const out: string[] = [];
     const re = /<a[^>]*class="result__a"[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>[\s\S]*?(?:result__snippet[^>]*>([\s\S]*?)<\/a>)?/gi;
     let m: RegExpExecArray | null;
@@ -501,8 +520,15 @@ export async function webSearch(query: string): Promise<ToolResult> {
     const ddg = await proxyDdgSearch(query);
     if (ddg.ok) base = ddg;
   }
+  if (!base.ok || base.output.length < 80) {
+    const ddg = await proxyDdgSearch(query);
+    if (ddg.ok) base = ddg;
+  }
   if (!base.ok) base = await wikipediaSearch(query);
-  if (!base.ok) return base;
+  // Hard "no results" signal so the agent reports it instead of inventing data.
+  if (!base.ok || base.output.replace(/\s/g, "").length < 40) {
+    return { ok: false, output: "NO_LIVE_RESULTS — the live web search returned nothing usable. Tell the user you couldn't fetch live results right now and do NOT invent any names, prices, or links." };
+  }
   // Deep search: open the top real result and pull its actual content so the
   // agent gives concrete facts/links, not just a list of site names.
   const link = (base.output.match(/https?:\/\/(?!(?:html\.)?duckduckgo\.com)[^\s)\]"']+/i) || [])[0];
@@ -523,27 +549,26 @@ export async function browse(url: string): Promise<ToolResult> {
   const viaBackend = await backendBrowse({ url });
   if (viaBackend) return viaBackend;
   const target = url.startsWith("http") ? url : `https://${url}`;
+  // Jina reader renders the page server-side (executes JS) and returns markdown.
   try {
-    const res = await fetch(`https://r.jina.ai/${target}`);
+    const res = await fetch(`https://r.jina.ai/${target}`, { headers: { "X-Return-Format": "markdown" } });
     if (res.ok) {
       const text = await res.text();
-      if (text.length > 80) return { ok: true, output: text.slice(0, 5000) };
+      if (text.length > 80) return { ok: true, output: text.slice(0, 6000) };
     }
   } catch {}
   // Fallback: CORS proxy + strip tags.
-  try {
-    const res = await fetch(`https://api.allorigins.win/raw?url=${encodeURIComponent(target)}`);
-    let html = await res.text();
-    html = html
+  const html = await corsGet(target);
+  if (html) {
+    const text = html
       .replace(/<script[\s\S]*?<\/script>/gi, "")
       .replace(/<style[\s\S]*?<\/style>/gi, "")
       .replace(/<[^>]+>/g, " ")
       .replace(/\s+/g, " ")
       .trim();
-    return { ok: html.length > 80, output: html.slice(0, 5000) };
-  } catch (e: any) {
-    return { ok: false, output: `Failed to fetch ${url}: ${e.message}` };
+    if (text.length > 80) return { ok: true, output: text.slice(0, 6000) };
   }
+  return { ok: false, output: `Couldn't fetch ${url} — the page may be blocking automated access.` };
 }
 
 // ------- Sandboxed code (browser, no node:vm) -------
