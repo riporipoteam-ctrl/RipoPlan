@@ -131,7 +131,7 @@ async function serverFetch(url: string): Promise<string> {
     if (r.ok) { const t = await r.text(); if (t.length > 80) return t.slice(0, 6000); }
   } catch {}
   try {
-    const r = await fetch(target, { headers: { "User-Agent": "Mozilla/5.0 AgentNexusBot" } });
+    const r = await fetch(target, { headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36", Accept: "text/html" } });
     let html = await r.text();
     html = html.replace(/<script[\s\S]*?<\/script>/gi, "").replace(/<style[\s\S]*?<\/style>/gi, "").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
     return html.slice(0, 6000);
@@ -146,18 +146,41 @@ async function liveBrowse(env: Env, url: string): Promise<string> {
   return serverFetch(url);
 }
 
+const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36";
+
 async function serverSearch(query: string): Promise<string> {
+  // 1) DuckDuckGo HTML directly from the edge (server-side, real browser UA) —
+  // returns real result links + snippets; then open the top result for details.
   try {
-    const r = await fetch(`https://s.jina.ai/${encodeURIComponent(query)}`, { headers: { "X-Return-Format": "markdown", Accept: "text/plain" } });
-    if (r.ok) { const md = (await r.text()).trim(); if (md.length > 120) return md.slice(0, 6000); }
-  } catch {}
-  try {
-    const r = await fetch(`https://r.jina.ai/https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`, { headers: { "X-Return-Format": "markdown" } });
+    const r = await fetch(`https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`, {
+      method: "POST",
+      headers: { "User-Agent": UA, "Content-Type": "application/x-www-form-urlencoded", Accept: "text/html" },
+      body: `q=${encodeURIComponent(query)}`,
+    });
     if (r.ok) {
-      let md = await r.text();
-      md = md.replace(/https?:\/\/(?:html\.)?duckduckgo\.com\/l\/\?uddg=([^)&\s]+)[^)\s]*/g, (_m, u) => { try { return decodeURIComponent(u); } catch { return _m; } });
-      return md.slice(0, 5000);
+      const html = await r.text();
+      const out: string[] = [];
+      const re = /<a[^>]*class="result__a"[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/gi;
+      let m: RegExpExecArray | null;
+      while ((m = re.exec(html)) && out.length < 6) {
+        let url = m[1];
+        const um = url.match(/uddg=([^&]+)/);
+        if (um) try { url = decodeURIComponent(um[1]); } catch {}
+        const title = m[2].replace(/<[^>]+>/g, "").trim();
+        if (title && url.startsWith("http")) out.push(`- [${title}](${url})`);
+      }
+      if (out.length) {
+        let result = out.join("\n");
+        const top = out[0].match(/\((https?:\/\/[^)]+)\)/)?.[1];
+        if (top) { const page = await serverFetch(top); if (page && page.length > 200) result += `\n\n--- Top result (${top}) ---\n${page.slice(0, 3500)}`; }
+        return result.slice(0, 6000);
+      }
     }
+  } catch {}
+  // 2) Jina search (may be rate-limited from CF IPs).
+  try {
+    const r = await fetch(`https://s.jina.ai/${encodeURIComponent(query)}`, { headers: { "X-Return-Format": "markdown", Accept: "text/plain", "User-Agent": UA } });
+    if (r.ok) { const md = (await r.text()).trim(); if (md.length > 120) return md.slice(0, 6000); }
   } catch {}
   return serverFetch(`https://en.wikipedia.org/wiki/Special:Search?search=${encodeURIComponent(query)}`);
 }
