@@ -27,6 +27,7 @@ interface Env {
   SUPABASE_SERVICE_KEY?: string;
   AGENT_MODEL?: string;
   GROQ_API_KEY?: string;
+  BRAVE_API_KEY?: string;
   NVIDIA_API_KEY?: string;
   GOOGLE_CLIENT_ID?: string;
   GOOGLE_CLIENT_SECRET?: string;
@@ -148,7 +149,29 @@ async function liveBrowse(env: Env, url: string): Promise<string> {
 
 const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36";
 
-async function serverSearch(query: string): Promise<string> {
+// Brave Search API (free tier) — the only reliable real web search from a
+// datacenter IP. Set BRAVE_API_KEY secret to enable it.
+async function braveSearch(env: Env, query: string): Promise<string> {
+  if (!env.BRAVE_API_KEY) return "";
+  try {
+    const r = await fetch(`https://api.search.brave.com/res/v1/web/search?q=${encodeURIComponent(query)}&count=8`, {
+      headers: { Accept: "application/json", "X-Subscription-Token": env.BRAVE_API_KEY },
+    });
+    if (!r.ok) return "";
+    const d = await r.json<any>();
+    const results = d?.web?.results || [];
+    if (!results.length) return "";
+    const lines = results.slice(0, 8).map((x: any) => `- [${x.title}](${x.url})\n  ${(x.description || "").replace(/<[^>]+>/g, "")}`);
+    let out = lines.join("\n");
+    const top = results[0]?.url;
+    if (top) { const page = await serverFetch(top); if (page && page.length > 200) out += `\n\n--- Top result (${top}) ---\n${page.slice(0, 3500)}`; }
+    return out.slice(0, 6000);
+  } catch { return ""; }
+}
+
+async function serverSearch(env: Env, query: string): Promise<string> {
+  const brave = await braveSearch(env, query);
+  if (brave) return brave;
   // 1) DuckDuckGo HTML directly from the edge (server-side, real browser UA) —
   // returns real result links + snippets; then open the top result for details.
   try {
@@ -214,7 +237,7 @@ async function runServerAgent(env: Env, system: string, history: any[]): Promise
     messages.push({ role: "assistant", content: msg.content || "", tool_calls: calls });
     for (const c of calls) {
       let args: any = {}; try { args = JSON.parse(c.function.arguments || "{}"); } catch {}
-      const out = c.function.name === "web_search" ? await serverSearch(String(args.query || "")) : await liveBrowse(env, String(args.url || ""));
+      const out = c.function.name === "web_search" ? await serverSearch(env, String(args.query || "")) : await liveBrowse(env, String(args.url || ""));
       messages.push({ role: "tool", tool_call_id: c.id, name: c.function.name, content: out.slice(0, 6000) });
     }
   }
@@ -369,7 +392,7 @@ export default {
 
     if (url.pathname === "/browse" && req.method === "POST") {
       const { url: u, query } = await req.json<any>();
-      const out = query ? await serverSearch(String(query)) : await liveBrowse(env, String(u || ""));
+      const out = query ? await serverSearch(env, String(query)) : await liveBrowse(env, String(u || ""));
       return Response.json({ ok: true, content: out }, { headers: cors(env) });
     }
 
