@@ -1,4 +1,8 @@
-name = "agentnexus-backend"
+# Deploy INTO the existing, already-working "ripoai-nvidia" worker (creating a
+# brand-new worker fails with API error 7003 on this token). The app's BACKEND_URL
+# already points here, so updating it lights up search/browse/tasks/Gmail with no
+# extra config. This code is a superset (chat + image + browse + tasks + oauth).
+name = "ripoai-nvidia"
 main = "src/index.ts"
 compatibility_date = "2024-11-01"
 compatibility_flags = ["nodejs_compat"]

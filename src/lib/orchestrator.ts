@@ -622,7 +622,7 @@ async function runBuildFlow(opts: DispatchOpts, connectors: Record<string, strin
         {
           role: "user",
           content:
-            `The user asked: "${opts.userContent}". You are the project lead. Research anything useful (search the web if it helps), then write a DETAILED build brief for our coding agent to build a top-tier single-page website/web app. Include: goal & audience; the sections/pages in order; concrete copy/text for each section; a colour palette (hex) and font pairing; layout & visual style; key interactions/animations; and 4-8 specific royalty-free image URLs using the form https://source.unsplash.com/1600x900/?KEYWORD (pick good keywords). Be concrete and opinionated. Output ONLY the brief in Markdown.`,
+            `The user asked: "${opts.userContent}". You are the project lead. Research anything useful (search the web if it helps), then write a DETAILED build brief for our coding agent to build a top-tier single-page website. Include: goal & audience; the sections in order; concrete copy/text for each section; a colour palette (hex) and a Google Fonts pairing; layout & visual style; key interactions/animations; and 4-8 image URLs using the working form https://picsum.photos/seed/KEYWORD/1600/900 (pick descriptive keyword seeds). Be concrete and opinionated. Output ONLY the brief in Markdown.`,
         },
       ],
       workspaceName: opts.workspaceName,
@@ -632,7 +632,7 @@ async function runBuildFlow(opts: DispatchOpts, connectors: Record<string, strin
     });
     brief = briefRes.content;
   } catch {
-    brief = `Build a polished, modern single-page site for: "${opts.userContent}". Clean responsive layout, strong hero, multiple sections, royalty-free imagery from https://source.unsplash.com, subtle animations.`;
+    brief = `Build a polished, modern single-page site for: "${opts.userContent}". Clean responsive layout, strong hero, multiple sections, imagery from https://picsum.photos/seed/<keyword>/1600/900, subtle animations.`;
   }
 
   // 2) Open a dedicated channel for the task.
@@ -683,12 +683,17 @@ async function runBuildFlow(opts: DispatchOpts, connectors: Record<string, strin
       ...coder,
       tools: Array.from(new Set([...(coder.tools || []), "build_app", "web_search", "browse", "code"])),
       system_prompt:
-        `You are ${coder.name}, an elite senior web engineer. You build complete, polished, single-file websites. ` +
-        `ABSOLUTE RULE: you MUST deliver by calling the build_app tool with the entire HTML document in the "html" argument. ` +
-        `NEVER paste HTML, CSS or JS into the chat — your visible message must be only a short sentence like "Done — published to Mini Apps ✅". ` +
-        `Inline ALL CSS and JS into ONE <!doctype html> file. Use the provided https://source.unsplash.com image URLs. ` +
-        `Make it genuinely one of the best sites you've built: responsive, modern, accessible, multiple real sections, smooth scroll-in animations, hover effects, polished typography and spacing. ` +
-        `CRITICAL: the document MUST be COMPLETE and valid — every tag closed, ending with </html>. Keep it focused (roughly under 550 lines) so it finishes in one go rather than getting cut off. A complete, working page beats an unfinished long one.`,
+        `You are ${coder.name}, a world-class product designer + front-end engineer. You build STUNNING, complete, single-file websites. ` +
+        `ABSOLUTE RULE: deliver by calling the build_app tool with the entire HTML document in the "html" argument. NEVER paste code in chat — your visible message is only a short "Done — published to Mini Apps ✅". ` +
+        `\n\nDESIGN SYSTEM (follow it):` +
+        `\n• Import a Google Font (e.g. <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap" rel="stylesheet">) and use it.` +
+        `\n• Define CSS variables for colors (a real palette, not default blue), spacing and radius. Dark text on light bg with strong contrast — NEVER white text on a white/empty background.` +
+        `\n• HERO: full-width, min-height 70vh, a background IMAGE from https://picsum.photos/seed/<keyword>/1600/900 with a dark gradient overlay so the white headline is readable, big bold headline, subtext, and a prominent CTA button.` +
+        `\n• Real sections (about, services/features as cards in a responsive grid, gallery, testimonials, contact/footer) with generous padding (e.g. 5rem) and max-width container (~1100px).` +
+        `\n• Buttons: solid accent color, rounded, hover state. Cards: subtle shadow + hover lift. Images: object-fit cover, rounded.` +
+        `\n• Add a sticky top nav and smooth-scroll + simple scroll-in fade animations with a tiny IntersectionObserver script.` +
+        `\n• ALL images must use https://picsum.photos/... URLs (Unsplash source is dead). Use real, specific copy — no lorem ipsum.` +
+        `\nCRITICAL: the document MUST be COMPLETE and valid — every tag closed, ending with </html>. Keep it focused (~550 lines) so it finishes in one go. A complete, beautiful page beats an unfinished long one.`,
     };
     const res = await runAgent({
       agent: coderForBuild,
