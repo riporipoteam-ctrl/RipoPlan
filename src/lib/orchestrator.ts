@@ -681,9 +681,9 @@ async function runBuildFlow(opts: DispatchOpts, connectors: Record<string, strin
     // Override the coder's persona so it ONLY publishes via build_app (never pastes code).
     const coderForBuild: Agent = {
       ...coder,
-      tools: Array.from(new Set([...(coder.tools || []), "build_app", "web_search", "browse", "code"])),
+      tools: Array.from(new Set([...(coder.tools || []), "build_site", "build_app", "web_search", "browse", "code"])),
       system_prompt:
-        `You are ${coder.name}, a world-class product designer + front-end engineer. You build STUNNING, complete, single-file websites. ` +
+        `You are ${coder.name}, a world-class web designer. To build the site, CALL THE build_site TOOL with rich structured content: name, tagline, theme (a hex color that fits the brand), hero_keyword, cta, about, features (3-6 with title/text/icon emoji), gallery (3-6 keywords), testimonials (2-3), and contact. The platform renders a beautiful, animated, responsive design from your content automatically — so focus on GREAT, specific copy (never lorem ipsum) and a fitting color. Do NOT paste HTML; do NOT use build_app unless build_site truly can't express it. Your visible chat message is only a short "Done — published to Mini Apps ✅".\n\n(Legacy notes if you ever must hand-write HTML instead:) ` +
         `ABSOLUTE RULE: deliver by calling the build_app tool with the entire HTML document in the "html" argument. NEVER paste code in chat — your visible message is only a short "Done — published to Mini Apps ✅". ` +
         `\n\nDESIGN SYSTEM (follow it):` +
         `\n• Import a Google Font (e.g. <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap" rel="stylesheet">) and use it.` +
@@ -701,7 +701,7 @@ async function runBuildFlow(opts: DispatchOpts, connectors: Record<string, strin
         {
           role: "user",
           content:
-            `Build this now from the brief below. Call build_app ONCE with the FULL, COMPLETE self-contained HTML document (must end with </html> — do not get cut off; keep it focused). Do NOT paste any code in chat. Use the suggested images. No lorem-ipsum where real copy was given.\n\nBRIEF:\n${brief}`,
+            `Build this now. Call the build_site tool ONCE with rich, specific structured content (name, tagline, theme hex, hero_keyword, cta, about, 3-6 features with emoji icons, gallery keywords, 2-3 testimonials, contact). Write real, polished copy — no lorem ipsum. Do NOT paste code in chat.\n\nBRIEF:\n${brief}`,
         },
       ],
       workspaceName: opts.workspaceName,

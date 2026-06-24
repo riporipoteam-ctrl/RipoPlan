@@ -104,6 +104,129 @@ TOOL_SCHEMAS.build_app = {
   },
 };
 
+// Preferred website builder: the model supplies STRUCTURED CONTENT only (small,
+// never truncated) and we render it into a professionally-designed template, so
+// the result always has real styling, a hero image, cards and animations.
+TOOL_SCHEMAS.build_site = {
+  type: "function",
+  function: {
+    name: "build_site",
+    description:
+      "Build and PUBLISH a beautiful website to Mini Apps. PREFER THIS over build_app. You only provide the CONTENT as structured fields — the platform renders a polished, responsive, animated design automatically. Always fill in real, specific copy.",
+    parameters: {
+      type: "object",
+      properties: {
+        name: { type: "string", description: "Site / business name" },
+        tagline: { type: "string", description: "Hero subtitle (one punchy sentence)" },
+        theme: { type: "string", description: "Primary brand color as hex, e.g. #e11d48" },
+        hero_keyword: { type: "string", description: "1-3 words describing the hero background photo, e.g. 'auto repair garage'" },
+        cta: { type: "string", description: "Hero button text, e.g. 'Book an appointment'" },
+        about: { type: "string", description: "A short 'about' paragraph" },
+        features: {
+          type: "array",
+          description: "3-6 services/features as cards",
+          items: { type: "object", properties: { title: { type: "string" }, text: { type: "string" }, icon: { type: "string", description: "one emoji" } } },
+        },
+        gallery: { type: "array", description: "2-6 keywords for gallery photos", items: { type: "string" } },
+        testimonials: { type: "array", items: { type: "object", properties: { name: { type: "string" }, text: { type: "string" } } } },
+        contact: { type: "object", properties: { phone: { type: "string" }, email: { type: "string" }, address: { type: "string" } } },
+      },
+      required: ["name", "tagline", "features"],
+    },
+  },
+};
+
+const esc = (s: any) => String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+const img = (kw: string, w = 1600, h = 900) => `https://picsum.photos/seed/${encodeURIComponent(String(kw || "site").toLowerCase().replace(/[^a-z0-9]+/g, "-"))}/${w}/${h}`;
+
+/** Render a structured site spec into a polished, self-contained HTML document. */
+export function renderSite(spec: any): string {
+  const name = esc(spec.name || "My Website");
+  const theme = /^#[0-9a-fA-F]{6}$/.test(spec.theme || "") ? spec.theme : "#6d5efc";
+  const tagline = esc(spec.tagline || "Welcome");
+  const cta = esc(spec.cta || "Get in touch");
+  const features = Array.isArray(spec.features) ? spec.features : [];
+  const gallery = Array.isArray(spec.gallery) ? spec.gallery : [];
+  const testimonials = Array.isArray(spec.testimonials) ? spec.testimonials : [];
+  const c = spec.contact || {};
+  const navLinks = [
+    spec.about && ["about", "About"],
+    features.length && ["services", "Services"],
+    gallery.length && ["gallery", "Gallery"],
+    testimonials.length && ["reviews", "Reviews"],
+    (c.phone || c.email || c.address) && ["contact", "Contact"],
+  ].filter(Boolean) as [string, string][];
+
+  const featureCards = features
+    .map(
+      (f: any) => `<div class="card reveal"><div class="ico">${esc(f.icon || "✨")}</div><h3>${esc(f.title || "")}</h3><p>${esc(f.text || "")}</p></div>`
+    )
+    .join("");
+  const galleryImgs = gallery.map((k: string) => `<img class="reveal" loading="lazy" src="${img(k, 800, 600)}" alt="${esc(k)}">`).join("");
+  const testiCards = testimonials
+    .map((t: any) => `<figure class="quote reveal"><blockquote>“${esc(t.text || "")}”</blockquote><figcaption>— ${esc(t.name || "Happy customer")}</figcaption></figure>`)
+    .join("");
+
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>${name}</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;600;800&display=swap" rel="stylesheet">
+<style>
+:root{--c:${theme};--ink:#15151c;--muted:#5b5b6b;--bg:#ffffff;--soft:#f5f5fb;--radius:18px}
+*{box-sizing:border-box;margin:0;padding:0}
+html{scroll-behavior:smooth}
+body{font-family:'Plus Jakarta Sans',system-ui,sans-serif;color:var(--ink);background:var(--bg);line-height:1.6}
+img{max-width:100%;display:block}
+.wrap{max-width:1120px;margin:0 auto;padding:0 24px}
+a{color:inherit;text-decoration:none}
+header{position:sticky;top:0;z-index:50;background:rgba(255,255,255,.8);backdrop-filter:blur(12px);border-bottom:1px solid #eee}
+nav{display:flex;align-items:center;justify-content:space-between;height:66px}
+nav .brand{font-weight:800;font-size:1.2rem}
+nav .links{display:flex;gap:26px}nav .links a{color:var(--muted);font-weight:600;font-size:.95rem}nav .links a:hover{color:var(--c)}
+@media(max-width:680px){nav .links{display:none}}
+.btn{display:inline-block;background:var(--c);color:#fff;font-weight:700;padding:14px 26px;border-radius:999px;box-shadow:0 10px 24px -10px var(--c);transition:transform .15s}
+.btn:hover{transform:translateY(-2px)}
+.hero{position:relative;min-height:88vh;display:flex;align-items:center;color:#fff;text-align:center;background:url('${img(spec.hero_keyword || spec.name)}') center/cover}
+.hero::before{content:"";position:absolute;inset:0;background:linear-gradient(180deg,rgba(10,10,20,.55),rgba(10,10,20,.78))}
+.hero .wrap{position:relative}
+.hero h1{font-size:clamp(2.4rem,6vw,4.4rem);font-weight:800;letter-spacing:-.02em;max-width:14ch;margin:0 auto}
+.hero p{font-size:clamp(1.05rem,2.5vw,1.4rem);opacity:.92;max-width:46ch;margin:18px auto 30px}
+section{padding:96px 0}
+.section-title{font-size:clamp(1.8rem,4vw,2.6rem);font-weight:800;letter-spacing:-.02em;text-align:center;margin-bottom:14px}
+.section-sub{color:var(--muted);text-align:center;max-width:60ch;margin:0 auto 52px}
+.soft{background:var(--soft)}
+.grid{display:grid;gap:24px;grid-template-columns:repeat(auto-fit,minmax(250px,1fr))}
+.card{background:#fff;border:1px solid #eee;border-radius:var(--radius);padding:30px;box-shadow:0 12px 30px -22px rgba(0,0,0,.4);transition:transform .2s,box-shadow .2s}
+.card:hover{transform:translateY(-4px);box-shadow:0 20px 40px -24px rgba(0,0,0,.45)}
+.card .ico{font-size:2rem;margin-bottom:12px}.card h3{font-size:1.2rem;margin-bottom:8px}.card p{color:var(--muted)}
+.gallery{display:grid;gap:16px;grid-template-columns:repeat(auto-fit,minmax(220px,1fr))}
+.gallery img{height:240px;width:100%;object-fit:cover;border-radius:var(--radius)}
+.quotes{display:grid;gap:24px;grid-template-columns:repeat(auto-fit,minmax(280px,1fr))}
+.quote{background:#fff;border-radius:var(--radius);padding:28px;border:1px solid #eee}
+.quote blockquote{font-size:1.05rem;margin-bottom:14px}.quote figcaption{color:var(--c);font-weight:700}
+.about{max-width:760px;margin:0 auto;text-align:center;font-size:1.2rem;color:var(--muted)}
+.contact{display:flex;flex-wrap:wrap;gap:14px;justify-content:center;color:var(--muted);font-size:1.05rem}
+.contact b{color:var(--ink)}
+footer{padding:40px 0;text-align:center;color:var(--muted);border-top:1px solid #eee}
+.reveal{opacity:0;transform:translateY(24px);transition:opacity .6s,transform .6s}
+.reveal.in{opacity:1;transform:none}
+</style></head>
+<body>
+<header><div class="wrap"><nav><span class="brand">${name}</span><div class="links">${navLinks.map(([id, l]) => `<a href="#${id}">${esc(l)}</a>`).join("")}</div>${(c.phone || c.email) ? `<a class="btn" href="#contact" style="padding:10px 20px">${cta}</a>` : ""}</nav></div></header>
+<section class="hero"><div class="wrap"><h1>${name}</h1><p>${tagline}</p><a class="btn" href="#${navLinks[0]?.[0] || "contact"}">${cta}</a></div></section>
+${spec.about ? `<section id="about"><div class="wrap"><h2 class="section-title">About us</h2><p class="about reveal">${esc(spec.about)}</p></div></section>` : ""}
+${features.length ? `<section id="services" class="soft"><div class="wrap"><h2 class="section-title">What we offer</h2><p class="section-sub">Everything you need, done right.</p><div class="grid">${featureCards}</div></div></section>` : ""}
+${gallery.length ? `<section id="gallery"><div class="wrap"><h2 class="section-title">Gallery</h2><div class="gallery">${galleryImgs}</div></div></section>` : ""}
+${testimonials.length ? `<section id="reviews" class="soft"><div class="wrap"><h2 class="section-title">What customers say</h2><div class="quotes">${testiCards}</div></div></section>` : ""}
+${(c.phone || c.email || c.address) ? `<section id="contact"><div class="wrap"><h2 class="section-title">Get in touch</h2><div class="contact reveal">${c.phone ? `<span><b>Phone:</b> ${esc(c.phone)}</span>` : ""}${c.email ? `<span><b>Email:</b> ${esc(c.email)}</span>` : ""}${c.address ? `<span><b>Address:</b> ${esc(c.address)}</span>` : ""}</div></div></section>` : ""}
+<footer>© ${new Date().getFullYear()} ${name}. All rights reserved.</footer>
+<script>
+const io=new IntersectionObserver((es)=>es.forEach(e=>{if(e.isIntersecting){e.target.classList.add('in');io.unobserve(e.target)}}),{threshold:.12});
+document.querySelectorAll('.reveal').forEach(el=>io.observe(el));
+</script>
+</body></html>`;
+}
+
 export function schemasForTools(tools: string[]) {
   const names = new Set(tools);
   return Object.entries(TOOL_SCHEMAS)
@@ -657,7 +780,8 @@ export function toolLabel(name: string, args: any): string {
     case "delegate":
       return `Delegating to @${args.handle}`;
     case "build_app":
-      return `Building app: ${args.name || "web app"}`;
+    case "build_site":
+      return `Designing site: ${args.name || "website"}`;
     case "create_rank":
       return `Creating rank: ${args.name || "rank"}`;
     case "assign_rank":
