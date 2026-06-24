@@ -4,6 +4,10 @@
 # extra config. This code is a superset (chat + image + browse + tasks + oauth).
 name = "ripoai-nvidia"
 main = "src/index.ts"
+# Account ID for "Ripo.ripoteam@gmail.com's Account" (from `wrangler whoami`).
+# Account IDs are not secret — this is what the account-scoped token needs to
+# avoid the /memberships auto-detect that fails for account tokens.
+account_id = "bb47472865954858c5044e5521884bf1"
 compatibility_date = "2024-11-01"
 compatibility_flags = ["nodejs_compat"]
 
