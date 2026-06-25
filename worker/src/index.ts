@@ -223,7 +223,45 @@ async function agentChat(env: Env, messages: any[], tools?: any[]): Promise<any>
 }
 
 function clean(t: string): string {
-  return (t || "").replace(/<think>[\s\S]*?<\/think>/gi, "").replace(/<\/?[A-Z][\w-]{1,30}>/g, "").trim();
+  return (t || "")
+    .replace(/<think>[\s\S]*?<\/think>/gi, "")
+    .replace(/<tool_call>[\s\S]*?<\/tool_call>/gi, "")
+    .replace(/<tool_call>[\s\S]*$/i, "")
+    .replace(/<\/?arg_(?:key|value)>/gi, "")
+    .replace(/<\/?[A-Z][\w-]{1,30}>/g, "")
+    .trim();
+}
+
+// GLM-5.2 on Workers AI often writes its tool call as TEXT instead of a real
+// tool_call: <tool_call>web_search<arg_key>query</arg_key><arg_value>…</arg_value></tool_call>
+// (or the JSON variant). Parse that so background agents actually run the search.
+function parseTextToolCall(content: string): { name: string; args: any } | null {
+  if (!content) return null;
+  const block = /<tool_call>\s*([\s\S]*?)(?:<\/tool_call>|$)/i.exec(content);
+  if (!block) return null;
+  const inner = block[1].trim();
+  if (!inner) return null;
+  const jm = /\{[\s\S]*\}/.exec(inner);
+  if (jm && /["']?(name|tool|function)["']?\s*:/i.test(inner)) {
+    try {
+      const o = JSON.parse(jm[0]);
+      const name = o.name || o.tool || o.function?.name;
+      const args = o.arguments || o.args || o.parameters || o.function?.arguments || {};
+      if (name) return { name, args: typeof args === "string" ? { query: args, url: args } : args };
+    } catch {}
+  }
+  const name = inner.match(/^([a-z_][a-z0-9_]*)/i)?.[1];
+  if (!name) return null;
+  const args: any = {};
+  const re = /<arg_key>\s*([\s\S]*?)\s*<\/arg_key>\s*<arg_value>\s*([\s\S]*?)\s*(?:<\/arg_value>|$)/gi;
+  let p: RegExpExecArray | null;
+  while ((p = re.exec(inner))) args[p[1].trim()] = p[2].trim();
+  return { name, args };
+}
+
+async function runToolByName(env: Env, name: string, args: any): Promise<string> {
+  if (name === "web_search") return serverSearch(env, String(args.query || args.q || ""));
+  return liveBrowse(env, String(args.url || args.query || ""));
 }
 
 async function runServerAgent(env: Env, system: string, history: any[]): Promise<string> {
@@ -233,15 +271,25 @@ async function runServerAgent(env: Env, system: string, history: any[]): Promise
     const msg = res.choices?.[0]?.message;
     if (!msg) break;
     const calls = msg.tool_calls || [];
-    if (!calls.length) return clean(msg.content || "") || "Done.";
+    if (!calls.length) {
+      // No structured call — maybe GLM emitted it as text. Execute & continue.
+      const leaked = round < 2 ? parseTextToolCall(msg.content || "") : null;
+      if (leaked) {
+        const out = await runToolByName(env, leaked.name, leaked.args);
+        messages.push({ role: "assistant", content: "" });
+        messages.push({ role: "user", content: `[result of ${leaked.name}]\n${out.slice(0, 6000)}` });
+        continue;
+      }
+      return clean(msg.content || "") || "Done.";
+    }
     messages.push({ role: "assistant", content: msg.content || "", tool_calls: calls });
     for (const c of calls) {
       let args: any = {}; try { args = JSON.parse(c.function.arguments || "{}"); } catch {}
-      const out = c.function.name === "web_search" ? await serverSearch(env, String(args.query || "")) : await liveBrowse(env, String(args.url || ""));
+      const out = await runToolByName(env, c.function.name, args);
       messages.push({ role: "tool", tool_call_id: c.id, name: c.function.name, content: out.slice(0, 6000) });
     }
   }
-  const fin = await agentChat(env, [...messages, { role: "user", content: "Give your final answer now." }]);
+  const fin = await agentChat(env, [...messages, { role: "user", content: "Give your final answer now, in plain prose. Do NOT output any tool call syntax." }]);
   return clean(fin.choices?.[0]?.message?.content || "") || "Done.";
 }
 

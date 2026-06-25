@@ -87,11 +87,54 @@ async function complete(
   throw lastErr;
 }
 
-const TOOL_NAMES = ["web_search", "browse", "code", "create_agent", "delegate", "generate_image", "github", "slack", "build_app", "build_site"];
+const TOOL_NAMES = ["web_search", "browse", "code", "create_agent", "delegate", "generate_image", "github", "slack", "build_app", "build_site", "create_rank", "assign_rank", "edit_rank", "weather", "currency", "crypto_price", "dictionary", "qr_code", "datetime", "gmail"];
+
+const KNOWN_TOOL = new Set(TOOL_NAMES);
+
+/** Parse one value that may be JSON (number/object/array/quoted) or a raw string. */
+function coerceVal(raw: string): any {
+  const t = (raw || "").trim();
+  if (!t) return "";
+  try { return JSON.parse(t); } catch {}
+  return t;
+}
+
+/** GLM/Hermes-style: <tool_call>name<arg_key>k</arg_key><arg_value>v</arg_value>…</tool_call>
+ *  (also handles the JSON variant <tool_call>{"name":..,"arguments":{..}}</tool_call>),
+ *  including when the closing </tool_call> was truncated. */
+function parseXmlToolCall(content: string): { name: string; args: any } | null {
+  // Match a <tool_call> block; tolerate a missing closing tag (truncated output).
+  const block = /<tool_call>\s*([\s\S]*?)(?:<\/tool_call>|$)/i.exec(content);
+  if (!block) return null;
+  const inner = block[1].trim();
+  if (!inner) return null;
+  // JSON variant: {"name": "web_search", "arguments": {...}}
+  const jm = /\{[\s\S]*\}/.exec(inner);
+  if (jm && /["']?(name|tool|function)["']?\s*:/i.test(inner)) {
+    try {
+      const o = JSON.parse(jm[0]);
+      const name = o.name || o.tool || o.function?.name;
+      const args = o.arguments || o.args || o.parameters || o.function?.arguments || {};
+      if (name && KNOWN_TOOL.has(name)) return { name, args: typeof args === "string" ? coerceVal(args) : args };
+    } catch {}
+  }
+  // Key/value variant: leading function name, then <arg_key>/<arg_value> pairs.
+  const nameMatch = inner.match(/^([a-z_][a-z0-9_]*)/i);
+  const name = nameMatch?.[1];
+  if (!name || !KNOWN_TOOL.has(name)) return null;
+  const args: any = {};
+  const pairRe = /<arg_key>\s*([\s\S]*?)\s*<\/arg_key>\s*<arg_value>\s*([\s\S]*?)\s*(?:<\/arg_value>|$)/gi;
+  let p: RegExpExecArray | null;
+  while ((p = pairRe.exec(inner))) args[p[1].trim()] = coerceVal(p[2]);
+  return { name, args };
+}
 
 /** Detect a tool call a model wrote as plain text instead of a real call. */
 function parseLeakedToolCall(content: string): { name: string; args: any } | null {
   if (!content) return null;
+  // GLM-5.2 / Hermes XML tool-call format takes priority (it's what Workers AI emits).
+  const xml = parseXmlToolCall(content);
+  if (xml) return xml;
   for (const n of TOOL_NAMES) {
     const pats = [
       new RegExp(`<${n}>\\s*(\\{[\\s\\S]*?\\})`, "i"),
@@ -117,6 +160,8 @@ function sanitize(text: string): string {
     .replace(/<think>[\s\S]*?<\/think>/gi, "")
     .replace(/<think>[\s\S]*$/i, "")
     .replace(/<tool_call>[\s\S]*?<\/tool_call>/gi, "")
+    .replace(/<tool_call>[\s\S]*$/i, "") // truncated tool call (no closing tag)
+    .replace(/<\/?arg_(?:key|value)>/gi, "") // stray GLM arg tags
     .replace(/<\|?function[\s\S]*?>[\s\S]*?<\/?\|?function[^>]*>/gi, "")
     .replace(/<function=[\s\S]*$/i, "");
   const names = "web_search|browse|code|create_agent|delegate|generate_image|github|slack|build_app|create_rank|assign_rank|edit_rank";
