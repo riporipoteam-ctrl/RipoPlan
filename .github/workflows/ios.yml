@@ -1,78 +1,99 @@
-name: Build iOS IPA
+name: Build iOS app (.ipa)
 
-# Builds an UNSIGNED .ipa of AgentNexus (download from Artifacts, install with
-# Sideloadly) AND captures a REAL screenshot of the app running in the iOS
-# Simulator. Run from the Actions tab → "Build iOS IPA" → Run workflow.
-
+# Builds the REAL native SwiftUI app (ios-native/) into a sideloadable .ipa on a
+# free GitHub-hosted macOS runner — no Mac needed on your end. It also boots the
+# iOS Simulator and captures a real screenshot of the native app running.
+#
+# Outputs:
+#   • Artifacts: "AskAI-ipa" (the .ipa) and "AskAI-ios-screenshot".
+#   • A rolling "ios-latest" pre-release with the .ipa attached, so you can grab
+#     it straight on your iPhone and sideload with AltStore / Sideloadly
+#     (they re-sign it with your own free Apple ID).
 on:
+  push:
+    branches: [main]
+    paths:
+      - "ios-native/**"
+      - ".github/workflows/ios.yml"
   workflow_dispatch:
+
+permissions:
+  contents: write
 
 jobs:
   ipa:
-    runs-on: macos-14
+    runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 20
-      - name: Install deps
-        run: npm install
-      - name: Build web (Capacitor target) + sync iOS
+      - name: Install XcodeGen
+        run: brew install xcodegen
+      - name: Generate Xcode project
+        working-directory: ios-native
+        run: xcodegen generate
+      - name: Build (unsigned, device)
+        working-directory: ios-native
         run: |
-          CAP_BUILD=1 npx next build
-          npx cap add ios || true
-          npx cap sync ios
-      - name: Archive (unsigned)
-        working-directory: ios/App
+          set -o pipefail
+          xcodebuild \
+            -project AskAI.xcodeproj -scheme AskAI -configuration Release \
+            -sdk iphoneos -destination 'generic/platform=iOS' -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
+            clean build
+      - name: Package .ipa
+        working-directory: ios-native
         run: |
-          xcodebuild -workspace App.xcworkspace -scheme App -configuration Release \
-            -sdk iphoneos -archivePath "$PWD/build/App.xcarchive" archive \
-            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" PROVISIONING_PROFILE_SPECIFIER=""
-      - name: Package unsigned IPA
-        working-directory: ios/App
-        run: |
-          mkdir -p build/Payload
-          cp -R build/App.xcarchive/Products/Applications/App.app build/Payload/
-          cd build && zip -r AgentNexus-unsigned.ipa Payload >/dev/null && ls -lh AgentNexus-unsigned.ipa
+          APP=$(find build/Build/Products/Release-iphoneos -maxdepth 1 -name "*.app" | head -1)
+          echo "App: $APP"
+          rm -rf Payload AskAI-unsigned.ipa
+          mkdir -p Payload && cp -R "$APP" Payload/
+          zip -qry AskAI-unsigned.ipa Payload
+          ls -lh AskAI-unsigned.ipa
       - uses: actions/upload-artifact@v4
         with:
-          name: AgentNexus-iOS-ipa
-          path: ios/App/build/AgentNexus-unsigned.ipa
+          name: AskAI-ipa
+          path: ios-native/AskAI-unsigned.ipa
           if-no-files-found: error
+      - name: Publish to rolling pre-release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ios-latest
+          name: AskAI iOS (latest)
+          prerelease: true
+          body: |
+            Unsigned **AskAI.ipa** built from the native SwiftUI app.
+            Sideload with AltStore or Sideloadly (re-signs with your own Apple ID).
+          files: ios-native/AskAI-unsigned.ipa
 
   screenshot:
-    runs-on: macos-14
+    runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 20
-      - name: Install deps
-        run: npm install
-      - name: Build web (Capacitor target) + sync iOS
+      - name: Install XcodeGen
+        run: brew install xcodegen
+      - name: Generate Xcode project
+        working-directory: ios-native
+        run: xcodegen generate
+      - name: Build for Simulator
+        working-directory: ios-native
         run: |
-          CAP_BUILD=1 npx next build
-          npx cap add ios || true
-          npx cap sync ios
-      - name: Build app for Simulator
-        working-directory: ios/App
-        run: |
-          xcodebuild -workspace App.xcworkspace -scheme App -configuration Debug \
-            -sdk iphonesimulator -derivedDataPath dd build CODE_SIGNING_ALLOWED=NO
+          xcodebuild \
+            -project AskAI.xcodeproj -scheme AskAI -configuration Debug \
+            -sdk iphonesimulator -derivedDataPath dd \
+            CODE_SIGNING_ALLOWED=NO build
       - name: Boot Simulator, launch app, capture screenshot
         run: |
-          DEV="iPhone 15 Pro"
+          DEV="iPhone 16 Pro"
           xcrun simctl boot "$DEV" || true
           sleep 8
-          APP=$(find ios/App/dd/Build/Products -name "App.app" -type d | head -1)
+          APP=$(find ios-native/dd/Build/Products -name "AskAI.app" -type d | head -1)
           echo "App: $APP"
           xcrun simctl install booted "$APP"
-          xcrun simctl launch booted gg.agentnexus.app || true
-          sleep 12
-          xcrun simctl io booted screenshot agentnexus-ios.png
-          ls -lh agentnexus-ios.png
+          xcrun simctl launch booted gg.askai.app || true
+          sleep 14
+          xcrun simctl io booted screenshot askai-ios.png
+          ls -lh askai-ios.png
       - uses: actions/upload-artifact@v4
         with:
-          name: AgentNexus-iOS-screenshot
-          path: agentnexus-ios.png
+          name: AskAI-ios-screenshot
+          path: askai-ios.png
           if-no-files-found: error
