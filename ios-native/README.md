@@ -2,9 +2,9 @@
 
 A real native **SwiftUI** app. The UI is a full-screen `WKWebView` rendering the
 live AskAI web app (so it looks exactly like the website), wrapped in native
-chrome: an **official Liquid Glass** status-bar bar (iOS 26 `glassEffect`, with a
-frosted-material fallback on older iOS), a slim load-progress bar, pull-to-refresh,
-edge-swipe back/forward, haptics, a native splash, and an offline retry screen.
+chrome: a **frosted "liquid glass"** status-bar bar (system blur material with a
+top sheen), a slim load-progress bar, pull-to-refresh, edge-swipe back/forward,
+haptics, a native splash, and an offline retry screen.
 
 - Source: `Sources/` (`AskAIApp`, `RootView`, `WebView`)
 - Project is defined with [XcodeGen](https://github.com/yonyz/XcodeGen) (`project.yml`)

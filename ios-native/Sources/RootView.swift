@@ -46,25 +46,20 @@ struct RootView: View {
     }
 
     // MARK: - Liquid Glass status bar
+    // A frosted "liquid glass" bar behind the status bar / Dynamic Island.
+    // Uses the system blur material (the same effect that backs iOS glass) with a
+    // top sheen so content scrolls under it cleanly.
     @ViewBuilder
     private func glassBar(height: CGFloat) -> some View {
-        Group {
-            if #available(iOS 26.0, *) {
-                Color.clear
-                    .frame(height: height)
-                    .glassEffect(in: Rectangle())
-            } else {
-                Rectangle()
-                    .fill(.ultraThinMaterial)
-                    .frame(height: height)
-                    .overlay(
-                        LinearGradient(colors: [.white.opacity(0.06), .clear],
-                                       startPoint: .top, endPoint: .bottom)
-                    )
-            }
-        }
-        .ignoresSafeArea()
-        .allowsHitTesting(false)
+        Rectangle()
+            .fill(.ultraThinMaterial)
+            .frame(height: height)
+            .overlay(
+                LinearGradient(colors: [.white.opacity(0.10), .clear],
+                               startPoint: .top, endPoint: .bottom)
+            )
+            .ignoresSafeArea()
+            .allowsHitTesting(false)
     }
 
     // MARK: - Offline / error
