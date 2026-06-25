@@ -250,3 +250,79 @@ button:active, a:active, [role="button"]:active { transform: scale(0.97); }
   background: rgba(140, 120, 180, 0.08);
   font-weight: 600;
 }
+
+/* ============================================================
+   iOS app (PWA / Capacitor) — native feel, safe areas, glass
+   ============================================================ */
+
+/* Native-app touch behaviour: no tap flash, no text inflation, no rubber-band
+   bounce on the page, momentum scrolling inside scrollers, no long-press menu. */
+html {
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+body {
+  -webkit-tap-highlight-color: transparent;
+  -webkit-touch-callout: none;
+  overscroll-behavior-y: none;
+  /* honour the notch / Dynamic Island & home indicator */
+  padding-top: env(safe-area-inset-top);
+  padding-bottom: env(safe-area-inset-bottom);
+}
+* { -webkit-tap-highlight-color: transparent; }
+input, textarea, [contenteditable] { -webkit-user-select: text; user-select: text; }
+:where(button, a, [role="button"]) { touch-action: manipulation; }
+.scroll-touch { -webkit-overflow-scrolling: touch; overscroll-behavior: contain; }
+
+/* Safe-area helpers — use on sticky top bars and bottom tab bars. */
+.safe-top { padding-top: env(safe-area-inset-top); }
+.safe-bottom { padding-bottom: env(safe-area-inset-bottom); }
+.safe-x { padding-left: env(safe-area-inset-left); padding-right: env(safe-area-inset-right); }
+.pt-safe { padding-top: calc(env(safe-area-inset-top) + 0.5rem); }
+.pb-safe { padding-bottom: calc(env(safe-area-inset-bottom) + 0.5rem); }
+.h-safe-top { height: env(safe-area-inset-top); }
+
+/* When launched from the home screen, hide any "install/open in browser" hints. */
+@media (display-mode: standalone) {
+  .only-browser { display: none !important; }
+  body { min-height: 100dvh; }
+}
+
+/* Richer "liquid glass" — layered frost with a top sheen, for bars & sheets. */
+.glass-ios {
+  position: relative;
+  background: color-mix(in srgb, var(--card) 70%, transparent);
+  backdrop-filter: blur(22px) saturate(180%);
+  -webkit-backdrop-filter: blur(22px) saturate(180%);
+  border: 1px solid color-mix(in srgb, var(--border) 60%, transparent);
+}
+.glass-ios::before {
+  content: "";
+  position: absolute; inset: 0;
+  background: linear-gradient(180deg, rgba(255,255,255,0.16), rgba(255,255,255,0) 55%);
+  pointer-events: none;
+}
+.dark .glass-ios::before {
+  background: linear-gradient(180deg, rgba(255,255,255,0.06), rgba(255,255,255,0) 55%);
+}
+
+/* iOS-style pressable: subtle scale + dim on touch, like UIKit buttons. */
+.pressable { transition: transform .12s cubic-bezier(.22,1,.36,1), opacity .12s ease; }
+.pressable:active { transform: scale(.96); opacity: .85; }
+
+/* A few more entrance/motion utilities (toward a rich animation set). */
+@keyframes sheet-up { from { opacity:0; transform: translateY(100%); } to { opacity:1; transform: translateY(0); } }
+@keyframes pop { 0%{transform:scale(.85);opacity:0} 60%{transform:scale(1.04);opacity:1} 100%{transform:scale(1)} }
+@keyframes fade-in { from{opacity:0} to{opacity:1} }
+@keyframes skeleton { 0%{background-position:-200% 0} 100%{background-position:200% 0} }
+@keyframes tilt-in { from{opacity:0;transform:rotate(-2deg) translateY(10px)} to{opacity:1;transform:none} }
+.animate-sheet-up { animation: sheet-up .34s cubic-bezier(.22,1,.36,1) both; }
+.animate-pop { animation: pop .3s cubic-bezier(.22,1,.36,1) both; }
+.animate-fade-in { animation: fade-in .3s ease both; }
+.animate-tilt-in { animation: tilt-in .4s cubic-bezier(.22,1,.36,1) both; }
+.skeleton { background: linear-gradient(90deg, color-mix(in srgb,var(--border) 40%,transparent) 25%, color-mix(in srgb,var(--border) 70%,transparent) 37%, color-mix(in srgb,var(--border) 40%,transparent) 63%); background-size: 200% 100%; animation: skeleton 1.4s ease infinite; }
+
+/* Respect reduced-motion for accessibility. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
+}

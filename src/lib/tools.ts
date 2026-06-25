@@ -291,6 +291,11 @@ export const UTILITY_TOOL_SCHEMAS = [
   { type: "function", function: { name: "dictionary", description: "Define a word and give synonyms.", parameters: { type: "object", properties: { word: { type: "string" } }, required: ["word"] } } },
   { type: "function", function: { name: "qr_code", description: "Generate a QR code image for any text or URL. Returns a Markdown image to show the user.", parameters: { type: "object", properties: { data: { type: "string" } }, required: ["data"] } } },
   { type: "function", function: { name: "datetime", description: "Get the current date and time (optionally for an IANA timezone).", parameters: { type: "object", properties: { timezone: { type: "string", description: "e.g. America/New_York" } } } } },
+  { type: "function", function: { name: "translate", description: "Translate text into another language.", parameters: { type: "object", properties: { text: { type: "string" }, to: { type: "string", description: "Target language code, e.g. es, fr, de, ja, ar" }, from: { type: "string", description: "Source language code (optional, auto-detect if omitted)" } }, required: ["text", "to"] } } },
+  { type: "function", function: { name: "stock_price", description: "Get the latest price for a stock/ETF ticker (e.g. AAPL, MSFT, TSLA).", parameters: { type: "object", properties: { ticker: { type: "string" } }, required: ["ticker"] } } },
+  { type: "function", function: { name: "calculate", description: "Evaluate a math expression (supports + - * / %, parentheses, ^ powers, and functions like sqrt, sin, log).", parameters: { type: "object", properties: { expression: { type: "string", description: "e.g. (1200*1.0825)/3" } }, required: ["expression"] } } },
+  { type: "function", function: { name: "wiki", description: "Get a concise Wikipedia summary of a topic, person, place, or thing.", parameters: { type: "object", properties: { topic: { type: "string" } }, required: ["topic"] } } },
+  { type: "function", function: { name: "unit_convert", description: "Convert a value between units of length, mass/weight, temperature, volume, speed, or data.", parameters: { type: "object", properties: { value: { type: "number" }, from: { type: "string", description: "e.g. km, lb, celsius, mph, gb" }, to: { type: "string", description: "e.g. mi, kg, fahrenheit, kph, mb" } }, required: ["value", "from", "to"] } } },
 ];
 
 async function weatherTool(location: string): Promise<ToolResult> {
@@ -348,6 +353,99 @@ function datetimeTool(tz?: string): ToolResult {
     const s = now.toLocaleString("en-US", { dateStyle: "full", timeStyle: "long", timeZone: tz || undefined });
     return { ok: true, output: `Current date & time${tz ? ` (${tz})` : ""}: ${s}` };
   } catch { return { ok: true, output: `Current date & time: ${new Date().toString()}` }; }
+}
+
+async function translateTool(args: any): Promise<ToolResult> {
+  const text = String(args.text || "").slice(0, 1000);
+  const to = String(args.to || "en").toLowerCase().slice(0, 5);
+  const from = String(args.from || "autodetect").toLowerCase().slice(0, 12);
+  if (!text) return { ok: false, output: "Nothing to translate." };
+  try {
+    const pair = `${from === "autodetect" ? "en" : from}|${to}`;
+    const r = await fetch(`https://api.mymemory.translated.net/get?q=${encodeURIComponent(text)}&langpair=${encodeURIComponent(pair)}`).then((x) => x.json());
+    const out = r?.responseData?.translatedText;
+    if (!out) return { ok: false, output: "Couldn't translate that." };
+    return { ok: true, output: `Translation (${to}): ${out}` };
+  } catch (e: any) { return { ok: false, output: `Translate failed: ${e.message}` }; }
+}
+
+async function stockTool(ticker: string): Promise<ToolResult> {
+  const t = ticker.trim().toLowerCase().replace(/[^a-z0-9.\-]/g, "");
+  if (!t) return { ok: false, output: "No ticker given." };
+  try {
+    // Stooq is keyless and CORS-friendly. US tickers use the ".us" suffix.
+    const sym = t.includes(".") ? t : `${t}.us`;
+    const csv = await fetch(`https://stooq.com/q/l/?s=${encodeURIComponent(sym)}&f=sd2t2ohlcv&h&e=csv`).then((x) => x.text());
+    const rows = csv.trim().split("\n");
+    if (rows.length < 2) return { ok: false, output: `No data for "${ticker}".` };
+    const cols = rows[0].split(",");
+    const vals = rows[1].split(",");
+    const rec: Record<string, string> = {};
+    cols.forEach((c, i) => (rec[c.trim().toLowerCase()] = (vals[i] || "").trim()));
+    if (!rec.close || rec.close === "N/D") return { ok: false, output: `No live price for "${ticker}".` };
+    return { ok: true, output: `${ticker.toUpperCase()}: $${rec.close} (open ${rec.open}, high ${rec.high}, low ${rec.low}, vol ${rec.volume}) as of ${rec.date} ${rec.time} UTC.` };
+  } catch (e: any) { return { ok: false, output: `Stock lookup failed: ${e.message}` }; }
+}
+
+function calculateTool(expr: string): ToolResult {
+  const raw = String(expr || "").trim();
+  if (!raw) return { ok: false, output: "No expression given." };
+  // Allow digits, operators, parens, decimals, and a whitelist of Math fns.
+  const fns = ["sqrt", "cbrt", "abs", "round", "floor", "ceil", "pow", "exp", "log", "log2", "log10", "sin", "cos", "tan", "asin", "acos", "atan", "min", "max", "sign", "hypot"];
+  let e = raw.replace(/\^/g, "**").replace(/\bpi\b/gi, "Math.PI").replace(/\be\b/g, "Math.E").replace(/%/g, "/100");
+  const fnRe = new RegExp(`\\b(${fns.join("|")})\\b`, "gi");
+  e = e.replace(fnRe, (m) => `Math.${m.toLowerCase()}`);
+  // Strip the allowed Math.<fn> tokens, then only digits/operators/parens may remain.
+  const residue = e.replace(/Math\.(PI|E|[a-z0-9]+)/g, "");
+  if (/[^0-9+\-*/().,\s]/.test(residue)) {
+    return { ok: false, output: "That expression has characters I can't safely evaluate." };
+  }
+  try {
+    // eslint-disable-next-line no-new-func
+    const val = Function(`"use strict";return (${e});`)();
+    if (typeof val !== "number" || !isFinite(val)) return { ok: false, output: "That didn't evaluate to a number." };
+    return { ok: true, output: `${raw} = ${Number(val.toFixed(10))}` };
+  } catch { return { ok: false, output: "Couldn't evaluate that expression." }; }
+}
+
+async function wikiTool(topic: string): Promise<ToolResult> {
+  const t = topic.trim();
+  if (!t) return { ok: false, output: "No topic given." };
+  try {
+    const title = encodeURIComponent(t.replace(/\s+/g, "_"));
+    const r = await fetch(`https://en.wikipedia.org/api/rest_v1/page/summary/${title}`).then((x) => x.json());
+    if (r?.extract) return { ok: true, output: `**${r.title}**\n${r.extract}${r.content_urls?.desktop?.page ? `\n\n${r.content_urls.desktop.page}` : ""}` };
+    // Fall back to search if the exact title missed.
+    return wikipediaSearch(t);
+  } catch (e: any) { return { ok: false, output: `Wikipedia failed: ${e.message}` }; }
+}
+
+function unitConvertTool(args: any): ToolResult {
+  const value = Number(args.value);
+  if (!isFinite(value)) return { ok: false, output: "Value must be a number." };
+  const norm = (u: string) => String(u || "").trim().toLowerCase().replace(/s$/, "");
+  const from = norm(args.from), to = norm(args.to);
+  // Linear units expressed in a base unit.
+  const length: Record<string, number> = { mm: 0.001, cm: 0.01, m: 1, km: 1000, in: 0.0254, inch: 0.0254, ft: 0.3048, foot: 0.3048, feet: 0.3048, yd: 0.9144, yard: 0.9144, mi: 1609.344, mile: 1609.344, nmi: 1852 };
+  const mass: Record<string, number> = { mg: 0.001, g: 1, kg: 1000, t: 1e6, tonne: 1e6, oz: 28.3495, ounce: 28.3495, lb: 453.592, pound: 453.592, st: 6350.29, stone: 6350.29 };
+  const volume: Record<string, number> = { ml: 0.001, l: 1, liter: 1, litre: 1, "fl oz": 0.0295735, cup: 0.236588, pt: 0.473176, pint: 0.473176, qt: 0.946353, quart: 0.946353, gal: 3.78541, gallon: 3.78541 };
+  const speed: Record<string, number> = { "m/s": 1, mps: 1, kph: 0.277778, "km/h": 0.277778, mph: 0.44704, knot: 0.514444, kt: 0.514444 };
+  const data: Record<string, number> = { b: 1, byte: 1, kb: 1e3, mb: 1e6, gb: 1e9, tb: 1e12, kib: 1024, mib: 1024 ** 2, gib: 1024 ** 3, tib: 1024 ** 4, bit: 0.125 };
+  const tables = [length, mass, volume, speed, data];
+  for (const tbl of tables) {
+    if (from in tbl && to in tbl) {
+      const out = (value * tbl[from]) / tbl[to];
+      return { ok: true, output: `${value} ${args.from} = ${Number(out.toFixed(6))} ${args.to}` };
+    }
+  }
+  // Temperature (non-linear).
+  const temp = new Set(["c", "celsius", "f", "fahrenheit", "k", "kelvin"]);
+  if (temp.has(from) && temp.has(to)) {
+    const toC = from[0] === "c" ? value : from[0] === "f" ? (value - 32) * 5 / 9 : value - 273.15;
+    const out = to[0] === "c" ? toC : to[0] === "f" ? toC * 9 / 5 + 32 : toC + 273.15;
+    return { ok: true, output: `${value} ${args.from} = ${Number(out.toFixed(4))} ${args.to}` };
+  }
+  return { ok: false, output: `I can't convert ${args.from} → ${args.to} (different or unknown unit types).` };
 }
 
 // ---- Rank management tools (exposed only to the supervisor / AgentNexus) ----
@@ -808,6 +906,16 @@ export async function executeTool(
       return qrTool(String(args.data || ""));
     case "datetime":
       return datetimeTool(args.timezone);
+    case "translate":
+      return translateTool(args);
+    case "stock_price":
+      return stockTool(String(args.ticker || ""));
+    case "calculate":
+      return calculateTool(String(args.expression || ""));
+    case "wiki":
+      return wikiTool(String(args.topic || ""));
+    case "unit_convert":
+      return unitConvertTool(args);
     default:
       return { ok: false, output: `Unknown tool: ${name}` };
   }
@@ -852,6 +960,16 @@ export function toolLabel(name: string, args: any): string {
       return `Generating QR code`;
     case "datetime":
       return `Checking the time`;
+    case "translate":
+      return `Translating → ${args.to || ""}`;
+    case "stock_price":
+      return `Checking ${String(args.ticker || "").toUpperCase()} stock`;
+    case "calculate":
+      return `Calculating ${args.expression || ""}`;
+    case "wiki":
+      return `Reading Wikipedia: ${args.topic || ""}`;
+    case "unit_convert":
+      return `Converting ${args.from} → ${args.to}`;
     default:
       return name;
   }
