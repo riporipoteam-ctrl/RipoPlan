@@ -119,6 +119,7 @@ TOOL_SCHEMAS.build_site = {
         name: { type: "string", description: "Site / business name" },
         tagline: { type: "string", description: "Hero subtitle (one punchy sentence)" },
         theme: { type: "string", description: "Primary brand color as hex, e.g. #e11d48" },
+        style: { type: "string", description: "Visual style — pick one that fits the brand: 'overlay' (full-bleed photo hero), 'split' (text + photo side-by-side), 'midnight' (sleek dark theme), 'editorial' (elegant serif), 'gradient' (bold gradient hero). When redesigning, choose a DIFFERENT style than before.", enum: ["overlay", "split", "midnight", "editorial", "gradient"] },
         hero_keyword: { type: "string", description: "1-3 words describing the hero background photo, e.g. 'auto repair garage'" },
         cta: { type: "string", description: "Hero button text, e.g. 'Book an appointment'" },
         about: { type: "string", description: "A short 'about' paragraph" },
@@ -139,7 +140,24 @@ TOOL_SCHEMAS.build_site = {
 const esc = (s: any) => String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 const img = (kw: string, w = 1600, h = 900) => `https://picsum.photos/seed/${encodeURIComponent(String(kw || "site").toLowerCase().replace(/[^a-z0-9]+/g, "-"))}/${w}/${h}`;
 
-/** Render a structured site spec into a polished, self-contained HTML document. */
+// A small library of distinct visual styles so two sites never look identical.
+// A style is chosen from spec.style, else deterministically from the site name.
+const SITE_STYLES = [
+  { key: "overlay", font: "Plus Jakarta Sans", fw: "400;600;800", hero: "overlay", dark: false, radius: 18, btn: 999, nav: "blur" },
+  { key: "split",   font: "Sora",              fw: "400;600;800", hero: "split",   dark: false, radius: 14, btn: 10,  nav: "solid" },
+  { key: "midnight",font: "Space Grotesk",     fw: "400;500;700", hero: "overlay", dark: true,  radius: 16, btn: 8,   nav: "blur" },
+  { key: "editorial",font:"Fraunces",          fw: "400;600;700", hero: "split",   dark: false, radius: 4,  btn: 4,   nav: "solid" },
+  { key: "gradient",font: "Outfit",            fw: "400;600;800", hero: "gradient",dark: false, radius: 22, btn: 999, nav: "blur" },
+] as const;
+
+function hashStr(s: string): number {
+  let h = 0;
+  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
+  return h;
+}
+
+/** Render a structured site spec into a polished, self-contained HTML document.
+ *  Picks one of several distinct visual styles so builds don't all look the same. */
 export function renderSite(spec: any): string {
   const name = esc(spec.name || "My Website");
   const theme = /^#[0-9a-fA-F]{6}$/.test(spec.theme || "") ? spec.theme : "#6d5efc";
@@ -149,6 +167,20 @@ export function renderSite(spec: any): string {
   const gallery = Array.isArray(spec.gallery) ? spec.gallery : [];
   const testimonials = Array.isArray(spec.testimonials) ? spec.testimonials : [];
   const c = spec.contact || {};
+
+  // Choose a style: explicit spec.style wins, otherwise derive from the name so
+  // the same site is stable but different sites get different looks.
+  const forced = SITE_STYLES.find((s) => s.key === String(spec.style || "").toLowerCase());
+  const S = forced || SITE_STYLES[hashStr(String(spec.name || "site")) % SITE_STYLES.length];
+  const dark = S.dark;
+  const ink = dark ? "#eef0f6" : "#15151c";
+  const muted = dark ? "#a7abbd" : "#5b5b6b";
+  const bg = dark ? "#0e0e16" : "#ffffff";
+  const soft = dark ? "#161623" : "#f5f5fb";
+  const cardBg = dark ? "#15151f" : "#ffffff";
+  const border = dark ? "#262636" : "#ececf3";
+  const navBg = S.nav === "blur" ? (dark ? "rgba(14,14,22,.72)" : "rgba(255,255,255,.8)") : (dark ? "#0e0e16" : "#ffffff");
+
   const navLinks = [
     spec.about && ["about", "About"],
     features.length && ["services", "Services"],
@@ -167,53 +199,70 @@ export function renderSite(spec: any): string {
     .map((t: any) => `<figure class="quote reveal"><blockquote>“${esc(t.text || "")}”</blockquote><figcaption>— ${esc(t.name || "Happy customer")}</figcaption></figure>`)
     .join("");
 
+  const heroImg = img(spec.hero_keyword || spec.name);
+  // Three hero treatments.
+  const heroBlock =
+    S.hero === "split"
+      ? `<section class="hero split"><div class="wrap hero-grid"><div class="hero-copy reveal"><h1>${name}</h1><p>${tagline}</p><a class="btn" href="#${navLinks[0]?.[0] || "contact"}">${cta}</a></div><div class="hero-media reveal"><img src="${heroImg}" alt="${name}"></div></div></section>`
+      : S.hero === "gradient"
+      ? `<section class="hero grad"><div class="wrap"><h1>${name}</h1><p>${tagline}</p><a class="btn btn-light" href="#${navLinks[0]?.[0] || "contact"}">${cta}</a></div></section>`
+      : `<section class="hero overlay"><div class="wrap"><h1>${name}</h1><p>${tagline}</p><a class="btn" href="#${navLinks[0]?.[0] || "contact"}">${cta}</a></div></section>`;
+
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>${name}</title>
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;600;800&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=${encodeURIComponent(S.font)}:wght@${S.fw}&display=swap" rel="stylesheet">
 <style>
-:root{--c:${theme};--ink:#15151c;--muted:#5b5b6b;--bg:#ffffff;--soft:#f5f5fb;--radius:18px}
+:root{--c:${theme};--ink:${ink};--muted:${muted};--bg:${bg};--soft:${soft};--card:${cardBg};--bd:${border};--radius:${S.radius}px;--btn:${S.btn}px}
 *{box-sizing:border-box;margin:0;padding:0}
 html{scroll-behavior:smooth}
-body{font-family:'Plus Jakarta Sans',system-ui,sans-serif;color:var(--ink);background:var(--bg);line-height:1.6}
+body{font-family:'${S.font}',system-ui,sans-serif;color:var(--ink);background:var(--bg);line-height:1.6}
 img{max-width:100%;display:block}
 .wrap{max-width:1120px;margin:0 auto;padding:0 24px}
 a{color:inherit;text-decoration:none}
-header{position:sticky;top:0;z-index:50;background:rgba(255,255,255,.8);backdrop-filter:blur(12px);border-bottom:1px solid #eee}
+header{position:sticky;top:0;z-index:50;background:${navBg};${S.nav === "blur" ? "backdrop-filter:blur(12px);" : ""}border-bottom:1px solid var(--bd)}
 nav{display:flex;align-items:center;justify-content:space-between;height:66px}
 nav .brand{font-weight:800;font-size:1.2rem}
 nav .links{display:flex;gap:26px}nav .links a{color:var(--muted);font-weight:600;font-size:.95rem}nav .links a:hover{color:var(--c)}
 @media(max-width:680px){nav .links{display:none}}
-.btn{display:inline-block;background:var(--c);color:#fff;font-weight:700;padding:14px 26px;border-radius:999px;box-shadow:0 10px 24px -10px var(--c);transition:transform .15s}
-.btn:hover{transform:translateY(-2px)}
-.hero{position:relative;min-height:88vh;display:flex;align-items:center;color:#fff;text-align:center;background:url('${img(spec.hero_keyword || spec.name)}') center/cover}
-.hero::before{content:"";position:absolute;inset:0;background:linear-gradient(180deg,rgba(10,10,20,.55),rgba(10,10,20,.78))}
-.hero .wrap{position:relative}
-.hero h1{font-size:clamp(2.4rem,6vw,4.4rem);font-weight:800;letter-spacing:-.02em;max-width:14ch;margin:0 auto}
-.hero p{font-size:clamp(1.05rem,2.5vw,1.4rem);opacity:.92;max-width:46ch;margin:18px auto 30px}
+.btn{display:inline-block;background:var(--c);color:#fff;font-weight:700;padding:14px 26px;border-radius:var(--btn);box-shadow:0 10px 24px -10px var(--c);transition:transform .15s,box-shadow .15s}
+.btn:hover{transform:translateY(-2px);box-shadow:0 16px 30px -12px var(--c)}
+.btn-light{background:#fff;color:var(--c);box-shadow:0 10px 24px -12px rgba(0,0,0,.4)}
+.hero h1{font-size:clamp(2.4rem,6vw,4.4rem);font-weight:800;letter-spacing:-.02em}
+.hero p{font-size:clamp(1.05rem,2.5vw,1.4rem);margin:18px 0 30px}
+.hero.overlay,.hero.grad{position:relative;min-height:88vh;display:flex;align-items:center;color:#fff;text-align:center}
+.hero.overlay{background:url('${heroImg}') center/cover}
+.hero.overlay::before{content:"";position:absolute;inset:0;background:linear-gradient(180deg,rgba(10,10,20,.55),rgba(10,10,20,.8))}
+.hero.grad{background:linear-gradient(135deg,var(--c),#0b0b16)}
+.hero.overlay .wrap,.hero.grad .wrap{position:relative}
+.hero.overlay h1,.hero.grad h1{max-width:15ch;margin:0 auto}.hero.overlay p,.hero.grad p{max-width:46ch;margin:18px auto 30px;opacity:.94}
+.hero.split{padding:70px 0}
+.hero-grid{display:grid;grid-template-columns:1.05fr .95fr;gap:48px;align-items:center}
+@media(max-width:820px){.hero-grid{grid-template-columns:1fr;text-align:center}}
+.hero.split .hero-media img{width:100%;height:440px;object-fit:cover;border-radius:var(--radius);box-shadow:0 30px 60px -30px rgba(0,0,0,.45)}
 section{padding:96px 0}
 .section-title{font-size:clamp(1.8rem,4vw,2.6rem);font-weight:800;letter-spacing:-.02em;text-align:center;margin-bottom:14px}
 .section-sub{color:var(--muted);text-align:center;max-width:60ch;margin:0 auto 52px}
 .soft{background:var(--soft)}
 .grid{display:grid;gap:24px;grid-template-columns:repeat(auto-fit,minmax(250px,1fr))}
-.card{background:#fff;border:1px solid #eee;border-radius:var(--radius);padding:30px;box-shadow:0 12px 30px -22px rgba(0,0,0,.4);transition:transform .2s,box-shadow .2s}
-.card:hover{transform:translateY(-4px);box-shadow:0 20px 40px -24px rgba(0,0,0,.45)}
+.card{background:var(--card);border:1px solid var(--bd);border-radius:var(--radius);padding:30px;box-shadow:0 12px 30px -22px rgba(0,0,0,.4);transition:transform .2s,box-shadow .2s}
+.card:hover{transform:translateY(-4px);box-shadow:0 20px 40px -24px rgba(0,0,0,.5)}
 .card .ico{font-size:2rem;margin-bottom:12px}.card h3{font-size:1.2rem;margin-bottom:8px}.card p{color:var(--muted)}
 .gallery{display:grid;gap:16px;grid-template-columns:repeat(auto-fit,minmax(220px,1fr))}
 .gallery img{height:240px;width:100%;object-fit:cover;border-radius:var(--radius)}
 .quotes{display:grid;gap:24px;grid-template-columns:repeat(auto-fit,minmax(280px,1fr))}
-.quote{background:#fff;border-radius:var(--radius);padding:28px;border:1px solid #eee}
+.quote{background:var(--card);border-radius:var(--radius);padding:28px;border:1px solid var(--bd)}
 .quote blockquote{font-size:1.05rem;margin-bottom:14px}.quote figcaption{color:var(--c);font-weight:700}
 .about{max-width:760px;margin:0 auto;text-align:center;font-size:1.2rem;color:var(--muted)}
 .contact{display:flex;flex-wrap:wrap;gap:14px;justify-content:center;color:var(--muted);font-size:1.05rem}
 .contact b{color:var(--ink)}
-footer{padding:40px 0;text-align:center;color:var(--muted);border-top:1px solid #eee}
+footer{padding:40px 0;text-align:center;color:var(--muted);border-top:1px solid var(--bd)}
 .reveal{opacity:0;transform:translateY(24px);transition:opacity .6s,transform .6s}
 .reveal.in{opacity:1;transform:none}
 </style></head>
 <body>
 <header><div class="wrap"><nav><span class="brand">${name}</span><div class="links">${navLinks.map(([id, l]) => `<a href="#${id}">${esc(l)}</a>`).join("")}</div>${(c.phone || c.email) ? `<a class="btn" href="#contact" style="padding:10px 20px">${cta}</a>` : ""}</nav></div></header>
-<section class="hero"><div class="wrap"><h1>${name}</h1><p>${tagline}</p><a class="btn" href="#${navLinks[0]?.[0] || "contact"}">${cta}</a></div></section>
+${heroBlock}
 ${spec.about ? `<section id="about"><div class="wrap"><h2 class="section-title">About us</h2><p class="about reveal">${esc(spec.about)}</p></div></section>` : ""}
 ${features.length ? `<section id="services" class="soft"><div class="wrap"><h2 class="section-title">What we offer</h2><p class="section-sub">Everything you need, done right.</p><div class="grid">${featureCards}</div></div></section>` : ""}
 ${gallery.length ? `<section id="gallery"><div class="wrap"><h2 class="section-title">Gallery</h2><div class="gallery">${galleryImgs}</div></div></section>` : ""}

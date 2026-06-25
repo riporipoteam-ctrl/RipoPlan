@@ -745,9 +745,11 @@ async function runBuildFlow(opts: DispatchOpts, connectors: Record<string, strin
 /** User wants to change/fix/expand an EXISTING site (a follow-up after a build). */
 function isEditAppIntent(content: string): boolean {
   const c = content.toLowerCase();
-  const change = /\b(fix|expand|improve|update|change|edit|redo|tweak|polish|add (to|more|another)|continue (on|with)|make (it|the site|the website)|more (updates|features|sections))\b/.test(c);
-  const target = /\b(website|web ?app|web ?site|web ?page|landing page|the site|the page|the app|mini ?app|it)\b/.test(c);
-  return change && target;
+  const change = /\b(fix|expand|improve|update|change|edit|redo|redesign|re-?design|rebuild|remake|revamp|tweak|polish|rename|add (to|more|another|information|details|info|a|some|the)|continue (on|with)|make (it|the site|the website|them)|more (updates|features|sections|animations)|better)\b/.test(c);
+  const target = /\b(website|web ?app|web ?site|web ?page|landing page|the site|the page|the app|mini ?app|\bit\b|\bthem\b|that one)\b/.test(c);
+  // "have it redesigned", "have it ...", referring back to the existing app.
+  const refback = /\bhave it\b|\bit (more|better|redesigned|updated|fixed|changed)\b/.test(c);
+  return (change && target) || refback;
 }
 
 /** Re-run the Coder to UPDATE the most recent published site, in its channel. */
@@ -791,27 +793,39 @@ async function runUpdateFlow(opts: DispatchOpts, connectors: Record<string, stri
   }).select("id").single();
   const mid = (ph as any)?.id as string | undefined;
 
-  const updateApp = async (html: string) => {
-    await supabase.from("mini_apps").update({ html, updated_at: new Date().toISOString() }).eq("id", app.id);
-    return { id: app.id as string, name: app.name as string };
+  // Optional rename ("name it X" / "call it X" / "rename it to X").
+  const renameMatch = opts.userContent.match(/\b(?:re)?name (?:it|the (?:site|website|app))?\s*(?:to|like|as)?\s*["“']?([A-Z0-9][\w &'.-]{1,40}?)["”']?(?:\.|,|$|\s+(?:and|the|a)\b)/i)
+    || opts.userContent.match(/\bcall (?:it|the (?:site|website|app))\s*["“']?([A-Z0-9][\w &'.-]{1,40}?)["”']?(?:\.|,|$)/i);
+  const newName = renameMatch?.[1]?.trim();
+
+  const updateApp = async (spec: { name?: string; html: string }) => {
+    const finalName = (spec.name && spec.name !== "Website" && spec.name !== "App") ? spec.name : (newName || app.name);
+    const patch: any = { html: spec.html, updated_at: new Date().toISOString() };
+    if (finalName && finalName !== app.name) patch.name = finalName;
+    await supabase.from("mini_apps").update(patch).eq("id", app.id);
+    return { id: app.id as string, name: (patch.name || app.name) as string };
   };
 
   let done: { id: string; name: string } | null = null;
   try {
     const coderForBuild: Agent = {
       ...coder,
-      tools: Array.from(new Set([...(coder.tools || []), "build_app", "web_search", "browse", "code"])),
-      system_prompt: `You are ${coder.name}, an elite web engineer. Update the user's existing single-file website and republish the COMPLETE updated HTML via build_app (full <!doctype html> document, all CSS/JS inline). NEVER paste code in chat — your visible message is just a short "Updated ✅". Keep everything that worked, apply the requested changes, and make sure the file is complete and valid.`,
+      tools: Array.from(new Set([...(coder.tools || []), "build_site", "build_app", "web_search", "browse", "code"])),
+      system_prompt:
+        `You are ${coder.name}, an elite web designer updating an EXISTING single-page site (it already exists — you are editing it, NOT creating a new one).\n` +
+        `FIRST, if the user asks to add real information about a real business/place/topic (e.g. a specific shop's address, hours, phone, services, reviews), USE web_search and browse to find the REAL details and real image URLs, then build them in — never invent facts.\n` +
+        `THEN republish the redesigned site. Prefer calling build_site with rich structured content (name${newName ? ` = "${newName}"` : ""}, tagline, theme hex that fits the brand, hero_keyword, cta, about, 3-6 features with emoji icons, gallery keywords, 2-3 testimonials, contact) — the platform renders a polished, animated, responsive design automatically. If the change truly needs hand-written HTML, call build_app with the COMPLETE valid <!doctype html> document instead.\n` +
+        `Genuinely change the design from before — different colors/layout/copy as requested, not the same look. Keep what worked, apply every requested change. NEVER paste code in chat — your visible message is just a short "Updated ✅".`,
     };
     const res = await runAgent({
       agent: coderForBuild,
-      history: [{ role: "user", content: `Current site HTML:\n\n${String(app.html || "").slice(0, 20000)}\n\nApply these changes and republish the FULL updated HTML via build_app:\n"${opts.userContent}"` }],
+      history: [{ role: "user", content: `You are EDITING the existing site below (do not make a brand-new separate one).${newName ? ` Rename it to "${newName}".` : ""}\n\nCurrent site HTML:\n\n${String(app.html || "").slice(0, 16000)}\n\nApply these changes — research real details/images with web_search+browse if the user wants real info added — and republish via build_site (preferred) or build_app:\n"${opts.userContent}"` }],
       workspaceName: opts.workspaceName, roster, connectors, maxTokens: 8000,
       onActivity: async (a) => { if (mid) await supabase.from("messages").update({ activities: a }).eq("id", mid); },
-      onBuildApp: (spec) => updateApp(spec.html),
+      onBuildApp: (spec) => updateApp(spec),
     });
     done = res.builtApps[0] || null;
-    if (!done) { const html = extractHtmlDoc(res.content); if (html) done = await updateApp(html); }
+    if (!done) { const html = extractHtmlDoc(res.content); if (html) done = await updateApp({ html, name: newName }); }
     if (mid) {
       const cleanMsg = done ? `Updated **${done.name}** ✅ — refresh it in Mini Apps.` : (res.content || "Working on it…");
       await supabase.from("messages").update({ content: cleanMsg, activities: res.activities, attachments: done ? [{ type: "mini_app", id: done.id, name: done.name }] : [], status: "complete" }).eq("id", mid);
@@ -980,7 +994,13 @@ export async function dispatch(opts: DispatchOpts): Promise<void> {
 
   // Follow-up "fix / expand / update the website" → update the existing app in
   // its channel (don't just reply in chat). Falls through if nothing's been built.
-  if (isEditAppIntent(opts.userContent) && !isBuildAppIntent(opts.userContent) && hasGroqKey()) {
+  // Edit/improve an EXISTING site takes priority over building a new one (so
+  // "redesign it / make it better / add X to it / rename it" updates the current
+  // Mini App instead of spawning a duplicate). runUpdateFlow returns false when
+  // there's no app yet → falls through to the build flow. An explicit request for
+  // a NEW/ANOTHER/SEPARATE site skips the edit path and builds fresh.
+  const wantsNew = /\b(new|another|second|separate|different|brand[- ]?new|from scratch|a fresh)\b.{0,20}\b(website|web ?app|web ?site|web ?page|landing page|site|page|app)\b/i.test(opts.userContent);
+  if (isEditAppIntent(opts.userContent) && !wantsNew && hasGroqKey()) {
     if (await runUpdateFlow(opts2, connectors)) return;
   }
 
