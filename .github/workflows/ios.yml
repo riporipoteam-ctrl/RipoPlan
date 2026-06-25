@@ -20,6 +20,11 @@ on:
 permissions:
   contents: write
 
+# A new run cancels any still-running one (frees a hung Simulator boot, saves minutes).
+concurrency:
+  group: ios-build
+  cancel-in-progress: true
+
 jobs:
   ipa:
     runs-on: macos-15
@@ -66,6 +71,7 @@ jobs:
 
   screenshot:
     runs-on: macos-15
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - name: Install XcodeGen
@@ -82,15 +88,20 @@ jobs:
             CODE_SIGNING_ALLOWED=NO build
       - name: Boot Simulator, launch app, capture screenshot
         run: |
-          DEV="iPhone 16 Pro"
-          xcrun simctl boot "$DEV" || true
-          sleep 8
+          set -x
+          # Pick a concrete available iPhone simulator and boot it by UDID.
+          UDID=$(xcrun simctl list devices available | grep -Eo '[0-9A-F-]{36}' | head -1)
+          if [ -z "$UDID" ]; then echo "No simulator available"; xcrun simctl list devices; exit 1; fi
+          echo "Using simulator $UDID"
+          xcrun simctl bootstatus "$UDID" -b || xcrun simctl boot "$UDID" || true
+          xcrun simctl bootstatus "$UDID" || true
           APP=$(find ios-native/dd/Build/Products -name "AskAI.app" -type d | head -1)
           echo "App: $APP"
-          xcrun simctl install booted "$APP"
-          xcrun simctl launch booted gg.askai.app || true
-          sleep 14
-          xcrun simctl io booted screenshot askai-ios.png
+          xcrun simctl install "$UDID" "$APP"
+          xcrun simctl launch "$UDID" gg.askai.app || true
+          # Give the WKWebView time to load the live site, then snapshot.
+          sleep 16
+          xcrun simctl io "$UDID" screenshot askai-ios.png
           ls -lh askai-ios.png
       - uses: actions/upload-artifact@v4
         with:
