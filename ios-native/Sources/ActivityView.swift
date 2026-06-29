@@ -2,6 +2,7 @@ import SwiftUI
 
 struct ActivityView: View {
     @EnvironmentObject var app: AppState
+    @Environment(\.dismiss) private var dismiss
     @State private var requesting = false
 
     var body: some View {
@@ -28,7 +29,7 @@ struct ActivityView: View {
                 .refreshable { await app.loadNotifications() }
             }
             .navigationTitle("Activity")
-            .toolbarColorScheme(.dark, for: .navigationBar)
+            .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Done") { dismiss() } } }
             .task {
                 await app.loadNotifications()
                 try? await Task.sleep(nanoseconds: 1_200_000_000)
@@ -54,10 +55,10 @@ struct ActivityView: View {
                     NotifManager.shared.notify(title: "Briefing requested", body: "Your Chief of Staff is preparing your daily briefing.")
                 }
             } label: {
-                HStack { if requesting { ProgressView().tint(.white) }; Text("Get my briefing").fontWeight(.semibold) }
+                HStack { if requesting { ProgressView().tint(Theme.onAccent) }; Text("Get my briefing").fontWeight(.semibold) }
                     .frame(maxWidth: .infinity).padding(.vertical, 12)
-                    .background(Theme.coolGradient, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-                    .foregroundStyle(.white)
+                    .background(Theme.accent, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    .foregroundStyle(Theme.onAccent)
             }.pressable().disabled(requesting)
         }
         .glass(radius: 20)

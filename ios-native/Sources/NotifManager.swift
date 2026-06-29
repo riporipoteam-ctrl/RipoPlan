@@ -11,14 +11,20 @@ final class NotifManager: NSObject, UNUserNotificationCenterDelegate {
 
     func configure() { center.delegate = self }
 
-    func enable(briefHour: Int) {
+    func requestAuth(_ completion: ((Bool) -> Void)? = nil) {
         center.requestAuthorization(options: [.alert, .sound, .badge]) { granted, _ in
-            if granted { self.scheduleDailyBriefing(hour: briefHour) }
+            DispatchQueue.main.async { completion?(granted) }
         }
     }
 
-    func disable() {
-        center.removeAllPendingNotificationRequests()
+    func enable(briefHour: Int) {
+        requestAuth { granted in if granted { self.scheduleDailyBriefing(hour: briefHour) } }
+    }
+
+    func disable() { center.removeAllPendingNotificationRequests() }
+
+    func cancelDailyBriefing() {
+        center.removePendingNotificationRequests(withIdentifiers: [dailyId])
     }
 
     func scheduleDailyBriefing(hour: Int) {

@@ -64,8 +64,18 @@ struct Message: Codable, Identifiable {
     var agent_id: String?
     var content: String?
     var activities: [Activity]?
+    var attachments: [Attachment]?
     var status: String?
     var created_at: String?
+}
+
+struct Attachment: Codable, Identifiable, Hashable {
+    var id = UUID()
+    var type: String   // "image" | "file"
+    var url: String
+    var name: String
+    var mime: String?
+    enum CodingKeys: String, CodingKey { case type, url, name, mime }
 }
 
 struct Notif: Codable, Identifiable {

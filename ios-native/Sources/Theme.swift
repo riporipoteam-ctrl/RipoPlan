@@ -1,31 +1,32 @@
 import SwiftUI
 import UIKit
 
-/// Design system for the native AskAI app — liquid glass surfaces, vivid
-/// violet→pink accents, rounded display type. Colors are **adaptive**: light by
-/// default, with a full dark mode (toggled in Settings → drives colorScheme).
+/// Design system — a clean **ChatGPT-style monochrome** look: white/black, no
+/// purple. Adaptive: light by default, full dark mode (toggled in Settings).
 enum Theme {
-    static let ink = Color(light: 0xF6F3EE, dark: 0x0B0B12)        // app background
-    static let ink2 = Color(light: 0xFFFFFF, dark: 0x12121C)       // raised background
+    static let ink = Color(light: 0xFFFFFF, dark: 0x0D0D0D)        // app background
+    static let ink2 = Color(light: 0xF4F4F5, dark: 0x1C1C1E)       // raised surfaces (composer, sidebar rows)
+    static let ink3 = Color(light: 0xECECEE, dark: 0x262628)       // pressed / dividers fill
     static let stroke = Color(lightUI: UIColor.black.withAlphaComponent(0.08),
                               darkUI: UIColor.white.withAlphaComponent(0.10))
-    static let text = Color(light: 0x15151C, dark: 0xF2F2F7)
-    static let muted = Color(light: 0x6B6B7B, dark: 0x9A9AB0)
-    static let accent = Color(hex: 0xA855F7)
-    static let accent2 = Color(hex: 0xFF5EA8)
-    static let accent3 = Color(hex: 0x6366F1)
+    static let text = Color(light: 0x0D0D0D, dark: 0xECECEC)
+    static let muted = Color(light: 0x6E6E80, dark: 0x9A9AA0)
+    // Primary action color is near-black on light, near-white on dark (ChatGPT).
+    static let accent = Color(light: 0x0D0D0D, dark: 0xFFFFFF)
+    static let onAccent = Color(light: 0xFFFFFF, dark: 0x0D0D0D)
     static let good = Color(hex: 0x16A34A)
     static let warn = Color(hex: 0xD97706)
     static let bad = Color(hex: 0xE11D48)
 
+    // Kept for compatibility with existing call sites — now flat/neutral.
     static var accentGradient: LinearGradient {
-        LinearGradient(colors: [accent, accent2], startPoint: .topLeading, endPoint: .bottomTrailing)
+        LinearGradient(colors: [accent, accent], startPoint: .top, endPoint: .bottom)
     }
     static var coolGradient: LinearGradient {
-        LinearGradient(colors: [accent3, accent], startPoint: .topLeading, endPoint: .bottomTrailing)
+        LinearGradient(colors: [accent, accent], startPoint: .top, endPoint: .bottom)
     }
     static var backdrop: LinearGradient {
-        LinearGradient(colors: [ink2, ink], startPoint: .top, endPoint: .bottom)
+        LinearGradient(colors: [ink, ink], startPoint: .top, endPoint: .bottom)
     }
 }
 
@@ -46,49 +47,44 @@ extension Color {
     init(lightUI: UIColor, darkUI: UIColor) {
         self = Color(UIColor { tc in tc.userInterfaceStyle == .dark ? darkUI : lightUI })
     }
+    /// Agent avatar color from a hex string (kept subtle/monochrome-friendly).
+    init(hexString: String?) {
+        let s = (hexString ?? "").trimmingCharacters(in: CharacterSet(charactersIn: "# ")).lowercased()
+        if let v = UInt32(s, radix: 16), s.count == 6 { self.init(hex: v) }
+        else { self = Theme.muted }
+    }
 }
 
-// MARK: - Glass surfaces
+// MARK: - Surfaces
 
-struct GlassCard: ViewModifier {
-    var radius: CGFloat = 22
+struct Card: ViewModifier {
+    var radius: CGFloat = 16
     var padding: CGFloat = 16
     func body(content: Content) -> some View {
         content
             .padding(padding)
-            .background(
-                RoundedRectangle(cornerRadius: radius, style: .continuous)
-                    .fill(.ultraThinMaterial)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: radius, style: .continuous)
-                            .fill(Color.white.opacity(0.03))
-                    )
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: radius, style: .continuous)
-                    .stroke(
-                        LinearGradient(colors: [Color.white.opacity(0.18), Color.white.opacity(0.03)],
-                                       startPoint: .topLeading, endPoint: .bottomTrailing),
-                        lineWidth: 1
-                    )
-            )
+            .background(Theme.ink2, in: RoundedRectangle(cornerRadius: radius, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: radius, style: .continuous).stroke(Theme.stroke, lineWidth: 1))
     }
 }
 
 extension View {
-    func glass(radius: CGFloat = 22, padding: CGFloat = 16) -> some View {
-        modifier(GlassCard(radius: radius, padding: padding))
+    func card(radius: CGFloat = 16, padding: CGFloat = 16) -> some View {
+        modifier(Card(radius: radius, padding: padding))
     }
-    /// iOS-style press feedback.
+    /// Back-compat alias used by older views.
+    func glass(radius: CGFloat = 16, padding: CGFloat = 16) -> some View {
+        modifier(Card(radius: radius, padding: padding))
+    }
     func pressable() -> some View { buttonStyle(PressableStyle()) }
 }
 
 struct PressableStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .scaleEffect(configuration.isPressed ? 0.96 : 1)
-            .opacity(configuration.isPressed ? 0.85 : 1)
-            .animation(.spring(response: 0.3, dampingFraction: 0.6), value: configuration.isPressed)
+            .scaleEffect(configuration.isPressed ? 0.97 : 1)
+            .opacity(configuration.isPressed ? 0.7 : 1)
+            .animation(.spring(response: 0.3, dampingFraction: 0.7), value: configuration.isPressed)
     }
 }
 
@@ -104,15 +100,15 @@ enum Haptic {
     static func selection() { UISelectionFeedbackGenerator().selectionChanged() }
 }
 
-// MARK: - The AskAI spark mark (matches the app icon family)
+// MARK: - Brand mark (monochrome sparkle, used sparingly)
 
 struct SparkMark: View {
     var size: CGFloat = 44
-    var gradient: LinearGradient = Theme.accentGradient
+    var color: Color = Theme.text
     var body: some View {
         ZStack {
-            SparkShape().fill(gradient).frame(width: size, height: size)
-            SparkShape().fill(gradient).opacity(0.9)
+            SparkShape().fill(color).frame(width: size, height: size)
+            SparkShape().fill(color).opacity(0.85)
                 .frame(width: size * 0.36, height: size * 0.36)
                 .offset(x: size * 0.42, y: -size * 0.42)
         }
@@ -136,31 +132,7 @@ struct SparkShape: Shape {
     }
 }
 
-/// Animated aurora background used behind hero areas.
+/// Plain background (kept as a type so existing references compile).
 struct AuroraBackground: View {
-    @State private var drift = false
-    var body: some View {
-        ZStack {
-            Theme.backdrop.ignoresSafeArea()
-            Circle().fill(Theme.accent.opacity(0.28)).frame(width: 360, height: 360)
-                .blur(radius: 90).offset(x: drift ? -120 : -80, y: drift ? -260 : -300)
-            Circle().fill(Theme.accent3.opacity(0.22)).frame(width: 320, height: 320)
-                .blur(radius: 90).offset(x: drift ? 140 : 110, y: drift ? -180 : -150)
-            Circle().fill(Theme.accent2.opacity(0.18)).frame(width: 300, height: 300)
-                .blur(radius: 100).offset(x: drift ? 90 : 130, y: drift ? 320 : 360)
-        }
-        .ignoresSafeArea()
-        .onAppear {
-            withAnimation(.easeInOut(duration: 9).repeatForever(autoreverses: true)) { drift.toggle() }
-        }
-    }
-}
-
-// Avatar color helper for agents (hex string -> Color).
-extension Color {
-    init(hexString: String?) {
-        let s = (hexString ?? "").trimmingCharacters(in: CharacterSet(charactersIn: "# ")).lowercased()
-        if let v = UInt32(s, radix: 16), s.count == 6 { self.init(hex: v) }
-        else { self = Theme.accent }
-    }
+    var body: some View { Theme.ink.ignoresSafeArea() }
 }

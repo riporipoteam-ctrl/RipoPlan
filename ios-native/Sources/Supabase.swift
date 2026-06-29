@@ -131,6 +131,26 @@ final class Supa {
         _ = try await send(url: full, method: "DELETE", auth: true, body: nil, prefer: "return=minimal")
     }
 
+    // MARK: - Storage (chat-uploads bucket, public)
+
+    /// Upload bytes to the public `chat-uploads` bucket; returns the public URL.
+    func uploadFile(data: Data, ext: String, contentType: String) async throws -> String {
+        let path = "\((userId ?? "anon"))/\(UUID().uuidString).\(ext)"
+        let url = URL(string: baseURL.absoluteString + "/storage/v1/object/chat-uploads/" + path)!
+        var req = URLRequest(url: url)
+        req.httpMethod = "POST"
+        req.setValue(anonKey, forHTTPHeaderField: "apikey")
+        req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        req.setValue(contentType, forHTTPHeaderField: "Content-Type")
+        req.setValue("3600", forHTTPHeaderField: "Cache-Control")
+        let (respData, resp) = try await URLSession.shared.upload(for: req, from: data)
+        guard let http = resp as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+            let msg = String(data: respData, encoding: .utf8) ?? "upload failed"
+            throw SupaError(message: msg)
+        }
+        return baseURL.absoluteString + "/storage/v1/object/public/chat-uploads/" + path
+    }
+
     private func decodeArray<T: Decodable>(_ data: Data) throws -> [T] {
         if data.isEmpty { return [] }
         do { return try JSONDecoder().decode([T].self, from: data) }

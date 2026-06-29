@@ -11,7 +11,7 @@ struct RootView: View {
             if app.booting {
                 SplashView()
             } else if app.authed {
-                MainTabView()
+                RootShell()
                     .transition(.opacity)
             } else {
                 AuthView()
@@ -39,7 +39,7 @@ struct SplashView: View {
                     .overlay(SparkMark(size: 60))
                     .overlay(
                         RoundedRectangle(cornerRadius: 30, style: .continuous)
-                            .stroke(Color.white.opacity(0.15), lineWidth: 1)
+                            .stroke(Theme.stroke, lineWidth: 1)
                     )
                     .shadow(color: Theme.accent.opacity(0.5), radius: 30, y: 16)
                     .scaleEffect(appear ? 1 : 0.85)

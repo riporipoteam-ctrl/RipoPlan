@@ -2,6 +2,7 @@ import SwiftUI
 
 struct AgentsView: View {
     @EnvironmentObject var app: AppState
+    @Environment(\.dismiss) private var dismiss
     @State private var showCreate = false
     @State private var path: [String] = []
 
@@ -24,11 +25,11 @@ struct AgentsView: View {
                 .refreshable { await app.loadAgents() }
             }
             .navigationTitle("Agents")
-            .toolbarColorScheme(.dark, for: .navigationBar)
             .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("Done") { dismiss() } }
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Button { Haptic.medium(); showCreate = true } label: {
-                        Image(systemName: "plus.circle.fill").foregroundStyle(Theme.accentGradient)
+                        Image(systemName: "plus").foregroundStyle(Theme.text).fontWeight(.semibold)
                     }
                 }
             }
@@ -65,12 +66,10 @@ struct AgentCard: View {
     }
 }
 
-struct ChatRef: Identifiable { let id: String }
-
 struct AgentDetailView: View {
     @EnvironmentObject var app: AppState
     let agent: Agent
-    @State private var chat: ChatRef?
+    @State private var coverThread: String?
     @State private var busy = false
 
     var body: some View {
@@ -97,12 +96,12 @@ struct AgentDetailView: View {
 
                     Button { startChat() } label: {
                         HStack {
-                            if busy { ProgressView().tint(.white) }
+                            if busy { ProgressView().tint(Theme.onAccent) }
                             Label("Message \(agent.name)", systemImage: "bubble.left.fill")
                         }
                         .fontWeight(.bold).frame(maxWidth: .infinity).padding(.vertical, 14)
-                        .background(Theme.accentGradient, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-                        .foregroundStyle(.white)
+                        .background(Theme.accent, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                        .foregroundStyle(Theme.onAccent)
                     }.pressable().disabled(busy)
                     Spacer(minLength: 80)
                 }
@@ -110,14 +109,14 @@ struct AgentDetailView: View {
             }
         }
         .navigationBarTitleDisplayMode(.inline)
-        .toolbarColorScheme(.dark, for: .navigationBar)
-        .fullScreenCover(item: $chat) { ref in
+        .fullScreenCover(isPresented: Binding(get: { coverThread != nil }, set: { if !$0 { coverThread = nil } })) {
             NavigationStack {
-                ChatView(threadId: ref.id)
+                ConversationView(threadId: Binding(get: { coverThread }, set: { coverThread = $0 }))
                     .environmentObject(app)
+                    .navigationTitle(agent.name).navigationBarTitleDisplayMode(.inline)
                     .toolbar {
                         ToolbarItem(placement: .cancellationAction) {
-                            Button { chat = nil } label: { Image(systemName: "xmark") }
+                            Button { coverThread = nil } label: { Image(systemName: "xmark") }
                         }
                     }
             }
@@ -134,7 +133,7 @@ struct AgentDetailView: View {
         Haptic.medium(); busy = true
         Task {
             if let tid = await app.send("Hey \(agent.name) 👋", forcedAgentId: agent.id) {
-                chat = ChatRef(id: tid)
+                coverThread = tid
             }
             busy = false
         }
@@ -166,17 +165,16 @@ struct CreateAgentSheet: View {
                             Haptic.success(); busy = false; dismiss()
                         }
                     } label: {
-                        HStack { if busy { ProgressView().tint(.white) }; Text("Create agent").fontWeight(.bold) }
+                        HStack { if busy { ProgressView().tint(Theme.onAccent) }; Text("Create agent").fontWeight(.bold) }
                             .frame(maxWidth: .infinity).padding(.vertical, 14)
-                            .background(Theme.accentGradient, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-                            .foregroundStyle(.white)
+                            .background(Theme.accent, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                            .foregroundStyle(Theme.onAccent)
                     }.pressable().disabled(name.isEmpty || busy).opacity(name.isEmpty ? 0.6 : 1)
                     Spacer()
                 }
                 .padding(16)
             }
             .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } } }
-            .toolbarColorScheme(.dark, for: .navigationBar)
         }
     }
 
@@ -186,7 +184,7 @@ struct CreateAgentSheet: View {
             TextField(ph, text: text)
                 .foregroundStyle(Theme.text).tint(Theme.accent)
                 .padding(.horizontal, 14).padding(.vertical, 12)
-                .background(Color.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .background(Theme.ink3, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
                 .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.stroke, lineWidth: 1))
         }
     }

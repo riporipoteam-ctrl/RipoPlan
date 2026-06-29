@@ -44,12 +44,12 @@ struct AuthView: View {
 
                         Button(action: submit) {
                             HStack {
-                                if busy { ProgressView().tint(.white) }
+                                if busy { ProgressView().tint(Theme.onAccent) }
                                 Text(isSignUp ? "Create account" : "Sign in").fontWeight(.bold)
                             }
                             .frame(maxWidth: .infinity).padding(.vertical, 15)
-                            .background(Theme.accentGradient, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-                            .foregroundStyle(.white)
+                            .background(Theme.accent, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                            .foregroundStyle(Theme.onAccent)
                         }
                         .pressable()
                         .disabled(busy || email.isEmpty || password.count < 6)
@@ -81,7 +81,7 @@ struct AuthView: View {
             }
         }
         .padding(.horizontal, 14).padding(.vertical, 13)
-        .background(Color.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .background(Theme.ink3, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 14).stroke(Theme.stroke, lineWidth: 1))
     }
 

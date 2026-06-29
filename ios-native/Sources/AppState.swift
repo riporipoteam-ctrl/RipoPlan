@@ -6,7 +6,6 @@ final class AppState: ObservableObject {
     @Published var authed = false
     @Published var booting = true
     @Published var bootError: String?
-    @Published var hideTabBar = false
 
     @Published var profile: Profile?
     @Published var workspace: Workspace?
@@ -38,8 +37,20 @@ final class AppState: ObservableObject {
         if authed {
             await Supa.shared.refreshIfPossible()
             await loadAll()
+            await maybeDailyBriefing()
         }
         booting = false
+    }
+
+    /// If the daily briefing is enabled, enqueue one (server-side) at most once a
+    /// day so there's real "what you & your agents did" content waiting.
+    func maybeDailyBriefing() async {
+        guard UserDefaults.standard.bool(forKey: "askai.brief") else { return }
+        let f = DateFormatter(); f.dateFormat = "yyyy-MM-dd"
+        let today = f.string(from: Date())
+        if UserDefaults.standard.string(forKey: "askai.briefDate") == today { return }
+        UserDefaults.standard.set(today, forKey: "askai.briefDate")
+        _ = await send("Daily briefing: in a short, skimmable summary, tell me what I worked on recently and what each agent has completed or is still working on, plus anything that needs my attention.")
     }
 
     func signIn(email: String, password: String) async throws {
@@ -119,19 +130,34 @@ final class AppState: ObservableObject {
     /// Send a message. Creates the thread if needed, posts the user message, adds a
     /// "thinking" agent placeholder, and enqueues a server-side background task so
     /// the agent runs even if the app is closed. Returns the thread id.
+    /// Upload a picked image/file and return its attachment (or nil on failure).
+    func upload(data: Data, ext: String, contentType: String, name: String) async -> Attachment? {
+        do {
+            let url = try await Supa.shared.uploadFile(data: data, ext: ext, contentType: contentType)
+            let type = contentType.hasPrefix("image/") ? "image" : "file"
+            return Attachment(type: type, url: url, name: name, mime: contentType)
+        } catch {
+            bootError = error.localizedDescription
+            return nil
+        }
+    }
+
     @discardableResult
-    func send(_ text: String, threadId: String? = nil, forcedAgentId: String? = nil) async -> String? {
+    func send(_ text: String, threadId: String? = nil, forcedAgentId: String? = nil, attachments: [Attachment] = []) async -> String? {
         guard let ws = workspace?.id, let uid = Supa.shared.userId else { return nil }
         let content = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !content.isEmpty else { return nil }
+        guard !content.isEmpty || !attachments.isEmpty else { return nil }
 
         var tid = threadId
         var agentId = forcedAgentId
 
         do {
+            let promptText = content.isEmpty ? "(the user sent an attachment — describe/use it)" : content
+            let attachJSON: [[String: Any]] = attachments.map { ["type": $0.type, "url": $0.url, "name": $0.name, "mime": $0.mime ?? ""] }
             if tid == nil {
                 if agentId == nil { agentId = supervisor?.id }
-                let title = content.split(separator: " ").prefix(6).joined(separator: " ")
+                let base = content.isEmpty ? (attachments.first?.name ?? "New chat") : content
+                let title = base.split(separator: " ").prefix(6).joined(separator: " ")
                 var row: [String: Any] = [
                     "workspace_id": ws,
                     "title": String(title.prefix(80)),
@@ -151,12 +177,14 @@ final class AppState: ObservableObject {
             }
             guard let threadIdReal = tid else { return nil }
 
-            // user message
-            _ = try await Supa.shared.insert("messages", [
+            // user message (with any attachments)
+            var userMsg: [String: Any] = [
                 "workspace_id": ws, "thread_id": threadIdReal,
                 "sender_type": "user", "user_id": uid,
                 "content": content, "status": "complete"
-            ], returning: false) as [Message]
+            ]
+            if !attachJSON.isEmpty { userMsg["attachments"] = attachJSON }
+            _ = try await Supa.shared.insert("messages", userMsg, returning: false) as [Message]
 
             // thinking placeholder for the responding agent
             let resolvedAgent = agentId ?? supervisor?.id
@@ -174,7 +202,7 @@ final class AppState: ObservableObject {
             var task: [String: Any] = [
                 "workspace_id": ws,
                 "thread_id": threadIdReal,
-                "prompt": content,
+                "prompt": promptText,
                 "created_by": uid
             ]
             if let resolvedAgent { task["agent_id"] = resolvedAgent }
