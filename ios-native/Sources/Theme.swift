@@ -55,20 +55,52 @@ extension Color {
     }
 }
 
-// MARK: - Surfaces
+// MARK: - Liquid glass surfaces
+// Real frosted-glass material with a top sheen + specular edge + soft shadow.
+// (Apple's iOS-26 `glassEffect` API isn't in the CI SDK, so this is the richest
+// liquid-glass look that compiles everywhere — content shows through the blur.)
+
+struct LiquidGlass: ViewModifier {
+    var radius: CGFloat = 22
+    var stroke: Bool = true
+    var shadow: Bool = true
+    func body(content: Content) -> some View {
+        let shape = RoundedRectangle(cornerRadius: radius, style: .continuous)
+        content
+            .background(.ultraThinMaterial, in: shape)
+            .overlay(   // top sheen
+                shape.fill(
+                    LinearGradient(colors: [Color.white.opacity(0.45), Color.white.opacity(0.04), .clear],
+                                   startPoint: .top, endPoint: .bottom)
+                )
+                .blendMode(.plusLighter)
+                .opacity(0.5)
+                .allowsHitTesting(false)
+            )
+            .overlay(   // specular edge
+                stroke ? shape.stroke(
+                    LinearGradient(colors: [Color.white.opacity(0.55), Color.white.opacity(0.08),
+                                            Color.black.opacity(0.05)],
+                                   startPoint: .topLeading, endPoint: .bottomTrailing),
+                    lineWidth: 1
+                ) : nil
+            )
+            .shadow(color: shadow ? Color.black.opacity(0.16) : .clear, radius: 18, x: 0, y: 10)
+    }
+}
 
 struct Card: ViewModifier {
     var radius: CGFloat = 16
     var padding: CGFloat = 16
     func body(content: Content) -> some View {
-        content
-            .padding(padding)
-            .background(Theme.ink2, in: RoundedRectangle(cornerRadius: radius, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: radius, style: .continuous).stroke(Theme.stroke, lineWidth: 1))
+        content.padding(padding).modifier(LiquidGlass(radius: radius, shadow: true))
     }
 }
 
 extension View {
+    func liquidGlass(_ radius: CGFloat = 22, stroke: Bool = true, shadow: Bool = true) -> some View {
+        modifier(LiquidGlass(radius: radius, stroke: stroke, shadow: shadow))
+    }
     func card(radius: CGFloat = 16, padding: CGFloat = 16) -> some View {
         modifier(Card(radius: radius, padding: padding))
     }
@@ -132,7 +164,17 @@ struct SparkShape: Shape {
     }
 }
 
-/// Plain background (kept as a type so existing references compile).
+/// Subtle ambient background so frosted glass has depth to refract. Neutral,
+/// barely-there tints (kept monochrome/ChatGPT-clean).
 struct AuroraBackground: View {
-    var body: some View { Theme.ink.ignoresSafeArea() }
+    var body: some View {
+        ZStack {
+            Theme.ink
+            Circle().fill(Color(lightUI: .black, darkUI: .white).opacity(0.04))
+                .frame(width: 360, height: 360).blur(radius: 80).offset(x: -120, y: -260)
+            Circle().fill(Color(lightUI: .black, darkUI: .white).opacity(0.035))
+                .frame(width: 320, height: 320).blur(radius: 90).offset(x: 140, y: 360)
+        }
+        .ignoresSafeArea()
+    }
 }
