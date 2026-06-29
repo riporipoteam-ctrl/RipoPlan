@@ -45,8 +45,7 @@ targets:
           UIApplicationSupportsMultipleScenes: false
         UILaunchScreen:
           UIColorName: LaunchBackground
-        UIStatusBarStyle: UIStatusBarStyleLightContent
-        UIViewControllerBasedStatusBarAppearance: false
+        UIViewControllerBasedStatusBarAppearance: true
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait
         UIRequiresFullScreen: true

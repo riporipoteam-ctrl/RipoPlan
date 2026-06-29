@@ -2,10 +2,16 @@ import SwiftUI
 
 struct MainTabView: View {
     @EnvironmentObject var app: AppState
-    @State private var tab: Tab = .home
+    @State private var tab: Tab = Tab.initial()
 
     enum Tab: String, CaseIterable {
         case home, chats, agents, activity, settings
+        /// CI/screenshot hook: ASKAI_SCREEN=home|chats|agents|activity|settings.
+        static func initial() -> Tab {
+            let raw = ProcessInfo.processInfo.environment["ASKAI_SCREEN"] ?? ""
+            if raw == "chat" { return .chats }
+            return Tab(rawValue: raw) ?? .home
+        }
         var icon: String {
             switch self {
             case .home: return "sparkles"

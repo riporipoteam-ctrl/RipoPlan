@@ -42,6 +42,15 @@ struct ChatsView: View {
             .navigationDestination(for: String.self) { tid in
                 ChatView(threadId: tid).environmentObject(app)
             }
+            .task {
+                // CI/screenshot hook: open the first thread for the chat capture.
+                if ProcessInfo.processInfo.environment["ASKAI_SCREEN"] == "chat" {
+                    for _ in 0..<20 where app.threads.isEmpty {
+                        try? await Task.sleep(nanoseconds: 300_000_000)
+                    }
+                    if let first = app.threads.first, path.isEmpty { path.append(first.id) }
+                }
+            }
             .alert("Rename chat", isPresented: Binding(get: { renaming != nil }, set: { if !$0 { renaming = nil } })) {
                 TextField("Title", text: $newTitle)
                 Button("Cancel", role: .cancel) { renaming = nil }

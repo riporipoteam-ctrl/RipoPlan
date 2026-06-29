@@ -1,0 +1,97 @@
+name: iOS screenshots (signed-in)
+
+# Builds the native app for the Simulator, signs in with a throwaway account
+# (passed as workflow inputs — never committed), and captures every screen by
+# launching the app into each route via env vars. Outputs an "AskAI-screens"
+# artifact with one PNG per screen (+ a dark-mode home).
+on:
+  workflow_dispatch:
+    inputs:
+      email:
+        description: "Test account email"
+        required: true
+      password:
+        description: "Test account password"
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  screens:
+    runs-on: macos-15
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install XcodeGen
+        run: brew install xcodegen
+      - name: Generate Xcode project
+        working-directory: ios-native
+        run: xcodegen generate
+      - name: Build for Simulator
+        working-directory: ios-native
+        run: |
+          xcodebuild \
+            -project AskAI.xcodeproj -scheme AskAI -configuration Debug \
+            -sdk iphonesimulator -derivedDataPath dd \
+            CODE_SIGNING_ALLOWED=NO build
+      - name: Boot Simulator, sign in, capture every screen
+        env:
+          EMAIL: ${{ inputs.email }}
+          PASSWORD: ${{ inputs.password }}
+        run: |
+          set -e
+          SUPA="https://xbwhvkzgbnyqsjplbyox.supabase.co"
+          ANON="sb_publishable_Jcs8IXK6YnOwWe-qYAFecg_Tb6M-ohu"
+
+          UDID=$(xcrun simctl list devices available | grep -Eo '[0-9A-F-]{36}' | head -1)
+          echo "Simulator: $UDID"
+          xcrun simctl bootstatus "$UDID" -b || xcrun simctl boot "$UDID" || true
+          xcrun simctl bootstatus "$UDID" || true
+
+          APP=$(find ios-native/dd/Build/Products -name "AskAI.app" -type d | head -1)
+          echo "App: $APP"
+          xcrun simctl install "$UDID" "$APP"
+
+          # Get a session from Supabase (auto-confirm signup, then password grant).
+          curl -s -X POST "$SUPA/auth/v1/signup" -H "apikey: $ANON" -H "Content-Type: application/json" \
+            -d "{\"email\":\"$EMAIL\",\"password\":\"$PASSWORD\"}" >/dev/null || true
+          RESP=$(curl -s -X POST "$SUPA/auth/v1/token?grant_type=password" -H "apikey: $ANON" -H "Content-Type: application/json" \
+            -d "{\"email\":\"$EMAIL\",\"password\":\"$PASSWORD\"}")
+          export ACCESS=$(echo "$RESP" | python3 -c "import sys,json;print(json.load(sys.stdin)['access_token'])")
+          export REFRESH=$(echo "$RESP" | python3 -c "import sys,json;print(json.load(sys.stdin)['refresh_token'])")
+          export UID2=$(echo "$RESP" | python3 -c "import sys,json;print(json.load(sys.stdin)['user']['id'])")
+          if [ -z "$ACCESS" ]; then echo "Sign-in failed: $RESP"; exit 1; fi
+
+          mkdir -p shots
+          snap () {
+            local screen="$1"; local dark="$2"; local out="$3"
+            xcrun simctl terminate "$UDID" gg.askai.app >/dev/null 2>&1 || true
+            SIMCTL_CHILD_ASKAI_ACCESS="$ACCESS" \
+            SIMCTL_CHILD_ASKAI_REFRESH="$REFRESH" \
+            SIMCTL_CHILD_ASKAI_UID="$UID2" \
+            SIMCTL_CHILD_ASKAI_EMAIL="$EMAIL" \
+            SIMCTL_CHILD_ASKAI_SCREEN="$screen" \
+            SIMCTL_CHILD_ASKAI_DARK="$dark" \
+              xcrun simctl launch "$UDID" gg.askai.app
+            sleep 9
+            xcrun simctl io "$UDID" screenshot "shots/$out"
+            echo "captured $out"
+          }
+
+          # Light theme (default)
+          snap home     0 askai-home.png
+          snap chats    0 askai-chats.png
+          snap chat     0 askai-chat.png
+          snap agents   0 askai-agents.png
+          snap activity 0 askai-activity.png
+          snap settings 0 askai-settings.png
+          # Dark theme (last — it persists the dark default)
+          snap home     1 askai-home-dark.png
+
+          ls -lh shots
+      - uses: actions/upload-artifact@v4
+        with:
+          name: AskAI-screens
+          path: shots/*.png
+          if-no-files-found: error

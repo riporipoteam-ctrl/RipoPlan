@@ -4,6 +4,7 @@ struct SettingsView: View {
     @EnvironmentObject var app: AppState
     @AppStorage("askai.notif") private var notifOn = false
     @AppStorage("askai.briefHour") private var briefHour = 8
+    @AppStorage("askai.dark") private var darkMode = false
     @State private var backend = ""
     @State private var confirmSignOut = false
 
@@ -20,6 +21,21 @@ struct SettingsView: View {
                             Text(app.profile?.email ?? app.workspace?.name ?? "").font(.subheadline).foregroundStyle(Theme.muted)
                         }
                         .frame(maxWidth: .infinity).glass(radius: 22)
+
+                        // Appearance
+                        VStack(alignment: .leading, spacing: 12) {
+                            SectionHeader(title: "Appearance")
+                            Toggle(isOn: $darkMode) {
+                                Label(darkMode ? "Dark mode" : "Light mode",
+                                      systemImage: darkMode ? "moon.stars.fill" : "sun.max.fill")
+                                    .foregroundStyle(Theme.text)
+                            }
+                            .tint(Theme.accent)
+                            .onChange(of: darkMode) { _ in Haptic.selection() }
+                            Text("AskAI is light by default. Turn this on for a dark theme.")
+                                .font(.caption).foregroundStyle(Theme.muted)
+                        }
+                        .glass(radius: 18)
 
                         // Notifications
                         VStack(alignment: .leading, spacing: 12) {

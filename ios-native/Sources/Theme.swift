@@ -1,22 +1,22 @@
 import SwiftUI
 import UIKit
 
-/// Design system for the native AskAI app — a dark "command center" look that is
-/// deliberately different from the light website: deep ink background, liquid
-/// glass surfaces, vivid violet→pink accents, rounded display type.
+/// Design system for the native AskAI app — liquid glass surfaces, vivid
+/// violet→pink accents, rounded display type. Colors are **adaptive**: light by
+/// default, with a full dark mode (toggled in Settings → drives colorScheme).
 enum Theme {
-    static let ink = Color(hex: 0x0B0B12)
-    static let ink2 = Color(hex: 0x12121C)
-    static let card = Color(hex: 0x17172192)        // translucent card base
-    static let stroke = Color.white.opacity(0.08)
-    static let text = Color(hex: 0xF2F2F7)
-    static let muted = Color(hex: 0x9A9AB0)
+    static let ink = Color(light: 0xF6F3EE, dark: 0x0B0B12)        // app background
+    static let ink2 = Color(light: 0xFFFFFF, dark: 0x12121C)       // raised background
+    static let stroke = Color(lightUI: UIColor.black.withAlphaComponent(0.08),
+                              darkUI: UIColor.white.withAlphaComponent(0.10))
+    static let text = Color(light: 0x15151C, dark: 0xF2F2F7)
+    static let muted = Color(light: 0x6B6B7B, dark: 0x9A9AB0)
     static let accent = Color(hex: 0xA855F7)
     static let accent2 = Color(hex: 0xFF5EA8)
     static let accent3 = Color(hex: 0x6366F1)
-    static let good = Color(hex: 0x34D399)
-    static let warn = Color(hex: 0xFBBF24)
-    static let bad = Color(hex: 0xFB7185)
+    static let good = Color(hex: 0x16A34A)
+    static let warn = Color(hex: 0xD97706)
+    static let bad = Color(hex: 0xE11D48)
 
     static var accentGradient: LinearGradient {
         LinearGradient(colors: [accent, accent2], startPoint: .topLeading, endPoint: .bottomTrailing)
@@ -36,6 +36,15 @@ extension Color {
         let g = Double((hex >> 8) & 0xFF) / 255
         let b = Double(hex & 0xFF) / 255
         self = Color(.sRGB, red: r, green: g, blue: b, opacity: a)
+    }
+    /// Adaptive color that resolves to `light`/`dark` hex per interface style.
+    init(light: UInt32, dark: UInt32) {
+        self = Color(UIColor { tc in
+            UIColor(Color(hex: tc.userInterfaceStyle == .dark ? dark : light))
+        })
+    }
+    init(lightUI: UIColor, darkUI: UIColor) {
+        self = Color(UIColor { tc in tc.userInterfaceStyle == .dark ? darkUI : lightUI })
     }
 }
 

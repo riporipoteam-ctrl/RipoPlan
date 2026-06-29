@@ -2,6 +2,8 @@ import SwiftUI
 
 struct RootView: View {
     @EnvironmentObject var app: AppState
+    // Light by default; user flips this in Settings → Dark mode.
+    @AppStorage("askai.dark") private var darkMode = false
 
     var body: some View {
         ZStack {
@@ -16,7 +18,7 @@ struct RootView: View {
                     .transition(.opacity)
             }
         }
-        .preferredColorScheme(.dark)
+        .preferredColorScheme(darkMode ? .dark : .light)
         .tint(Theme.accent)
         .animation(.easeInOut(duration: 0.4), value: app.authed)
         .animation(.easeInOut(duration: 0.4), value: app.booting)

@@ -18,7 +18,15 @@ final class Supa {
     private(set) var session: Session?
     private let sessionKey = "askai.session"
 
-    private init() { loadSession() }
+    private init() {
+        loadSession()
+        // CI/screenshot hook: seed a session from launch environment so the app
+        // opens authenticated without typing credentials.
+        let e = ProcessInfo.processInfo.environment
+        if let at = e["ASKAI_ACCESS"], let rt = e["ASKAI_REFRESH"], let uid = e["ASKAI_UID"], !at.isEmpty {
+            saveSession(Session(accessToken: at, refreshToken: rt, userId: uid, email: e["ASKAI_EMAIL"]))
+        }
+    }
 
     // MARK: - Session persistence
 
