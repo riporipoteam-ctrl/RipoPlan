@@ -1,6 +1,9 @@
 import SwiftUI
 
-enum ShellSheet: String, Identifiable { case agents, apps, activity; var id: String { rawValue } }
+enum ShellSheet: String, Identifiable {
+    case agents, apps, activity, jobs, knowledge, integrations, channels
+    var id: String { rawValue }
+}
 
 /// The signed-in app: a single conversation surface with a top bar (menu + new
 /// chat) and a swipe-in left sidebar. No bottom tab bar — pages live in the drawer.
@@ -16,12 +19,12 @@ struct RootShell: View {
 
     var body: some View {
         ZStack(alignment: .leading) {
-            // Main column
-            VStack(spacing: 0) {
+            // Main column — content scrolls under the frosted top bar.
+            ZStack(alignment: .top) {
+                ConversationView(threadId: $current, topInset: 50)
                 topBar
-                ConversationView(threadId: $current)
             }
-            .background(Theme.ink.ignoresSafeArea())
+            .background(AuroraBackground())
             .disabled(showSidebar)
 
             // Dim overlay
@@ -49,6 +52,10 @@ struct RootShell: View {
                 case .agents: AgentsView().environmentObject(app)
                 case .activity: ActivityView().environmentObject(app)
                 case .apps: AppsView().environmentObject(app)
+                case .jobs: JobsView().environmentObject(app)
+                case .knowledge: KnowledgeView().environmentObject(app)
+                case .integrations: IntegrationsView().environmentObject(app)
+                case .channels: ChannelsView().environmentObject(app)
                 }
             }
             .tint(Theme.accent)
@@ -72,8 +79,8 @@ struct RootShell: View {
             }
             .padding(.horizontal, 16)
         }
-        .frame(height: 48)
-        .background(Theme.ink)
+        .frame(height: 50)
+        .background(.ultraThinMaterial)
         .overlay(Divider().overlay(Theme.stroke), alignment: .bottom)
     }
 

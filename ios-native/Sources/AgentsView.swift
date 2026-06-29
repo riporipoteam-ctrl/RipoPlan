@@ -68,6 +68,7 @@ struct AgentCard: View {
 
 struct AgentDetailView: View {
     @EnvironmentObject var app: AppState
+    @Environment(\.dismiss) private var dismiss
     let agent: Agent
     @State private var coverThread: String?
     @State private var busy = false
@@ -109,6 +110,20 @@ struct AgentDetailView: View {
             }
         }
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .navigationBarTrailing) {
+                Menu {
+                    if agent.status == "paused" {
+                        Button { Task { await app.setAgentStatus(agent.id, "active") } } label: { Label("Resume", systemImage: "play.fill") }
+                    } else {
+                        Button { Task { await app.setAgentStatus(agent.id, "paused") } } label: { Label("Pause", systemImage: "pause.fill") }
+                    }
+                    Button(role: .destructive) { Task { await app.setAgentStatus(agent.id, "archived"); dismiss() } } label: {
+                        Label("Archive", systemImage: "archivebox")
+                    }
+                } label: { Image(systemName: "ellipsis.circle").foregroundStyle(Theme.text) }
+            }
+        }
         .fullScreenCover(isPresented: Binding(get: { coverThread != nil }, set: { if !$0 { coverThread = nil } })) {
             NavigationStack {
                 ConversationView(threadId: Binding(get: { coverThread }, set: { coverThread = $0 }))

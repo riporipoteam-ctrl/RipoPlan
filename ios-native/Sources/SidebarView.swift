@@ -37,18 +37,20 @@ struct SidebarView: View {
             .padding(.horizontal, 14)
 
             // Pages
-            VStack(spacing: 2) {
-                navRow("person.2", "Agents") { openSheet(.agents) }
-                navRow("square.grid.2x2", "Apps") { openSheet(.apps) }
-                navRow("bell", "Activity") { openSheet(.activity) }
-            }
-            .padding(.horizontal, 8).padding(.top, 10)
-
-            Text("Recents").font(.caption.weight(.semibold)).foregroundStyle(Theme.muted)
-                .padding(.horizontal, 18).padding(.top, 16).padding(.bottom, 4)
-
             ScrollView {
-                LazyVStack(spacing: 1) {
+                VStack(spacing: 2) {
+                    navRow("person.2", "Agents") { openSheet(.agents) }
+                    navRow("number", "Channels") { openSheet(.channels) }
+                    navRow("square.grid.2x2", "Apps") { openSheet(.apps) }
+                    navRow("clock.arrow.circlepath", "Jobs") { openSheet(.jobs) }
+                    navRow("book", "Knowledge") { openSheet(.knowledge) }
+                    navRow("puzzlepiece.extension", "Integrations") { openSheet(.integrations) }
+                    navRow("bell", "Activity") { openSheet(.activity) }
+
+                    Text("Recents").font(.caption.weight(.semibold)).foregroundStyle(Theme.muted)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 14).padding(.top, 14).padding(.bottom, 4)
+
                     ForEach(filtered) { t in
                         Button { Haptic.light(); current = t.id; close() } label: {
                             HStack {
@@ -66,7 +68,7 @@ struct SidebarView: View {
                         }
                     }
                 }
-                .padding(.horizontal, 8)
+                .padding(.horizontal, 8).padding(.top, 10)
             }
 
             Divider().overlay(Theme.stroke)
@@ -88,7 +90,12 @@ struct SidebarView: View {
         }
         .padding(.top, 8)
         .frame(maxHeight: .infinity, alignment: .top)
-        .background(Theme.ink.ignoresSafeArea())
+        .background(.ultraThinMaterial)
+        .overlay(alignment: .trailing) {
+            LinearGradient(colors: [.white.opacity(0.35), .clear], startPoint: .top, endPoint: .bottom)
+                .frame(width: 1).blendMode(.plusLighter)
+        }
+        .ignoresSafeArea()
     }
 
     private func navRow(_ icon: String, _ label: String, _ action: @escaping () -> Void) -> some View {

@@ -121,6 +121,11 @@ final class AppState: ObservableObject {
 
     func agent(_ id: String?) -> Agent? { agents.first { $0.id == id } }
 
+    func setAgentStatus(_ id: String, _ status: String) async {
+        try? await Supa.shared.update("agents?id=eq.\(id)", ["status": status])
+        await loadAgents()
+    }
+
     // MARK: - Messages
 
     func messages(thread: String) async -> [Message] {

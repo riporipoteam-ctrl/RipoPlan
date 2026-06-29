@@ -22,6 +22,7 @@ let SUGGESTIONS: [Suggestion] = [
 struct ConversationView: View {
     @EnvironmentObject var app: AppState
     @Binding var threadId: String?
+    var topInset: CGFloat = 0
 
     @State private var messages: [Message] = []
     @State private var text = ""
@@ -35,19 +36,24 @@ struct ConversationView: View {
     @State private var showFiles = false
 
     var body: some View {
-        VStack(spacing: 0) {
-            if threadId == nil {
-                newChat
-            } else {
-                thread
+        ZStack(alignment: .bottom) {
+            Group {
+                if threadId == nil { newChat } else { thread }
             }
-            InputBar(text: $text, attachments: $attachments,
-                     sending: sending, uploading: uploading,
-                     onSend: send, onPickPhoto: { showPhoto = true }, onPickFile: { showFiles = true })
-                .padding(.horizontal, 12)
-                .padding(.bottom, 8)
+            // Floating glass composer — content scrolls underneath it (real glass).
+            VStack(spacing: 0) {
+                LinearGradient(colors: [Theme.ink.opacity(0), Theme.ink.opacity(0.9), Theme.ink],
+                               startPoint: .top, endPoint: .bottom)
+                    .frame(height: 24).allowsHitTesting(false)
+                InputBar(text: $text, attachments: $attachments,
+                         sending: sending, uploading: uploading,
+                         onSend: send, onPickPhoto: { showPhoto = true }, onPickFile: { showFiles = true })
+                    .padding(.horizontal, 12)
+                    .padding(.bottom, 8)
+                    .background(Theme.ink.opacity(0.001))
+            }
         }
-        .background(Theme.ink)
+        .background(AuroraBackground())
         .photosPicker(isPresented: $showPhoto, selection: $photoItem, matching: .images)
         .onChange(of: photoItem) { item in Task { await loadPhoto(item) } }
         .fileImporter(isPresented: $showFiles, allowedContentTypes: [.item], allowsMultipleSelection: false) { result in
@@ -60,7 +66,7 @@ struct ConversationView: View {
     private var newChat: some View {
         ScrollView {
             VStack(spacing: 18) {
-                Spacer(minLength: 60)
+                Spacer(minLength: 70 + topInset)
                 SparkMark(size: 40, color: Theme.text)
                 Text("How can I help\(app.firstName.isEmpty ? "" : ", \(app.firstName)")?")
                     .font(.system(size: 24, weight: .semibold))
@@ -74,15 +80,14 @@ struct ConversationView: View {
                                 Text(s.label).foregroundStyle(Theme.text)
                                 Spacer()
                             }
-                            .padding(.horizontal, 14).padding(.vertical, 12)
-                            .background(Theme.ink2, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-                            .overlay(RoundedRectangle(cornerRadius: 14).stroke(Theme.stroke, lineWidth: 1))
+                            .padding(.horizontal, 14).padding(.vertical, 13)
+                            .liquidGlass(16, shadow: false)
                         }
                         .buttonStyle(.plain)
                     }
                 }
                 .padding(.horizontal, 14)
-                Spacer(minLength: 12)
+                Spacer(minLength: 110)
             }
             .frame(maxWidth: .infinity)
         }
@@ -98,6 +103,8 @@ struct ConversationView: View {
                     Color.clear.frame(height: 1).id("end")
                 }
                 .padding(16)
+                .padding(.top, topInset)
+                .padding(.bottom, 84)
             }
             .onChange(of: messages.count) { _ in withAnimation(.easeOut(duration: 0.2)) { proxy.scrollTo("end", anchor: .bottom) } }
             .onChange(of: lastStamp) { _ in withAnimation(.easeOut(duration: 0.2)) { proxy.scrollTo("end", anchor: .bottom) } }
@@ -194,13 +201,17 @@ struct MessageBubble: View {
                 if thinking && (message.content ?? "").isEmpty {
                     activityOrDots
                 } else if !(message.content ?? "").isEmpty {
-                    MD(text: message.content ?? "")
-                        .font(.body).foregroundStyle(Theme.text)
-                        .textSelection(.enabled)
-                        .padding(.horizontal, isUser ? 14 : 0)
-                        .padding(.vertical, isUser ? 10 : 0)
-                        .background(isUser ? AnyShapeStyle(Theme.ink2) : AnyShapeStyle(Color.clear),
-                                    in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+                    if isUser {
+                        MD(text: message.content ?? "")
+                            .font(.body).foregroundStyle(Theme.text)
+                            .textSelection(.enabled)
+                            .padding(.horizontal, 14).padding(.vertical, 10)
+                            .liquidGlass(18, shadow: false)
+                    } else {
+                        MD(text: message.content ?? "")
+                            .font(.body).foregroundStyle(Theme.text)
+                            .textSelection(.enabled)
+                    }
                 }
             }
             if !isUser { Spacer(minLength: 40) }

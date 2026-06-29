@@ -134,8 +134,7 @@ struct InputBar: View {
             }
             .padding(.horizontal, 6)
             .padding(.vertical, 6)
-            .background(Theme.ink2, in: RoundedRectangle(cornerRadius: 26, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 26, style: .continuous).stroke(Theme.stroke, lineWidth: 1))
+            .liquidGlass(26)
         }
     }
 
