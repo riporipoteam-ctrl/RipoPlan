@@ -78,6 +78,8 @@ struct Attachment: Codable, Identifiable, Hashable {
     enum CodingKeys: String, CodingKey { case type, url, name, mime }
 }
 
+struct ConfigRow: Codable { var key: String; var value: String? }
+
 struct Notif: Codable, Identifiable {
     let id: String
     var type: String?

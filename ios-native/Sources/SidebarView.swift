@@ -88,14 +88,9 @@ struct SidebarView: View {
             }
             .buttonStyle(.plain)
         }
-        .padding(.top, 8)
-        .frame(maxHeight: .infinity, alignment: .top)
-        .background(.ultraThinMaterial)
-        .overlay(alignment: .trailing) {
-            LinearGradient(colors: [.white.opacity(0.35), .clear], startPoint: .top, endPoint: .bottom)
-                .frame(width: 1).blendMode(.plusLighter)
-        }
-        .ignoresSafeArea()
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .background(Theme.ink.ignoresSafeArea())
+        .overlay(alignment: .trailing) { Rectangle().fill(Theme.stroke).frame(width: 1).ignoresSafeArea() }
     }
 
     private func navRow(_ icon: String, _ label: String, _ action: @escaping () -> Void) -> some View {

@@ -7,7 +7,8 @@ struct SettingsView: View {
     @AppStorage("askai.brief") private var briefOn = false
     @AppStorage("askai.briefHour") private var briefHour = 8
     @AppStorage("askai.dark") private var darkMode = false
-    @State private var backend = ""
+    @AppStorage("askai.model") private var model = "groq"
+    @AppStorage("askai.nvkey") private var nvkey = ""
     @State private var confirmSignOut = false
 
     var body: some View {
@@ -36,6 +37,34 @@ struct SettingsView: View {
                             .onChange(of: darkMode) { _ in Haptic.selection() }
                             Text("AskAI is light by default. Turn this on for a dark theme.")
                                 .font(.caption).foregroundStyle(Theme.muted)
+                        }
+                        .card(radius: 16)
+
+                        // Model
+                        VStack(alignment: .leading, spacing: 10) {
+                            SectionHeader(title: "Model")
+                            Picker("Model", selection: $model) {
+                                Text("Llama 3.3 70B · fast").tag("groq")
+                                Text("Kimi K2.6 · NVIDIA").tag("kimi")
+                            }
+                            .pickerStyle(.segmented)
+                            .onChange(of: model) { _ in Haptic.selection() }
+                            Text(model == "kimi"
+                                 ? "Kimi K2.6 (Moonshot) running on NVIDIA — powerful, larger context."
+                                 : "Llama 3.3 70B on Groq — very fast responses.")
+                                .font(.caption).foregroundStyle(Theme.muted)
+                            if model == "kimi" {
+                                SecureField("NVIDIA API key (nvapi-…)", text: $nvkey)
+                                    .textInputAutocapitalization(.never).autocorrectionDisabled()
+                                    .foregroundStyle(Theme.text).tint(Theme.accent)
+                                    .padding(.horizontal, 12).padding(.vertical, 10)
+                                    .background(Theme.ink3, in: RoundedRectangle(cornerRadius: 12))
+                                    .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.stroke, lineWidth: 1))
+                                Text(nvkey.isEmpty
+                                     ? "Paste your NVIDIA key (build.nvidia.com) to enable Kimi. Stored only on this device."
+                                     : "Key saved on this device. Kimi K2.6 is active.")
+                                    .font(.caption2).foregroundStyle(nvkey.isEmpty ? Theme.warn : Theme.good)
+                            }
                         }
                         .card(radius: 16)
 
@@ -80,21 +109,6 @@ struct SettingsView: View {
                         }
                         .card(radius: 16)
 
-                        // Advanced
-                        VStack(alignment: .leading, spacing: 8) {
-                            SectionHeader(title: "Advanced")
-                            Text("Backend URL (optional — speeds up replies & enables image generation)")
-                                .font(.caption).foregroundStyle(Theme.muted)
-                            TextField("https://your-worker.workers.dev", text: $backend)
-                                .textInputAutocapitalization(.never).autocorrectionDisabled()
-                                .foregroundStyle(Theme.text).tint(Theme.accent)
-                                .padding(.horizontal, 12).padding(.vertical, 10)
-                                .background(Theme.ink3, in: RoundedRectangle(cornerRadius: 12))
-                                .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.stroke, lineWidth: 1))
-                                .onSubmit { app.backendURL = backend }
-                        }
-                        .card(radius: 16)
-
                         Button(role: .destructive) { confirmSignOut = true } label: {
                             Label("Sign out", systemImage: "rectangle.portrait.and.arrow.right")
                                 .frame(maxWidth: .infinity).padding(.vertical, 14)
@@ -111,7 +125,6 @@ struct SettingsView: View {
             .navigationTitle("Settings")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Done") { dismiss() } } }
-            .onAppear { backend = app.backendURL }
             .confirmationDialog("Sign out of AskAI?", isPresented: $confirmSignOut, titleVisibility: .visible) {
                 Button("Sign out", role: .destructive) { Haptic.warning(); app.signOut() }
                 Button("Cancel", role: .cancel) {}

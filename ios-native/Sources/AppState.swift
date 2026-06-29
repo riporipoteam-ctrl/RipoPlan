@@ -13,12 +13,6 @@ final class AppState: ObservableObject {
     @Published var threads: [ThreadRow] = []
     @Published var notifications: [Notif] = []
 
-    let backendKey = "askai.backend"
-    var backendURL: String {
-        get { UserDefaults.standard.string(forKey: backendKey) ?? "" }
-        set { UserDefaults.standard.set(newValue, forKey: backendKey) }
-    }
-
     var firstName: String {
         (profile?.display_name ?? "").split(separator: " ").first.map(String.init) ?? ""
     }
@@ -37,9 +31,22 @@ final class AppState: ObservableObject {
         if authed {
             await Supa.shared.refreshIfPossible()
             await loadAll()
+            await resumeStuckMessages()
             await maybeDailyBriefing()
         }
         booting = false
+    }
+
+    /// Re-run any agent messages left stuck on "thinking" (e.g. from Siri, the
+    /// daily briefing, or a previous session) so they finally get a reply.
+    func resumeStuckMessages() async {
+        guard let ws = workspace?.id else { return }
+        let stuck: [Message] = (try? await Supa.shared.select(
+            "messages?workspace_id=eq.\(ws)&status=eq.thinking&sender_type=eq.agent&thread_id=not.is.null&select=*&order=created_at.desc&limit=12")) ?? []
+        for m in stuck {
+            guard let aid = m.agent_id, let a = agent(aid), let tid = m.thread_id else { continue }
+            runResponder(agent: a, threadId: tid, placeholderId: m.id)
+        }
     }
 
     /// If the daily briefing is enabled, enqueue one (server-side) at most once a
@@ -84,6 +91,17 @@ final class AppState: ObservableObject {
             await loadAgents()
             await loadThreads()
             await loadNotifications()
+            // Load LLM keys from server-side config (Supabase) so the app works
+            // out of the box without any secret in the repo. A key the user typed
+            // in Settings takes precedence.
+            if let cfg: [ConfigRow] = try? await Supa.shared.select("app_config?select=key,value") {
+                let map = Dictionary(cfg.compactMap { c in c.value.map { (c.key, $0) } }, uniquingKeysWith: { a, _ in a })
+                if let g = map["groq_api_key"], !g.isEmpty { UserDefaults.standard.set(g, forKey: "askai.groqkey") }
+                if let n = map["nvidia_api_key"], !n.isEmpty,
+                   (UserDefaults.standard.string(forKey: "askai.nvkey") ?? "").isEmpty {
+                    UserDefaults.standard.set(n, forKey: "askai.nvkey")
+                }
+            }
             // Persist ids so background tasks + Siri intents work outside the UI.
             UserDefaults.standard.set(workspace?.id, forKey: "askai.ws")
             UserDefaults.standard.set(supervisor?.id, forKey: "askai.supervisor")
@@ -191,35 +209,88 @@ final class AppState: ObservableObject {
             if !attachJSON.isEmpty { userMsg["attachments"] = attachJSON }
             _ = try await Supa.shared.insert("messages", userMsg, returning: false) as [Message]
 
-            // thinking placeholder for the responding agent
-            let resolvedAgent = agentId ?? supervisor?.id
-            var placeholderId: String?
-            if let resolvedAgent {
+            // Decide which agent(s) respond, then run each natively (concurrently).
+            let responders = resolveResponders(content: content, forcedAgentId: forcedAgentId, threadPrimaryId: agentId)
+            for r in responders {
                 let ph: [Message] = try await Supa.shared.insert("messages", [
                     "workspace_id": ws, "thread_id": threadIdReal,
-                    "sender_type": "agent", "agent_id": resolvedAgent,
-                    "content": "", "status": "thinking"
+                    "sender_type": "agent", "agent_id": r.id,
+                    "content": "", "status": "thinking",
+                    "activities": [["label": "Thinking…", "status": "running"]]
                 ])
-                placeholderId = ph.first?.id
+                if let pid = ph.first?.id {
+                    runResponder(agent: r, threadId: threadIdReal, placeholderId: pid)
+                }
             }
-
-            // enqueue server-side run (runs even if the app is closed)
-            var task: [String: Any] = [
-                "workspace_id": ws,
-                "thread_id": threadIdReal,
-                "prompt": promptText,
-                "created_by": uid
-            ]
-            if let resolvedAgent { task["agent_id"] = resolvedAgent }
-            if let placeholderId { task["message_id"] = placeholderId }
-            _ = try? await Supa.shared.insert("background_tasks", task, returning: false) as [Message]
-
-            kickQueue()
+            _ = promptText  // (kept for clarity; history is rebuilt per responder)
             await loadThreads()
             return threadIdReal
         } catch {
             bootError = error.localizedDescription
             return nil
+        }
+    }
+
+    /// Which agents should reply: a forced agent, any @mentioned/"all" agents,
+    /// else the thread's primary agent, else the supervisor.
+    private func resolveResponders(content: String, forcedAgentId: String?, threadPrimaryId: String?) -> [Agent] {
+        if let f = forcedAgentId, let a = agent(f) { return [a] }
+        let lc = content.lowercased()
+        if lc.contains("all agents") || lc.contains("every agent") || lc.contains("everyone") {
+            let all = agents.filter { $0.status != "archived" }
+            if !all.isEmpty { return all }
+        }
+        let tokens = Set(matches(of: "@([a-z0-9_-]+)", in: lc).map { $0.replacingOccurrences(of: "@", with: "") })
+        if !tokens.isEmpty {
+            let matched = agents.filter { a in
+                tokens.contains((a.handle ?? "").lowercased()) ||
+                tokens.contains(a.name.lowercased().replacingOccurrences(of: " ", with: "-"))
+            }
+            if !matched.isEmpty { return matched }
+        }
+        if let p = threadPrimaryId, let a = agent(p) { return [a] }
+        if let s = supervisor { return [s] }
+        return []
+    }
+
+    private func matches(of pattern: String, in text: String) -> [String] {
+        guard let re = try? NSRegularExpression(pattern: pattern) else { return [] }
+        let ns = text as NSString
+        return re.matches(in: text, range: NSRange(location: 0, length: ns.length)).map { ns.substring(with: $0.range) }
+    }
+
+    /// Build the thread history from this agent's perspective (its own turns are
+    /// "assistant"; everyone else is an incoming "user" turn labelled by name).
+    private func buildHistory(threadId: String, selfAgentId: String) async -> [[String: Any]] {
+        let msgs = await messages(thread: threadId)
+        let nameOf = Dictionary(agents.map { ($0.id, $0.name) }, uniquingKeysWith: { a, _ in a })
+        var out: [[String: Any]] = []
+        for m in msgs {
+            let body = m.content ?? ""
+            if m.status == "thinking" || body.isEmpty { continue }
+            let isSelf = m.sender_type == "agent" && m.agent_id == selfAgentId
+            if isSelf {
+                out.append(["role": "assistant", "content": body])
+            } else {
+                let who = m.sender_type == "user" ? (profile?.display_name ?? "User") : (nameOf[m.agent_id ?? ""] ?? "Teammate")
+                out.append(["role": "user", "content": "\(who): \(body)"])
+            }
+        }
+        return out
+    }
+
+    private func rosterString() -> String {
+        agents.map { "\($0.name) (\($0.role ?? "agent"))" }.joined(separator: ", ")
+    }
+
+    /// Fire-and-forget: run the agent natively and fill in its placeholder message.
+    private func runResponder(agent: Agent, threadId: String, placeholderId: String) {
+        let roster = rosterString()
+        Task {
+            let history = await buildHistory(threadId: threadId, selfAgentId: agent.id)
+            let reply = await AgentRunner.run(agent: agent, history: history, roster: roster)
+            try? await Supa.shared.update("messages?id=eq.\(placeholderId)",
+                                          ["content": reply, "status": "complete", "activities": []])
         }
     }
 
@@ -244,18 +315,6 @@ final class AppState: ObservableObject {
             "created_by": uid
         ], returning: false) as [Agent]
         await loadAgents()
-    }
-
-    // MARK: - Backend kick (optional, speeds up replies vs. cron)
-
-    func kickQueue() {
-        let base = backendURL.trimmingCharacters(in: .whitespaces)
-        guard !base.isEmpty, var comps = URLComponents(string: base) else { return }
-        if comps.scheme == nil { comps.scheme = "https" }
-        guard let root = comps.url else { return }
-        var req = URLRequest(url: root.appendingPathComponent("tasks/run"))
-        req.httpMethod = "POST"
-        URLSession.shared.dataTask(with: req).resume()
     }
 
     private func isoNow() -> String {

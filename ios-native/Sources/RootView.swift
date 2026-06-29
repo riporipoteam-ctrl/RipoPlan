@@ -4,6 +4,7 @@ struct RootView: View {
     @EnvironmentObject var app: AppState
     // Light by default; user flips this in Settings → Dark mode.
     @AppStorage("askai.dark") private var darkMode = false
+    @AppStorage("askai.onboarded") private var onboarded = false
 
     var body: some View {
         ZStack {
@@ -11,8 +12,13 @@ struct RootView: View {
             if app.booting {
                 SplashView()
             } else if app.authed {
-                RootShell()
-                    .transition(.opacity)
+                if onboarded {
+                    RootShell().transition(.opacity)
+                } else {
+                    OnboardingView(done: { withAnimation { onboarded = true } })
+                        .environmentObject(app)
+                        .transition(.opacity)
+                }
             } else {
                 AuthView()
                     .transition(.opacity)
