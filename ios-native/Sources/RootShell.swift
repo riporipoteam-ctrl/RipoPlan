@@ -115,6 +115,10 @@ struct RootShell: View {
         case "agents": sheet = .agents
         case "apps": sheet = .apps
         case "activity": sheet = .activity
+        case "jobs": sheet = .jobs
+        case "knowledge": sheet = .knowledge
+        case "integrations": sheet = .integrations
+        case "channels": sheet = .channels
         case "settings": showSettings = true
         case "sidebar": setSidebar(true)
         default: break
