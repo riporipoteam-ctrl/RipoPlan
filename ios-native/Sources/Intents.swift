@@ -24,12 +24,15 @@ struct AskAgentsIntent: AppIntent {
 
 struct AskAIShortcuts: AppShortcutsProvider {
     static var appShortcuts: [AppShortcut] {
+        // Note: App Shortcut phrases can only interpolate AppEnum/AppEntity
+        // parameters, not String — so the task is collected via requestValueDialog
+        // when the user triggers the shortcut.
         AppShortcut(
             intent: AskAgentsIntent(),
             phrases: [
                 "Ask \(.applicationName)",
-                "Ask \(.applicationName) to \(\.$prompt)",
-                "Tell \(.applicationName) to \(\.$prompt)"
+                "New task in \(.applicationName)",
+                "Run \(.applicationName)"
             ],
             shortTitle: "Ask AskAI",
             systemImageName: "sparkles"
