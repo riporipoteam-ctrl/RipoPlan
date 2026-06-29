@@ -1,35 +1,48 @@
 # AskAI — native iOS app (SwiftUI)
 
-A real native **SwiftUI** app. The UI is a full-screen `WKWebView` rendering the
-live AskAI web app (so it looks exactly like the website), wrapped in native
-chrome: a **frosted "liquid glass"** status-bar bar (system blur material with a
-top sheen), a slim load-progress bar, pull-to-refresh, edge-swipe back/forward,
-haptics, a native splash, and an offline retry screen.
+A **fully native SwiftUI app** — not a web view. It talks directly to Supabase
+(auth + data over REST) and has its own dark "command center" design, distinct
+from the light website.
 
-- Source: `Sources/` (`AskAIApp`, `RootView`, `WebView`)
-- Project is defined with [XcodeGen](https://github.com/yonyz/XcodeGen) (`project.yml`)
-- Bundle id: `gg.askai.app` · min iOS 16 · portrait
+## What's inside
+- **Native UI** (`Sources/`): custom glass tab bar, animated aurora backgrounds,
+  spring animations, haptics everywhere, swipe/long-press actions.
+  - `HomeView` — ChatGPT-style new chat: greeting, composer, suggestion chips
+    (incl. a live World Cup one).
+  - `ChatsView` / `ChatView` — threads with search + rename/delete; a live chat
+    that polls Supabase for agent replies and shows tool "activity".
+  - `AgentsView` — agent grid, detail, and natural-language agent creation.
+  - `ActivityView` — notifications + a one-tap **Daily Briefing**.
+  - `SettingsView` — profile, notifications, Siri tip, advanced backend URL.
+- **Supabase client** (`Supabase.swift`): pure `URLSession` (no SPM deps so it
+  builds on a bare CI runner) — email auth, PostgREST queries, token refresh.
+- **Background execution**: sending a message enqueues a `background_tasks` row.
+  The Cloudflare Worker (cron) runs the agent **server-side**, so work continues
+  even if the app is closed or the phone is off — the result is waiting when you
+  reopen the app.
+- **Notifications** (`NotifManager.swift`): local notifications (work for a
+  sideloaded app — no APNs/paid account needed). Daily briefing + "task complete"
+  alerts fired from `BGAppRefresh` polling (`TaskRunner.swift`).
+- **Siri / Shortcuts** (`Intents.swift`): "Hey Siri, Ask AskAI to …" hands a task
+  to your agents hands-free.
+
+> Note: remote push (APNs) needs a paid Apple Developer account + entitlements,
+> which a free Sideloadly install can't use — so AskAI uses **local**
+> notifications, which work great when sideloaded.
 
 ## Get the .ipa (no Mac needed)
-
-The `.github/workflows/ios.yml` workflow builds an **unsigned `.ipa`** on a free
-GitHub macOS runner and:
-
-1. uploads it as the **`AskAI-ipa`** artifact, and
-2. attaches it to the rolling **`ios-latest`** pre-release.
-
-Trigger it from the repo's **Actions → "Build iOS app (.ipa)" → Run workflow**
-(or it runs automatically when `ios-native/**` changes on `main`).
+`.github/workflows/ios.yml` builds an **unsigned `.ipa`** on a free GitHub macOS
+runner, uploads the **`AskAI-ipa`** artifact, attaches it to the rolling
+**`ios-latest`** pre-release, and captures a Simulator screenshot.
 
 ### Sideload onto your iPhone
-Open the `.ipa` with **AltStore** or **Sideloadly** — they re-sign it with your
-own free Apple ID and install it (free Apple IDs expire after 7 days; paid
-developer accounts last a year). A signing service works too.
+Open the `.ipa` with **Sideloadly** or **AltStore** — they re-sign it with your
+own free Apple ID and install it (free IDs expire after 7 days).
 
-## Build locally (if you have a Mac)
+## Build locally (with a Mac)
 ```bash
 brew install xcodegen
 cd ios-native
 xcodegen generate
-open AskAI.xcodeproj   # then Run on your device/simulator
+open AskAI.xcodeproj   # Run on your device/simulator
 ```

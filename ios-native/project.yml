@@ -45,11 +45,17 @@ targets:
           UIApplicationSupportsMultipleScenes: false
         UILaunchScreen:
           UIColorName: LaunchBackground
-        UIStatusBarStyle: UIStatusBarStyleDarkContent
+        UIStatusBarStyle: UIStatusBarStyleLightContent
         UIViewControllerBasedStatusBarAppearance: false
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait
         UIRequiresFullScreen: true
         ITSAppUsesNonExemptEncryption: false
+        UIBackgroundModes:
+          - fetch
+          - processing
+        BGTaskSchedulerPermittedIdentifiers:
+          - gg.askai.refresh
+        NSUserNotificationsUsageDescription: "AskAI notifies you when your agents finish tasks and sends your daily briefing."
         NSAppTransportSecurity:
           NSAllowsArbitraryLoads: true
