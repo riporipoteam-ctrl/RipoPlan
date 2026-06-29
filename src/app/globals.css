@@ -322,6 +322,43 @@ input, textarea, [contenteditable] { -webkit-user-select: text; user-select: tex
 .animate-tilt-in { animation: tilt-in .4s cubic-bezier(.22,1,.36,1) both; }
 .skeleton { background: linear-gradient(90deg, color-mix(in srgb,var(--border) 40%,transparent) 25%, color-mix(in srgb,var(--border) 70%,transparent) 37%, color-mix(in srgb,var(--border) 40%,transparent) 63%); background-size: 200% 100%; animation: skeleton 1.4s ease infinite; }
 
+/* ---- Branded splash / launch screen (no more flat black "Loading…") ---- */
+.splash-root {
+  background:
+    radial-gradient(120% 120% at 50% 0%, color-mix(in srgb, var(--accent) 12%, var(--bg)), var(--bg) 60%);
+  animation: fade-in .3s ease both;
+}
+.splash-blob {
+  position: absolute; border-radius: 999px; filter: blur(60px); opacity: .55;
+  pointer-events: none; will-change: transform;
+}
+.splash-blob-a { width: 60vw; height: 60vw; top: -10vh; left: -15vw;
+  background: radial-gradient(circle, color-mix(in srgb, var(--accent) 70%, transparent), transparent 70%);
+  animation: float 7s ease-in-out infinite; }
+.splash-blob-b { width: 55vw; height: 55vw; bottom: -12vh; right: -12vw;
+  background: radial-gradient(circle, color-mix(in srgb, var(--accent-2) 65%, transparent), transparent 70%);
+  animation: float 9s ease-in-out infinite reverse; }
+.splash-mark {
+  display: grid; place-items: center; width: 116px; height: 116px; border-radius: 30px;
+  background: color-mix(in srgb, var(--card) 78%, transparent);
+  backdrop-filter: blur(18px) saturate(180%); -webkit-backdrop-filter: blur(18px) saturate(180%);
+  border: 1px solid color-mix(in srgb, var(--accent) 22%, var(--border));
+  box-shadow: 0 24px 60px -22px color-mix(in srgb, var(--accent) 60%, transparent);
+  animation: float 3.6s ease-in-out infinite;
+}
+.splash-bar {
+  position: relative; height: 4px; width: 132px; border-radius: 999px; overflow: hidden;
+  background: color-mix(in srgb, var(--border) 70%, transparent);
+}
+.splash-bar > span {
+  position: absolute; inset: 0; width: 40%; border-radius: 999px;
+  background: linear-gradient(90deg, var(--accent), var(--accent-2));
+  animation: splash-slide 1.15s cubic-bezier(.65,0,.35,1) infinite;
+}
+@keyframes splash-slide {
+  0% { left: -45%; } 100% { left: 105%; }
+}
+
 /* Respect reduced-motion for accessibility. */
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }

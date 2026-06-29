@@ -296,6 +296,7 @@ export const UTILITY_TOOL_SCHEMAS = [
   { type: "function", function: { name: "calculate", description: "Evaluate a math expression (supports + - * / %, parentheses, ^ powers, and functions like sqrt, sin, log).", parameters: { type: "object", properties: { expression: { type: "string", description: "e.g. (1200*1.0825)/3" } }, required: ["expression"] } } },
   { type: "function", function: { name: "wiki", description: "Get a concise Wikipedia summary of a topic, person, place, or thing.", parameters: { type: "object", properties: { topic: { type: "string" } }, required: ["topic"] } } },
   { type: "function", function: { name: "unit_convert", description: "Convert a value between units of length, mass/weight, temperature, volume, speed, or data.", parameters: { type: "object", properties: { value: { type: "number" }, from: { type: "string", description: "e.g. km, lb, celsius, mph, gb" }, to: { type: "string", description: "e.g. mi, kg, fahrenheit, kph, mb" } }, required: ["value", "from", "to"] } } },
+  { type: "function", function: { name: "world_cup", description: "Get live FIFA World Cup info: recent results, today's/upcoming fixtures, and standings. Use for any World Cup question.", parameters: { type: "object", properties: { what: { type: "string", enum: ["results", "fixtures", "standings", "all"], description: "Which info to fetch (default 'all')" }, date: { type: "string", description: "Optional ISO date (YYYY-MM-DD) to look up matches for" } } } } },
 ];
 
 async function weatherTool(location: string): Promise<ToolResult> {
@@ -446,6 +447,55 @@ function unitConvertTool(args: any): ToolResult {
     return { ok: true, output: `${value} ${args.from} = ${Number(out.toFixed(4))} ${args.to}` };
   }
   return { ok: false, output: `I can't convert ${args.from} → ${args.to} (different or unknown unit types).` };
+}
+
+// ---- World Cup: live results, fixtures & standings (keyless) ----
+// Uses TheSportsDB's free tier; falls back to live web search if it's unavailable
+// so the agent always has real, current data (never invented scores).
+async function worldCupTool(args: any): Promise<ToolResult> {
+  const what = String(args.what || "all").toLowerCase();
+  const fmtEvent = (e: any) => {
+    const home = e.strHomeTeam || "?";
+    const away = e.strAwayTeam || "?";
+    const hs = e.intHomeScore, as = e.intAwayScore;
+    const score = hs != null && as != null && hs !== "" && as !== "" ? `${hs}–${as}` : "vs";
+    const when = [e.dateEvent, e.strTime?.slice(0, 5)].filter(Boolean).join(" ");
+    const round = e.intRound ? ` (R${e.intRound})` : "";
+    return `- ${home} ${score} ${away}${round}${when ? ` — ${when} UTC` : ""}`;
+  };
+  const soccerDay = async (date: string) => {
+    try {
+      const r = await fetch(`https://www.thesportsdb.com/api/v1/json/3/eventsday.php?d=${date}&s=Soccer`).then((x) => x.json());
+      const events: any[] = r?.events || [];
+      return events.filter((e) => /world cup/i.test(`${e.strLeague || ""}`));
+    } catch { return []; }
+  };
+  try {
+    const today = new Date();
+    const iso = (d: Date) => d.toISOString().slice(0, 10);
+    const target = /^\d{4}-\d{2}-\d{2}$/.test(args.date || "") ? args.date : iso(today);
+    const yest = iso(new Date(Date.parse(target) - 86400000));
+    const tom = iso(new Date(Date.parse(target) + 86400000));
+
+    const sections: string[] = [];
+    if (what === "results" || what === "all") {
+      const past = await soccerDay(yest);
+      const todayDone = (await soccerDay(target)).filter((e) => e.intHomeScore != null && e.intHomeScore !== "");
+      const done = [...past, ...todayDone];
+      if (done.length) sections.push(`**Recent results:**\n${done.slice(0, 12).map(fmtEvent).join("\n")}`);
+    }
+    if (what === "fixtures" || what === "all") {
+      const up = [...(await soccerDay(target)), ...(await soccerDay(tom))].filter((e) => e.intHomeScore == null || e.intHomeScore === "");
+      if (up.length) sections.push(`**Upcoming fixtures:**\n${up.slice(0, 12).map(fmtEvent).join("\n")}`);
+    }
+    if (sections.length) {
+      return { ok: true, output: `🏆 FIFA World Cup (as of ${target}):\n\n${sections.join("\n\n")}\n\n(Source: TheSportsDB live data.)` };
+    }
+  } catch {}
+  // Fallback: real live web search so the agent never invents scores.
+  const q = what === "standings" ? "FIFA World Cup 2026 group standings table" : what === "fixtures" ? "FIFA World Cup 2026 today fixtures schedule" : "FIFA World Cup 2026 latest results scores standings";
+  const search = await webSearch(q);
+  return search.ok ? search : { ok: false, output: "Couldn't pull live World Cup data right now — tell the user and don't invent scores." };
 }
 
 // ---- Rank management tools (exposed only to the supervisor / AgentNexus) ----
@@ -916,6 +966,8 @@ export async function executeTool(
       return wikiTool(String(args.topic || ""));
     case "unit_convert":
       return unitConvertTool(args);
+    case "world_cup":
+      return worldCupTool(args);
     default:
       return { ok: false, output: `Unknown tool: ${name}` };
   }
@@ -970,6 +1022,8 @@ export function toolLabel(name: string, args: any): string {
       return `Reading Wikipedia: ${args.topic || ""}`;
     case "unit_convert":
       return `Converting ${args.from} → ${args.to}`;
+    case "world_cup":
+      return `Checking the World Cup`;
     default:
       return name;
   }

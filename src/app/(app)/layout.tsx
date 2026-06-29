@@ -7,7 +7,7 @@ import { BottomNav } from "@/components/BottomNav";
 import { Sidebar } from "@/components/Sidebar";
 import { Onboarding } from "@/components/Onboarding";
 import { initNative } from "@/lib/native";
-import { Loader2 } from "lucide-react";
+import { Splash } from "@/components/Splash";
 
 function Shell({ children }: { children: React.ReactNode }) {
   const { loading, ctx } = useSession();
@@ -16,27 +16,9 @@ function Shell({ children }: { children: React.ReactNode }) {
     initNative();
   }, []);
 
-  if (loading) {
-    return (
-      <div className="flex min-h-dvh items-center justify-center bg-[var(--bg)] text-[var(--muted)]">
-        <Loader2 className="animate-spin" />
-      </div>
-    );
-  }
-  if (!ctx) {
-    return (
-      <div className="flex min-h-dvh items-center justify-center bg-[var(--bg)] text-sm text-[var(--muted)]">
-        Redirecting…
-      </div>
-    );
-  }
-  if (!ctx.workspace) {
-    return (
-      <div className="flex min-h-dvh items-center justify-center p-8 text-center text-sm text-[var(--muted)]">
-        Setting up your workspace… refresh in a moment.
-      </div>
-    );
-  }
+  if (loading) return <Splash label="Loading your workspace" />;
+  if (!ctx) return <Splash label="Signing you in" />;
+  if (!ctx.workspace) return <Splash label="Setting up your workspace" />;
 
   // Chat pages have their own bottom composer, so the mobile tab bar is hidden
   // there (a back button handles navigation). Match the singular chat routes

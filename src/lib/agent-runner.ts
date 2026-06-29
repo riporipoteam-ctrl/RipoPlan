@@ -4,7 +4,11 @@ import { getBackendUrl } from "./backend";
 import { getUnfiltered } from "./prefs";
 import type { Activity, Agent } from "./types";
 
-const MAX_TOOL_ROUNDS = 3;
+const MAX_TOOL_ROUNDS = 4;
+
+// Every agent always gets a real web browser (browse), live web search, and a
+// code sandbox — their baseline "skills" — on top of whatever else is configured.
+const DEFAULT_AGENT_TOOLS = ["web_search", "browse", "code"];
 
 // Each Groq model has its own separate free-tier daily limit, so rotating across
 // models multiplies capacity and survives a single model's 429 rate limit.
@@ -263,7 +267,9 @@ function systemPrompt(agent: Agent, workspaceName?: string, memories?: string[],
       `You are ${agent.name}, ${agent.role || "an AI agent"}.`,
     `\nYou work inside "${workspaceName || "the workspace"}", a collaborative platform where humans and AI agents work together in channels and threads.`,
     `Current date & time: ${date}.`,
-    `Available tools: ${tools}. You also always have these built-in skills: weather, currency conversion, crypto prices, stock prices, dictionary/definitions, Wikipedia lookup, translation, a math calculator, unit conversion, QR-code generation, and current date/time. Use any tool only when it genuinely helps.`,
+    `Available tools: ${tools}. You ALWAYS have your own real web browser (the \`browse\` tool — open and read ANY page, follow links, revisit pages), live \`web_search\`, and a \`code\` sandbox, plus built-in skills: weather, currency conversion, crypto & stock prices, dictionary/definitions, Wikipedia lookup, translation, a math calculator, unit conversion, QR-code generation, current date/time, and live FIFA World Cup results/fixtures/standings (\`world_cup\`). Use any tool only when it genuinely helps.`,
+    `BE AUTONOMOUS & THOROUGH: you can chain several tools across multiple steps to actually finish a task — search, then browse the best result, then compute or cross-check — instead of giving a shallow first-pass answer. Don't ask permission to use a tool; just use it and deliver the result. Keep going until the user's request is genuinely done.`,
+    `WORLD CUP: the FIFA World Cup is on — for any World Cup question (scores, fixtures, standings, who's playing), call the \`world_cup\` tool for real live data; never guess scores.`,
     `WHEN TO SEARCH: ALWAYS use web_search for ANYTHING about the real world that you can't be 100% sure of from memory — current events, news, prices, products, hotels/apartments, places, businesses, people, sports, weather, releases, "today/latest/now", or any specific real listing. It is better to search than to guess. Only skip search for casual chat, opinions, math, coding, writing, or questions about this workspace/team. When a user names a site (e.g. booking.com), call browse on that site's relevant URL to pull REAL details.`,
     `CRITICAL — NEVER FABRICATE: only state facts, names, prices, listings, or links that actually appear in your web_search / browse results. NEVER invent a URL, price, or listing, and NEVER write a half/broken link. If search and browse return nothing usable, say honestly "I couldn't pull live results right now" — do NOT make something up.`,
     `SEARCH RULES: After web_search, extract the REAL results — give specific items with their actual URLs as complete Markdown links. If the user wants concrete items (hotels, products, listings, prices), open the best result(s) with browse to get real names/prices/links, then present 3-6 concrete options in a Markdown table with a working clickable link for each.`,
@@ -312,9 +318,11 @@ export async function runAgent(input: RunInput): Promise<RunOutput> {
 
   const connectors = input.connectors || {};
   const backendUrl = getBackendUrl();
-  // Every agent gets the keyless utility skills (weather, currency, crypto,
-  // dictionary, QR codes, datetime) on top of its configured tools.
-  const tools = [...schemasForTools(agent.tools || []), ...UTILITY_TOOL_SCHEMAS, ...connectorSchemas(connectors)];
+  // Every agent gets a real browser + live search + code sandbox by default,
+  // plus the keyless utility skills (weather, currency, crypto, world cup, …),
+  // on top of whatever else is configured for the agent.
+  const baseTools = Array.from(new Set([...(agent.tools || []), ...DEFAULT_AGENT_TOOLS]));
+  const tools = [...schemasForTools(baseTools), ...UTILITY_TOOL_SCHEMAS, ...connectorSchemas(connectors)];
   if (backendUrl) tools.push(IMAGE_TOOL_SCHEMA);
   // The supervisor (AgentNexus) can manage ranks from chat.
   if (agent.is_supervisor && input.onRankAction) tools.push(...RANK_TOOL_SCHEMAS);

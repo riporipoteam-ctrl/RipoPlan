@@ -24,7 +24,8 @@ struct WebView: UIViewRepresentable {
         web.allowsBackForwardNavigationGestures = true
         web.scrollView.contentInsetAdjustmentBehavior = .never
         web.isOpaque = false
-        let bg = UIColor(red: 0.043, green: 0.043, blue: 0.063, alpha: 1)
+        // Match the web app's default (light) theme to avoid a dark flash on load.
+        let bg = UIColor(red: 0.965, green: 0.953, blue: 0.933, alpha: 1)
         web.backgroundColor = bg
         web.scrollView.backgroundColor = bg
         web.scrollView.bounces = true

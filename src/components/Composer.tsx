@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Paperclip, ArrowUp, Settings2, Loader2, ChevronDown, X, FileText, Check } from "lucide-react";
 import type { Agent } from "@/lib/types";
 import { createClient } from "@/lib/supabase/client";
@@ -16,12 +16,19 @@ export function Composer({
   channelId,
   agents,
   placeholder,
+  presetText,
+  presetNonce,
+  autoFocus,
 }: {
   mode: "start" | "thread" | "channel";
   threadId?: string;
   channelId?: string;
   agents: Agent[];
   placeholder?: string;
+  /** When `presetNonce` changes, the composer text is set to `presetText`. */
+  presetText?: string;
+  presetNonce?: number;
+  autoFocus?: boolean;
 }) {
   const router = useRouter();
   const supabase = createClient();
@@ -39,6 +46,23 @@ export function Composer({
   const selectedAgent = agents.find((a) => a.id === agentId);
   // On the Home composer (top of page) open menus downward; elsewhere upward.
   const dropCls = mode === "start" ? "top-full mt-2" : "bottom-full mb-2";
+
+  // A suggestion chip (or other parent) can seed the composer text + focus it.
+  useEffect(() => {
+    if (presetNonce === undefined) return;
+    setText(presetText || "");
+    requestAnimationFrame(() => {
+      const el = taRef.current;
+      if (el) {
+        el.focus();
+        el.style.height = "auto";
+        el.style.height = Math.min(el.scrollHeight, 160) + "px";
+        const end = el.value.length;
+        el.setSelectionRange(end, end);
+      }
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [presetNonce]);
 
   function autosize() {
     const el = taRef.current;
@@ -166,6 +190,7 @@ export function Composer({
         <textarea
           ref={taRef}
           rows={1}
+          autoFocus={autoFocus}
           value={text}
           onChange={(e) => onChange(e.target.value)}
           onKeyDown={(e) => {
