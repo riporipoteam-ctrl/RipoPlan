@@ -116,17 +116,20 @@ enum AgentRunner {
         var msgs: [[String: Any]] = [["role": "system", "content": system]]
         msgs.append(contentsOf: history)
 
-        for round in 0..<5 {
-            guard let message = await chat(msgs, tools: round < 4 ? tools : nil) else { break }
-            let calls = normalizeCalls(message["tool_calls"] as? [[String: Any]] ?? [])
+        for round in 0..<6 {
+            guard let message = await chat(msgs, tools: tools) else { break }
+            let rawContent = (message["content"] as? String) ?? ""
+            // Kimi sometimes emits tool calls as raw special-token text instead of
+            // structured tool_calls; parse those too so we never display the tokens.
+            var calls = normalizeCalls(message["tool_calls"] as? [[String: Any]] ?? [])
+            if calls.isEmpty { calls = parseTextToolCalls(rawContent) }
             if calls.isEmpty {
-                let content = (message["content"] as? String) ?? ""
-                if !content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    return RunResult(text: clean(content), images: images, steps: steps)
-                }
+                let cleaned = clean(rawContent)
+                if !cleaned.isEmpty { return RunResult(text: cleaned, images: images, steps: steps) }
                 break
             }
-            msgs.append(["role": "assistant", "content": message["content"] as? String ?? "", "tool_calls": calls])
+            // Strip any tool-token noise from the assistant content we echo back.
+            msgs.append(["role": "assistant", "content": stripToolTokens(rawContent), "tool_calls": calls])
             for c in calls {
                 let f = c["function"] as? [String: Any] ?? [:]
                 let name = f["name"] as? String ?? ""
@@ -138,12 +141,41 @@ enum AgentRunner {
             }
         }
         await ctx.onActivity("Writing the answer…", "final")
-        msgs.append(["role": "user", "content": "Now give your complete final answer in plain English Markdown. Do not call tools."])
-        if let m = await chat(msgs, tools: nil), let content = m["content"] as? String,
-           !content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            return RunResult(text: clean(content), images: images, steps: steps)
+        msgs.append(["role": "user", "content": "Now write your complete final answer for the user in plain English Markdown. Do NOT call any tools or output any tool/function syntax."])
+        if let m = await chat(msgs, tools: nil) {
+            let cleaned = clean((m["content"] as? String) ?? "")
+            if !cleaned.isEmpty { return RunResult(text: cleaned, images: images, steps: steps) }
         }
         return RunResult(text: images.isEmpty ? "I wasn't able to finish that — please try again." : "Here's what I generated.", images: images, steps: steps)
+    }
+
+    /// Parse Kimi/K2-style tool calls emitted as plain text special tokens, e.g.
+    /// `<|tool_call_begin|> functions.browse:4 <|tool_call_argument_begin|> {"url":"…"} <|tool_call_end|>`
+    private static func parseTextToolCalls(_ text: String) -> [[String: Any]] {
+        guard text.contains("tool_call") || text.contains("functions.") else { return [] }
+        var out: [[String: Any]] = []
+        let pattern = "functions\\.([a-zA-Z_]+):?\\d*\\s*<\\|tool_call_argument_begin\\|>\\s*(\\{.*?\\})\\s*<\\|tool_call_end\\|>"
+        if let re = try? NSRegularExpression(pattern: pattern, options: [.dotMatchesLineSeparators]) {
+            let ns = text as NSString
+            for m in re.matches(in: text, range: NSRange(location: 0, length: ns.length)) {
+                let name = ns.substring(with: m.range(at: 1))
+                let args = ns.substring(with: m.range(at: 2))
+                out.append(["id": "call_\(Int.random(in: 1000...99999))", "type": "function",
+                            "function": ["name": name, "arguments": args]])
+            }
+        }
+        return out
+    }
+    /// Remove K2 special tool tokens (and any half-emitted tool syntax) from text.
+    private static func stripToolTokens(_ s: String) -> String {
+        var t = s
+        t = t.replacingOccurrences(of: "(?s)<\\|tool_calls_section_begin\\|>.*?(<\\|tool_calls_section_end\\|>|$)", with: "", options: .regularExpression)
+        for tok in ["<|tool_call_begin|>", "<|tool_call_end|>", "<|tool_call_argument_begin|>",
+                    "<|tool_calls_section_begin|>", "<|tool_calls_section_end|>", "<|im_end|>", "<|im_start|>"] {
+            t = t.replacingOccurrences(of: tok, with: "")
+        }
+        t = t.replacingOccurrences(of: "<\\|[^|]*\\|>", with: "", options: .regularExpression)
+        return t.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     /// Keep only the fields the API needs when echoing tool_calls back (some
@@ -425,6 +457,8 @@ enum AgentRunner {
         return out.isEmpty ? "(no output)" : out
     }
     private static func clean(_ s: String) -> String {
-        s.replacingOccurrences(of: "(?s)<think>.*?</think>", with: "", options: .regularExpression).trimmingCharacters(in: .whitespacesAndNewlines)
+        var t = s.replacingOccurrences(of: "(?s)<think>.*?</think>", with: "", options: .regularExpression)
+        t = stripToolTokens(t)
+        return t.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 }

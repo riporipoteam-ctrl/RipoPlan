@@ -5,32 +5,57 @@ struct AgentsView: View {
     @EnvironmentObject var app: AppState
     @Environment(\.dismiss) private var dismiss
     @State private var showCreate = false
+    @State private var showRanks = false
+    @State private var ranks: [RankRow] = []
     @State private var path: [String] = []
 
     private let cols = [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)]
+    private func rank(_ id: String?) -> RankRow? { id == nil ? nil : ranks.first { $0.id == id } }
 
     var body: some View {
         NavigationStack(path: $path) {
             ZStack {
                 Theme.backdrop.ignoresSafeArea()
                 ScrollView {
+                    // Ranks strip — manage ranks right here in the Agents page.
+                    Button { Haptic.light(); showRanks = true } label: {
+                        HStack(spacing: 10) {
+                            Image(systemName: "rosette").foregroundStyle(Theme.warn)
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text("Ranks").font(.subheadline.weight(.semibold)).foregroundStyle(Theme.text)
+                                Text(ranks.isEmpty ? "Create badges for your team" : ranks.prefix(4).map { $0.name }.joined(separator: " · "))
+                                    .font(.caption2).foregroundStyle(Theme.muted).lineLimit(1)
+                            }
+                            Spacer()
+                            Image(systemName: "chevron.right").font(.caption).foregroundStyle(Theme.muted)
+                        }
+                        .glass(radius: 16, padding: 12)
+                    }
+                    .buttonStyle(.plain).padding(.horizontal, 16).padding(.top, 12)
+
                     LazyVGrid(columns: cols, spacing: 12) {
                         ForEach(app.agents) { a in
-                            Button { Haptic.light(); path.append(a.id) } label: { AgentCard(agent: a) }
+                            Button { Haptic.light(); path.append(a.id) } label: { AgentCard(agent: a, rank: rank(a.rank_id)) }
                                 .buttonStyle(.plain)
                         }
                     }
                     .padding(16)
                     .padding(.bottom, 100)
                 }
-                .refreshable { await app.loadAgents() }
+                .refreshable { await app.loadAgents(); ranks = await app.loadRanks() }
             }
             .navigationTitle("Agents")
+            .task { ranks = await app.loadRanks() }
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Done") { dismiss() } }
                 ToolbarItem(placement: .navigationBarTrailing) {
-                    Button { Haptic.medium(); showCreate = true } label: {
-                        Image(systemName: "plus").foregroundStyle(Theme.text).fontWeight(.semibold)
+                    HStack(spacing: 16) {
+                        Button { Haptic.light(); showRanks = true } label: {
+                            Image(systemName: "rosette").foregroundStyle(Theme.text)
+                        }
+                        Button { Haptic.medium(); showCreate = true } label: {
+                            Image(systemName: "plus").foregroundStyle(Theme.text).fontWeight(.semibold)
+                        }
                     }
                 }
             }
@@ -38,12 +63,16 @@ struct AgentsView: View {
                 if let a = app.agent(id) { AgentDetailView(agent: a).environmentObject(app) }
             }
             .sheet(isPresented: $showCreate) { CreateAgentSheet().environmentObject(app) }
+            .sheet(isPresented: $showRanks, onDismiss: { Task { ranks = await app.loadRanks() } }) {
+                RanksView().environmentObject(app)
+            }
         }
     }
 }
 
 struct AgentCard: View {
     let agent: Agent
+    var rank: RankRow? = nil
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
@@ -57,6 +86,13 @@ struct AgentCard: View {
             }
             Text(agent.name).font(.headline).foregroundStyle(Theme.text).lineLimit(1)
             Text(agent.role ?? "AI Agent").font(.caption).foregroundStyle(Theme.muted).lineLimit(1)
+            if let r = rank {
+                Label(r.name, systemImage: "rosette").font(.caption2.weight(.semibold))
+                    .foregroundStyle(Color(hexString: r.color))
+                    .padding(.horizontal, 7).padding(.vertical, 2)
+                    .background(Color(hexString: r.color).opacity(0.14), in: Capsule())
+                    .lineLimit(1)
+            }
             HStack(spacing: 5) {
                 Circle().fill(agent.status == "paused" ? Theme.warn : Theme.good).frame(width: 7, height: 7)
                 Text(agent.status == "paused" ? "Paused" : "Active").font(.caption2).foregroundStyle(Theme.muted)
