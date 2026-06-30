@@ -139,6 +139,12 @@ final class AppState: ObservableObject {
 
     func agent(_ id: String?) -> Agent? { agents.first { $0.id == id } }
 
+    func updateProfile(displayName: String) async {
+        guard let uid = Supa.shared.userId, !displayName.isEmpty else { return }
+        try? await Supa.shared.update("profiles?id=eq.\(uid)", ["display_name": displayName])
+        if var p = profile { p.display_name = displayName; profile = p }
+    }
+
     func setAgentStatus(_ id: String, _ status: String) async {
         try? await Supa.shared.update("agents?id=eq.\(id)", ["status": status])
         await loadAgents()
@@ -279,6 +285,53 @@ final class AppState: ObservableObject {
         return out
     }
 
+    /// Post a message into a channel and have the chief reply there.
+    func sendToChannel(channelId: String, text: String) async {
+        guard let ws = workspace?.id, let uid = Supa.shared.userId else { return }
+        let content = text.trimmingCharacters(in: .whitespacesAndNewlines); guard !content.isEmpty else { return }
+        _ = try? await Supa.shared.insert("messages", [
+            "workspace_id": ws, "channel_id": channelId, "sender_type": "user", "user_id": uid, "content": content, "status": "complete"
+        ], returning: false) as [Message]
+        guard let r = supervisor else { return }
+        let ph: [Message] = (try? await Supa.shared.insert("messages", [
+            "workspace_id": ws, "channel_id": channelId, "sender_type": "agent", "agent_id": r.id,
+            "content": "", "status": "thinking", "activities": [["label": "Thinking…", "status": "running"]]
+        ])) ?? []
+        guard let pid = ph.first?.id else { return }
+        let roster = rosterString()
+        Task {
+            let history = await buildChannelHistory(channelId: channelId, selfAgentId: r.id)
+            let mems = await fetchContext()
+            let ctx = RunContext(
+                workspaceId: ws, userId: uid, threadId: channelId,
+                onCreateAgent: { n, ro, d in await self.toolCreateAgent(n, ro, d) },
+                onDelegate: { _, _ in "Delegation runs in chats — open a chat to delegate." },
+                onBuildApp: { n, h in await self.toolBuildApp(n, h) },
+                onCreateRank: { n, b, c in await self.toolCreateRank(n, b, c) },
+                onAssignRank: { a, rk in await self.toolAssignRank(a, rk) }
+            )
+            let res = await AgentRunner.run(agent: r, history: history, roster: roster, memories: mems, ctx: ctx)
+            var patch: [String: Any] = ["content": res.text, "status": "complete", "activities": []]
+            if !res.images.isEmpty { patch["attachments"] = res.images.map { ["type": "image", "url": $0, "name": "Generated image"] } }
+            try? await Supa.shared.update("messages?id=eq.\(pid)", patch)
+        }
+    }
+
+    private func buildChannelHistory(channelId: String, selfAgentId: String) async -> [[String: Any]] {
+        let msgs: [Message] = (try? await Supa.shared.select("messages?channel_id=eq.\(channelId)&thread_id=is.null&select=*&order=created_at.asc&limit=24")) ?? []
+        let nameOf = Dictionary(agents.map { ($0.id, $0.name) }, uniquingKeysWith: { a, _ in a })
+        var out: [[String: Any]] = []
+        for m in msgs {
+            let body = m.content ?? ""; if m.status == "thinking" || body.isEmpty { continue }
+            if m.sender_type == "agent" && m.agent_id == selfAgentId { out.append(["role": "assistant", "content": body]) }
+            else {
+                let who = m.sender_type == "user" ? (profile?.display_name ?? "User") : (nameOf[m.agent_id ?? ""] ?? "Teammate")
+                out.append(["role": "user", "content": "\(who): \(body)"])
+            }
+        }
+        return out
+    }
+
     private func rosterString() -> String {
         agents.map { "\($0.name) (\($0.role ?? "agent"))" }.joined(separator: ", ")
     }
@@ -291,17 +344,75 @@ final class AppState: ObservableObject {
         Task {
             var history = await buildHistory(threadId: threadId, selfAgentId: agent.id)
             if let extra { history.append(["role": "user", "content": extra]) }
+            let mems = await fetchContext()
             let ctx = RunContext(
                 workspaceId: ws, userId: uid, threadId: threadId,
                 onCreateAgent: { name, role, desc in await self.toolCreateAgent(name, role, desc) },
                 onDelegate: { handle, task in await self.toolDelegate(threadId: threadId, handle: handle, task: task) },
-                onBuildApp: { name, html in await self.toolBuildApp(name, html) }
+                onBuildApp: { name, html in await self.toolBuildApp(name, html) },
+                onCreateRank: { name, badge, color in await self.toolCreateRank(name, badge, color) },
+                onAssignRank: { ag, rank in await self.toolAssignRank(ag, rank) }
             )
-            let reply = await AgentRunner.run(agent: agent, history: history, roster: roster, ctx: ctx)
-            try? await Supa.shared.update("messages?id=eq.\(placeholderId)",
-                                          ["content": reply, "status": "complete", "activities": []])
+            let result = await AgentRunner.run(agent: agent, history: history, roster: roster, memories: mems, ctx: ctx)
+            var patch: [String: Any] = ["content": result.text, "status": "complete", "activities": []]
+            if !result.images.isEmpty {
+                patch["attachments"] = result.images.map { ["type": "image", "url": $0, "name": "Generated image"] }
+            }
+            try? await Supa.shared.update("messages?id=eq.\(placeholderId)", patch)
+            await self.saveMemory(from: history)
             await self.loadThreads()
         }
+    }
+
+    /// Workspace knowledge + recent agent memories, fed into the agent's context.
+    private func fetchContext() async -> [String] {
+        guard let ws = workspace?.id else { return [] }
+        var out: [String] = []
+        if let kb: [KnowledgeRow] = try? await Supa.shared.select("knowledge?workspace_id=eq.\(ws)&select=title,content&order=created_at.desc&limit=10") {
+            for k in kb { let t = "\(k.title ?? ""): \(k.content ?? "")".trimmingCharacters(in: .whitespaces); if t.count > 2 { out.append(t) } }
+        }
+        if let mem: [MemoryRow] = try? await Supa.shared.select("agent_memories?workspace_id=eq.\(ws)&select=id,content&order=created_at.desc&limit=16") {
+            var seen = Set<String>()
+            for m in mem { let c = (m.content ?? "").trimmingCharacters(in: .whitespaces); if c.count > 2 && !seen.contains(c) { seen.insert(c); out.append(c) } }
+        }
+        return out
+    }
+
+    /// Save a durable fact from the latest user turn (like the website's memory).
+    private func saveMemory(from history: [[String: Any]]) async {
+        guard let ws = workspace?.id else { return }
+        guard let lastUser = history.last(where: { ($0["role"] as? String) == "user" }),
+              let raw = lastUser["content"] as? String else { return }
+        let text = raw.replacingOccurrences(of: #"^[^:]+:\s*"#, with: "", options: .regularExpression)
+        let lc = text.lowercased()
+        let memorable = lc.contains("remember") || lc.range(of: #"\b(my name is|call me|i am |i'm |i live|i work|my (job|company|email|birthday|goal|budget|timezone)|i (like|love|prefer|hate|always|never)|we (use|prefer|need))\b"#, options: .regularExpression) != nil
+        guard memorable, text.count > 4 else { return }
+        let fact = String(text.prefix(240))
+        let exists: [MemoryRow] = (try? await Supa.shared.select("agent_memories?workspace_id=eq.\(ws)&content=eq.\(fact.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? fact)&limit=1")) ?? []
+        if exists.isEmpty {
+            _ = try? await Supa.shared.insert("agent_memories", ["workspace_id": ws, "content": fact, "kind": "fact"], returning: false) as [MemoryRow]
+        }
+    }
+
+    private func toolCreateRank(_ name: String, _ badge: String, _ color: String) async -> String {
+        guard let ws = workspace?.id, !name.isEmpty else { return "Need a rank name." }
+        let badges = ["crown", "star", "shield", "medal", "gem", "fire", "trophy", "flag", "diamond", "bolt", "rocket", "brain"]
+        let b = badges.contains(badge.lowercased()) ? badge.lowercased() : "star"
+        let c = color.range(of: "^#[0-9a-fA-F]{6}$", options: .regularExpression) != nil ? color : "#6e6e80"
+        _ = try? await Supa.shared.insert("ranks", ["workspace_id": ws, "name": name, "badge": b, "color": c, "position": 100], returning: false) as [MemoryRow]
+        return "✅ Created the **\(name)** rank."
+    }
+    private func toolAssignRank(_ agentName: String, _ rankName: String) async -> String {
+        guard let ws = workspace?.id else { return "No workspace." }
+        guard let ag = agents.first(where: { $0.name.lowercased() == agentName.lowercased() || ($0.handle ?? "").lowercased() == agentName.lowercased() }) else { return "No agent named \(agentName)." }
+        if rankName.trimmingCharacters(in: .whitespaces).isEmpty {
+            try? await Supa.shared.update("agents?id=eq.\(ag.id)", ["rank_id": NSNull()]); return "Removed \(ag.name)'s rank."
+        }
+        let ranks: [RankRow] = (try? await Supa.shared.select("ranks?workspace_id=eq.\(ws)&select=id,name&order=position")) ?? []
+        guard let rank = ranks.first(where: { $0.name.lowercased() == rankName.lowercased() }) else { return "No rank called \(rankName). Create it first." }
+        try? await Supa.shared.update("agents?id=eq.\(ag.id)", ["rank_id": rank.id])
+        await loadAgents()
+        return "✅ \(ag.name) is now **\(rank.name)**."
     }
 
     // MARK: - Agent tool actions (DB writes)

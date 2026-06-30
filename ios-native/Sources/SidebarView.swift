@@ -45,6 +45,7 @@ struct SidebarView: View {
                     navRow("clock.arrow.circlepath", "Jobs") { openSheet(.jobs) }
                     navRow("book", "Knowledge") { openSheet(.knowledge) }
                     navRow("puzzlepiece.extension", "Integrations") { openSheet(.integrations) }
+                    navRow("rosette", "Ranks") { openSheet(.ranks) }
                     navRow("bell", "Activity") { openSheet(.activity) }
 
                     Text("Recents").font(.caption.weight(.semibold)).foregroundStyle(Theme.muted)

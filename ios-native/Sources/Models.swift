@@ -80,6 +80,8 @@ struct Attachment: Codable, Identifiable, Hashable {
 }
 
 struct ConfigRow: Codable { var key: String; var value: String? }
+struct MemoryRow: Codable, Identifiable { let id: String; var content: String? }
+struct RankRow: Codable, Identifiable { let id: String; var name: String; var badge: String?; var color: String? }
 
 struct Notif: Codable, Identifiable {
     let id: String

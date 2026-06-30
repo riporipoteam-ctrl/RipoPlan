@@ -10,6 +10,8 @@ struct SettingsView: View {
     @AppStorage("askai.model") private var model = "groq"
     @AppStorage("askai.nvkey") private var nvkey = ""
     @State private var confirmSignOut = false
+    @State private var editName = false
+    @State private var nameDraft = ""
 
     var body: some View {
         NavigationStack {
@@ -17,13 +19,26 @@ struct SettingsView: View {
                 Theme.ink.ignoresSafeArea()
                 ScrollView {
                     VStack(spacing: 16) {
-                        // Profile header
-                        VStack(spacing: 10) {
-                            Avatar(name: app.profile?.display_name ?? "You", color: app.profile?.avatar_color, size: 76)
-                            Text(app.profile?.display_name ?? "You").font(.title2.bold()).foregroundStyle(Theme.text)
-                            Text(app.profile?.email ?? app.workspace?.name ?? "").font(.subheadline).foregroundStyle(Theme.muted)
+                        // Profile header (tap to edit name)
+                        Button {
+                            nameDraft = app.profile?.display_name ?? ""; editName = true
+                        } label: {
+                            VStack(spacing: 10) {
+                                Avatar(name: app.profile?.display_name ?? "You", color: app.profile?.avatar_color, size: 76)
+                                HStack(spacing: 6) {
+                                    Text(app.profile?.display_name ?? "You").font(.title2.bold()).foregroundStyle(Theme.text)
+                                    Image(systemName: "pencil").font(.caption).foregroundStyle(Theme.muted)
+                                }
+                                Text(app.profile?.email ?? app.workspace?.name ?? "").font(.subheadline).foregroundStyle(Theme.muted)
+                            }
+                            .frame(maxWidth: .infinity).card(radius: 20)
                         }
-                        .frame(maxWidth: .infinity).card(radius: 20)
+                        .buttonStyle(.plain)
+                        .alert("Edit name", isPresented: $editName) {
+                            TextField("Display name", text: $nameDraft)
+                            Button("Cancel", role: .cancel) {}
+                            Button("Save") { Task { await app.updateProfile(displayName: nameDraft) } }
+                        }
 
                         // Appearance
                         VStack(alignment: .leading, spacing: 12) {

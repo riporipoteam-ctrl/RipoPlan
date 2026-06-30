@@ -1,148 +1,305 @@
 import Foundation
 import JavaScriptCore
 
-/// Context the runner needs to take real actions (DB writes happen on the app side).
 struct RunContext {
     let workspaceId: String
     let userId: String
     let threadId: String
-    let onCreateAgent: (String, String, String) async -> String   // name, role, desc -> result text
-    let onDelegate: (String, String) async -> String              // handle, task -> result text
-    let onBuildApp: (String, String) async -> String              // name, html -> result text
+    let onCreateAgent: (String, String, String) async -> String
+    let onDelegate: (String, String) async -> String
+    let onBuildApp: (String, String) async -> String
+    let onCreateRank: (String, String, String) async -> String   // name, badge, color
+    let onAssignRank: (String, String) async -> String           // agent, rank
 }
 
-/// Runs an agent natively by calling the LLM directly. Supports a multi-round
-/// tool loop: live web search, page browse, code, create_agent, delegate (assign
-/// tasks to teammates), build_app, and quick skills (world cup, weather, math).
+struct RunResult { var text: String; var images: [String] = [] }
+
+/// Native agent runner. Calls the LLM directly and runs a multi-round tool loop
+/// covering the full website tool set + extra skills.
 enum AgentRunner {
     static let groqModel = "llama-3.3-70b-versatile"
     static let kimiModel = "moonshotai/kimi-k2.6"
-
-    // Keys live in Supabase `app_config`, loaded into UserDefaults at boot.
     static var groqKey: String { UserDefaults.standard.string(forKey: "askai.groqkey") ?? "" }
     static var nvidiaKey: String { UserDefaults.standard.string(forKey: "askai.nvkey") ?? "" }
     static var useKimi: Bool {
         (UserDefaults.standard.string(forKey: "askai.model") ?? "groq") == "kimi" && !nvidiaKey.isEmpty
     }
 
-    private static func toolSchemas(isSupervisor: Bool) -> [[String: Any]] {
-        func fn(_ name: String, _ desc: String, _ props: [String: Any], _ required: [String]) -> [String: Any] {
-            ["type": "function", "function": ["name": name, "description": desc,
-              "parameters": ["type": "object", "properties": props, "required": required]]]
-        }
-        var t: [[String: Any]] = [
-            fn("web_search", "Search the live web for current info (news, prices, scores, facts).",
-               ["query": ["type": "string"]], ["query"]),
-            fn("browse", "Fetch a web page URL and return its readable text.",
-               ["url": ["type": "string"]], ["url"]),
-            fn("code", "Run JavaScript to compute/transform data or do math. Use return or console.log.",
-               ["source": ["type": "string"]], ["source"]),
-            fn("world_cup", "Live FIFA World Cup results, fixtures, and standings.", [:], []),
-            fn("weather", "Current weather + short forecast for a place.",
-               ["location": ["type": "string"]], ["location"]),
-            fn("calculate", "Evaluate a math expression.",
-               ["expression": ["type": "string"]], ["expression"]),
-            fn("build_app", "Build & publish a complete self-contained HTML web app/site to Mini Apps.",
-               ["name": ["type": "string"], "html": ["type": "string"]], ["name", "html"]),
+    private static func fn(_ name: String, _ desc: String, _ props: [String: Any], _ req: [String]) -> [String: Any] {
+        ["type": "function", "function": ["name": name, "description": desc,
+          "parameters": ["type": "object", "properties": props, "required": req]]]
+    }
+    private static var tools: [[String: Any]] {
+        let S: [String: Any] = ["type": "string"]; let N: [String: Any] = ["type": "number"]
+        return [
+            fn("web_search", "Search the live web for current info.", ["query": S], ["query"]),
+            fn("browse", "Fetch a web page URL and return readable text.", ["url": S], ["url"]),
+            fn("code", "Run JavaScript to compute/transform. Use return or console.log.", ["source": S], ["source"]),
+            fn("generate_image", "Generate an image from a text prompt (shown to the user).", ["prompt": S], ["prompt"]),
+            fn("world_cup", "Live FIFA World Cup results, fixtures, standings.", [:], []),
+            fn("weather", "Current weather + forecast for a place.", ["location": S], ["location"]),
+            fn("calculate", "Evaluate a math expression.", ["expression": S], ["expression"]),
+            fn("currency", "Convert money between currencies (live rates).", ["amount": N, "from": S, "to": S], ["from", "to"]),
+            fn("crypto_price", "Current crypto price in USD.", ["coin": S], ["coin"]),
+            fn("stock_price", "Latest stock/ETF price by ticker.", ["ticker": S], ["ticker"]),
+            fn("dictionary", "Define a word + synonyms.", ["word": S], ["word"]),
+            fn("wiki", "Concise Wikipedia summary of a topic.", ["topic": S], ["topic"]),
+            fn("translate", "Translate text to another language.", ["text": S, "to": S], ["text", "to"]),
+            fn("datetime", "Current date & time (optional IANA timezone).", ["timezone": S], []),
+            fn("unit_convert", "Convert between units (length, mass, temp, volume, speed, data).", ["value": N, "from": S, "to": S], ["value", "from", "to"]),
+            fn("qr_code", "Generate a QR code image for text/URL.", ["data": S], ["data"]),
+            fn("build_app", "Build & publish a complete self-contained HTML web app to Mini Apps.", ["name": S, "html": S], ["name", "html"]),
+            fn("create_agent", "Create a new AI agent on the team.", ["name": S, "role": S, "description": S], ["name", "role"]),
+            fn("delegate", "Assign a task to a teammate by handle; they reply here.", ["handle": S, "task": S], ["handle", "task"]),
+            fn("create_rank", "Create a rank/badge for agents.", ["name": S, "badge": S, "color": S], ["name"]),
+            fn("assign_rank", "Assign a rank to an agent by name.", ["agent": S, "rank": S], ["agent", "rank"]),
         ]
-        // Team-management tools — most useful for the supervisor but available to all.
-        t.append(fn("create_agent", "Create a brand-new AI agent on the team.",
-                    ["name": ["type": "string"], "role": ["type": "string"], "description": ["type": "string"]],
-                    ["name", "role"]))
-        t.append(fn("delegate", "Assign a task to a teammate agent by handle; they reply in this thread.",
-                    ["handle": ["type": "string"], "task": ["type": "string"]], ["handle", "task"]))
-        return t
     }
 
-    static func run(agent: Agent, history: [[String: Any]], roster: String, ctx: RunContext) async -> String {
+    static func run(agent: Agent, history: [[String: Any]], roster: String, memories: [String] = [], ctx: RunContext) async -> RunResult {
+        var images: [String] = []
+        let memText = memories.isEmpty ? "" : "\n\nWorkspace knowledge & memory you should use:\n- " + memories.prefix(20).joined(separator: "\n- ")
         let system = """
         You are \(agent.name), \(agent.role ?? "an AI agent") on the user's AskAI team. \
         \(agent.description ?? "") \(agent.system_prompt ?? "")
         Teammates: \(roster).
-        Capabilities: a real web browser (browse), live web_search, a code sandbox (code), \
-        quick skills (world_cup, weather, calculate), and you can build & publish web apps (build_app), \
-        create new agents (create_agent), and delegate tasks to teammates (delegate) who will then reply here. \
-        Be proactive and autonomous: break a goal into steps, use tools and delegate to teammates to get real \
-        work done, and don't just say you will — actually call the tools. Answer in Markdown. Speak only as \(agent.name).
+        You can browse the web, search, run code, generate images, build & publish web apps, create agents, \
+        delegate tasks to teammates (who then reply here), manage ranks, and use skills (weather, currency, \
+        crypto, stocks, dictionary, wiki, translate, world cup, unit convert, QR, datetime, calculate). \
+        Be proactive and autonomous: plan, use tools, and delegate to actually finish the job — don't just \
+        say you will. Answer in Markdown. Speak only as \(agent.name).\(memText)
         """
         var msgs: [[String: Any]] = [["role": "system", "content": system]]
         msgs.append(contentsOf: history)
-        let tools = toolSchemas(isSupervisor: agent.is_supervisor == true)
 
         for round in 0..<5 {
             guard let message = await chat(msgs, tools: round < 4 ? tools : nil) else { break }
             let calls = message["tool_calls"] as? [[String: Any]] ?? []
             if calls.isEmpty {
                 let content = (message["content"] as? String) ?? ""
-                if !content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return clean(content) }
+                if !content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return RunResult(text: clean(content), images: images) }
                 break
             }
             msgs.append(["role": "assistant", "content": message["content"] as? String ?? "", "tool_calls": calls])
             for c in calls {
-                let fn = c["function"] as? [String: Any] ?? [:]
-                let name = fn["name"] as? String ?? ""
-                let args = parseArgs(fn["arguments"])
-                let out = await runTool(name, args, ctx)
+                let f = c["function"] as? [String: Any] ?? [:]
+                let name = f["name"] as? String ?? ""
+                let args = parseArgs(f["arguments"])
+                let out = await runTool(name, args, ctx, &images)
                 msgs.append(["role": "tool", "tool_call_id": c["id"] as? String ?? "", "name": name, "content": String(out.prefix(6000))])
             }
         }
         msgs.append(["role": "user", "content": "Give your final answer now in plain Markdown. Do not call tools."])
         if let m = await chat(msgs, tools: nil), let content = m["content"] as? String, !content.isEmpty {
-            return clean(content)
+            return RunResult(text: clean(content), images: images)
         }
-        return "Done."
+        return RunResult(text: images.isEmpty ? "Done." : "Here's what I generated.", images: images)
     }
 
-    // MARK: Chat call
+    // MARK: Chat
     private static func chat(_ messages: [[String: Any]], tools: [[String: Any]]?) async -> [String: Any]? {
         let kimi = useKimi
-        let endpoint = kimi ? "https://integrate.api.nvidia.com/v1/chat/completions"
-                            : "https://api.groq.com/openai/v1/chat/completions"
+        let endpoint = kimi ? "https://integrate.api.nvidia.com/v1/chat/completions" : "https://api.groq.com/openai/v1/chat/completions"
         let key = kimi ? nvidiaKey : groqKey
         let modelId = kimi ? kimiModel : groqModel
         if key.isEmpty { return nil }
-        var body: [String: Any] = ["model": modelId, "messages": messages,
-                                    "temperature": kimi ? 0.8 : 0.6, "max_tokens": kimi ? 4096 : 2000]
+        var body: [String: Any] = ["model": modelId, "messages": messages, "temperature": kimi ? 0.8 : 0.6, "max_tokens": kimi ? 4096 : 2000]
         if let tools { body["tools"] = tools; body["tool_choice"] = "auto" }
-        var req = URLRequest(url: URL(string: endpoint)!)
-        req.httpMethod = "POST"
+        var req = URLRequest(url: URL(string: endpoint)!); req.httpMethod = "POST"
         req.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         req.timeoutInterval = 90
         req.httpBody = try? JSONSerialization.data(withJSONObject: body)
-        do {
-            let (data, resp) = try await URLSession.shared.data(for: req)
-            guard let http = resp as? HTTPURLResponse, (200..<300).contains(http.statusCode) else { return nil }
-            let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
-            let choices = json?["choices"] as? [[String: Any]]
-            return choices?.first?["message"] as? [String: Any]
-        } catch { return nil }
+        guard let (data, resp) = try? await URLSession.shared.data(for: req),
+              let http = resp as? HTTPURLResponse, (200..<300).contains(http.statusCode),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let choices = json["choices"] as? [[String: Any]] else { return nil }
+        return choices.first?["message"] as? [String: Any]
     }
-
     private static func parseArgs(_ raw: Any?) -> [String: Any] {
-        if let s = raw as? String, let d = s.data(using: .utf8),
-           let o = try? JSONSerialization.jsonObject(with: d) as? [String: Any] { return o }
-        if let o = raw as? [String: Any] { return o }
-        return [:]
+        if let s = raw as? String, let d = s.data(using: .utf8), let o = try? JSONSerialization.jsonObject(with: d) as? [String: Any] { return o }
+        return (raw as? [String: Any]) ?? [:]
     }
+    private static func str(_ a: Any?) -> String { (a as? String) ?? (a.map { "\($0)" } ?? "") }
+    private static func num(_ a: Any?) -> Double { (a as? Double) ?? Double(str(a)) ?? 0 }
 
-    // MARK: Tools
-    private static func runTool(_ name: String, _ args: [String: Any], _ ctx: RunContext) async -> String {
+    // MARK: Tool dispatch
+    private static func runTool(_ name: String, _ args: [String: Any], _ ctx: RunContext, _ images: inout [String]) async -> String {
         switch name {
         case "web_search": return await webSearch(str(args["query"]))
         case "browse": return await browse(str(args["url"]))
         case "code": return runJS(str(args["source"]))
+        case "generate_image":
+            if let url = await generateImage(str(args["prompt"])) { images.append(url); return "Image generated and shown to the user." }
+            return "Image generation failed."
         case "world_cup": return await worldCup()
         case "weather": return await weather(str(args["location"]))
         case "calculate": return calculate(str(args["expression"]))
+        case "currency": return await currency(num(args["amount"]) == 0 ? 1 : num(args["amount"]), str(args["from"]), str(args["to"]))
+        case "crypto_price": return await crypto(str(args["coin"]))
+        case "stock_price": return await stock(str(args["ticker"]))
+        case "dictionary": return await dictionary(str(args["word"]))
+        case "wiki": return await wiki(str(args["topic"]))
+        case "translate": return await translate(str(args["text"]), str(args["to"]))
+        case "datetime": return datetime(str(args["timezone"]))
+        case "unit_convert": return unitConvert(num(args["value"]), str(args["from"]), str(args["to"]))
+        case "qr_code": return qrCode(str(args["data"]))
+        case "build_app": return await ctx.onBuildApp(str(args["name"]), str(args["html"]))
         case "create_agent": return await ctx.onCreateAgent(str(args["name"]), str(args["role"]), str(args["description"]))
         case "delegate": return await ctx.onDelegate(str(args["handle"]), str(args["task"]))
-        case "build_app": return await ctx.onBuildApp(str(args["name"]), str(args["html"]))
+        case "create_rank": return await ctx.onCreateRank(str(args["name"]), str(args["badge"]), str(args["color"]))
+        case "assign_rank": return await ctx.onAssignRank(str(args["agent"]), str(args["rank"]))
         default: return "Unknown tool."
         }
     }
-    private static func str(_ a: Any?) -> String { (a as? String) ?? (a.map { "\($0)" } ?? "") }
 
+    // MARK: Skills
+    private static func get(_ url: String) async -> Data? {
+        guard let u = URL(string: url) else { return nil }
+        return try? await URLSession.shared.data(from: u).0
+    }
+    private static func reader(_ url: String) async -> String {
+        guard let u = URL(string: "https://r.jina.ai/\(url)") else { return "" }
+        var req = URLRequest(url: u); req.setValue("markdown", forHTTPHeaderField: "X-Return-Format"); req.timeoutInterval = 30
+        if let (d, r) = try? await URLSession.shared.data(for: req), let h = r as? HTTPURLResponse, (200..<300).contains(h.statusCode),
+           let s = String(data: d, encoding: .utf8) { return s }
+        return ""
+    }
+    private static func webSearch(_ query: String) async -> String {
+        let q = query.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? query
+        var out = await reader("https://lite.duckduckgo.com/lite/?q=\(q)")
+        if let re = try? NSRegularExpression(pattern: "uddg=([^&)\\s]+)") {
+            let ns = out as NSString
+            for m in re.matches(in: out, range: NSRange(location: 0, length: ns.length)).reversed() {
+                if let dec = ns.substring(with: m.range(at: 1)).removingPercentEncoding { out = (out as NSString).replacingCharacters(in: m.range, with: dec) }
+            }
+        }
+        out = out.trimmingCharacters(in: .whitespacesAndNewlines)
+        return out.count > 100 ? String(out.prefix(6000)) : "No live results. Don't invent facts."
+    }
+    private static func browse(_ url: String) async -> String {
+        let t = await reader(url.hasPrefix("http") ? url : "https://\(url)")
+        return t.isEmpty ? "Couldn't fetch \(url)." : String(t.prefix(6000))
+    }
+    private static func generateImage(_ prompt: String) async -> String? {
+        let key = nvidiaKey; if key.isEmpty || prompt.isEmpty { return nil }
+        for model in ["black-forest-labs/flux.2-klein-4b", "black-forest-labs/flux.1-dev"] {
+            let payload: [String: Any] = model.contains("klein")
+                ? ["prompt": prompt, "width": 1024, "height": 1024, "seed": Int.random(in: 0..<1_000_000), "steps": 4]
+                : ["prompt": prompt, "mode": "base", "width": 1024, "height": 1024, "steps": 30, "cfg_scale": 4.5, "samples": 1, "seed": Int.random(in: 0..<1_000_000)]
+            var req = URLRequest(url: URL(string: "https://ai.api.nvidia.com/v1/genai/\(model)")!)
+            req.httpMethod = "POST"; req.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
+            req.setValue("application/json", forHTTPHeaderField: "Content-Type"); req.setValue("application/json", forHTTPHeaderField: "Accept")
+            req.timeoutInterval = 120; req.httpBody = try? JSONSerialization.data(withJSONObject: payload)
+            guard let (d, r) = try? await URLSession.shared.data(for: req), let h = r as? HTTPURLResponse, (200..<300).contains(h.statusCode),
+                  let j = try? JSONSerialization.jsonObject(with: d) as? [String: Any] else { continue }
+            var b64 = ""
+            if let arts = j["artifacts"] as? [[String: Any]], let s = arts.first?["base64"] as? String { b64 = s }
+            else if let arr = j["data"] as? [[String: Any]], let s = arr.first?["b64_json"] as? String { b64 = s }
+            else if let s = j["image"] as? String { b64 = s.replacingOccurrences(of: "^data:image/\\w+;base64,", with: "", options: .regularExpression) }
+            guard !b64.isEmpty, let data = Data(base64Encoded: b64), data.count > 5000 else { continue }
+            if let url = try? await Supa.shared.uploadFile(data: data, ext: "jpg", contentType: "image/jpeg") { return url }
+        }
+        return nil
+    }
+    private static func worldCup() async -> String {
+        let day = ISO8601DateFormatter(); day.formatOptions = [.withFullDate]
+        let today = day.string(from: Date())
+        if let d = await get("https://www.thesportsdb.com/api/v1/json/3/eventsday.php?d=\(today)&s=Soccer"),
+           let j = try? JSONSerialization.jsonObject(with: d) as? [String: Any], let ev = j["events"] as? [[String: Any]] {
+            let wc = ev.filter { ("\($0["strLeague"] ?? "")").localizedCaseInsensitiveContains("world cup") }
+            if !wc.isEmpty { return "FIFA World Cup (\(today)):\n" + wc.prefix(12).map { "- \($0["strHomeTeam"] ?? "?") vs \($0["strAwayTeam"] ?? "?") (\($0["dateEvent"] ?? ""))" }.joined(separator: "\n") }
+        }
+        return await webSearch("FIFA World Cup 2026 results fixtures standings")
+    }
+    private static func weather(_ location: String) async -> String {
+        let q = location.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? location
+        guard let gd = await get("https://geocoding-api.open-meteo.com/v1/search?count=1&name=\(q)"),
+              let gj = try? JSONSerialization.jsonObject(with: gd) as? [String: Any],
+              let res = (gj["results"] as? [[String: Any]])?.first, let lat = res["latitude"] as? Double, let lon = res["longitude"] as? Double
+        else { return "Couldn't find \(location)." }
+        guard let wd = await get("https://api.open-meteo.com/v1/forecast?latitude=\(lat)&longitude=\(lon)&current=temperature_2m,wind_speed_10m,relative_humidity_2m"),
+              let wj = try? JSONSerialization.jsonObject(with: wd) as? [String: Any], let cur = wj["current"] as? [String: Any] else { return "Weather unavailable." }
+        return "Weather in \(res["name"] ?? location): \(cur["temperature_2m"] ?? "?")°C, humidity \(cur["relative_humidity_2m"] ?? "?")%, wind \(cur["wind_speed_10m"] ?? "?") km/h."
+    }
+    private static func currency(_ amount: Double, _ from: String, _ to: String) async -> String {
+        guard let d = await get("https://api.frankfurter.app/latest?amount=\(amount)&from=\(from.uppercased())&to=\(to.uppercased())"),
+              let j = try? JSONSerialization.jsonObject(with: d) as? [String: Any], let rates = j["rates"] as? [String: Any],
+              let v = rates[to.uppercased()] else { return "Couldn't convert \(from)→\(to)." }
+        return "\(amount) \(from.uppercased()) = \(v) \(to.uppercased())"
+    }
+    private static func crypto(_ coin: String) async -> String {
+        let id = coin.lowercased().replacingOccurrences(of: " ", with: "-")
+        guard let d = await get("https://api.coingecko.com/api/v3/simple/price?ids=\(id)&vs_currencies=usd&include_24hr_change=true"),
+              let j = try? JSONSerialization.jsonObject(with: d) as? [String: Any], let c = j[id] as? [String: Any], let usd = c["usd"] else { return "Couldn't find \(coin)." }
+        return "\(coin): $\(usd) (24h \((c["usd_24h_change"] as? Double).map { String(format: "%.2f", $0) } ?? "?")%)"
+    }
+    private static func stock(_ ticker: String) async -> String {
+        let t = ticker.lowercased().trimmingCharacters(in: .whitespaces)
+        let sym = t.contains(".") ? t : "\(t).us"
+        guard let d = await get("https://stooq.com/q/l/?s=\(sym)&f=sd2t2ohlcv&h&e=csv"), let csv = String(data: d, encoding: .utf8) else { return "No data for \(ticker)." }
+        let rows = csv.split(separator: "\n"); guard rows.count >= 2 else { return "No data for \(ticker)." }
+        let cols = rows[0].split(separator: ",").map(String.init); let vals = rows[1].split(separator: ",").map(String.init)
+        var rec: [String: String] = [:]; for (i, c) in cols.enumerated() where i < vals.count { rec[c.lowercased()] = vals[i] }
+        guard let close = rec["close"], close != "N/D" else { return "No live price for \(ticker)." }
+        return "\(ticker.uppercased()): $\(close) (open \(rec["open"] ?? "?"), high \(rec["high"] ?? "?"), low \(rec["low"] ?? "?"))"
+    }
+    private static func dictionary(_ word: String) async -> String {
+        let w = word.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? word
+        guard let d = await get("https://api.dictionaryapi.dev/api/v2/entries/en/\(w)"),
+              let arr = try? JSONSerialization.jsonObject(with: d) as? [[String: Any]], let e = arr.first,
+              let meanings = e["meanings"] as? [[String: Any]] else { return "No definition for \(word)." }
+        let defs = meanings.prefix(3).compactMap { m -> String? in
+            let pos = m["partOfSpeech"] as? String ?? ""
+            let def = (m["definitions"] as? [[String: Any]])?.first?["definition"] as? String ?? ""
+            return def.isEmpty ? nil : "(\(pos)) \(def)"
+        }
+        return "**\(e["word"] as? String ?? word)**\n" + defs.joined(separator: "\n")
+    }
+    private static func wiki(_ topic: String) async -> String {
+        let t = topic.replacingOccurrences(of: " ", with: "_").addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? topic
+        guard let d = await get("https://en.wikipedia.org/api/rest_v1/page/summary/\(t)"),
+              let j = try? JSONSerialization.jsonObject(with: d) as? [String: Any], let extract = j["extract"] as? String, !extract.isEmpty
+        else { return await webSearch("\(topic) wikipedia") }
+        return "**\(j["title"] as? String ?? topic)**\n\(extract)"
+    }
+    private static func translate(_ text: String, _ to: String) async -> String {
+        let q = text.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? text
+        guard let d = await get("https://api.mymemory.translated.net/get?q=\(q)&langpair=en|\(to.lowercased())"),
+              let j = try? JSONSerialization.jsonObject(with: d) as? [String: Any], let rd = j["responseData"] as? [String: Any], let out = rd["translatedText"] as? String
+        else { return "Couldn't translate." }
+        return "Translation (\(to)): \(out)"
+    }
+    private static func datetime(_ tz: String) -> String {
+        let f = DateFormatter(); f.dateStyle = .full; f.timeStyle = .long
+        if !tz.isEmpty, let z = TimeZone(identifier: tz) { f.timeZone = z }
+        return "Current date & time\(tz.isEmpty ? "" : " (\(tz))"): \(f.string(from: Date()))"
+    }
+    private static func unitConvert(_ value: Double, _ from: String, _ to: String) -> String {
+        let f = from.lowercased(), t = to.lowercased()
+        let length: [String: Double] = ["mm": 0.001, "cm": 0.01, "m": 1, "km": 1000, "in": 0.0254, "ft": 0.3048, "yd": 0.9144, "mi": 1609.344]
+        let mass: [String: Double] = ["mg": 0.001, "g": 1, "kg": 1000, "oz": 28.3495, "lb": 453.592]
+        let volume: [String: Double] = ["ml": 0.001, "l": 1, "gal": 3.78541, "qt": 0.946353, "cup": 0.236588]
+        let speed: [String: Double] = ["mps": 1, "kph": 0.277778, "mph": 0.44704, "knot": 0.514444]
+        for tbl in [length, mass, volume, speed] {
+            if let a = tbl[f], let b = tbl[t] { return "\(value) \(from) = \(round(value * a / b * 1e6) / 1e6) \(to)" }
+        }
+        let temp: Set<String> = ["c", "celsius", "f", "fahrenheit", "k", "kelvin"]
+        if temp.contains(f), temp.contains(t) {
+            let c = f.first == "c" ? value : f.first == "f" ? (value - 32) * 5 / 9 : value - 273.15
+            let out = t.first == "c" ? c : t.first == "f" ? c * 9 / 5 + 32 : c + 273.15
+            return "\(value) \(from) = \(round(out * 100) / 100) \(to)"
+        }
+        return "Can't convert \(from)→\(to)."
+    }
+    private static func qrCode(_ data: String) -> String {
+        let q = data.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? data
+        return "QR code: ![QR](https://api.qrserver.com/v1/create-qr-code/?size=320x320&data=\(q))"
+    }
+    private static func calculate(_ expr: String) -> String {
+        let r = runJS("return (\(expr.replacingOccurrences(of: "^", with: "**")))")
+        return "\(expr) = \(r.replacingOccurrences(of: "=> ", with: ""))"
+    }
     private static func runJS(_ source: String) -> String {
         guard let ctx = JSContext() else { return "No JS engine." }
         var logs: [String] = []
@@ -155,66 +312,7 @@ enum AgentRunner {
         if let v = val, !v.isUndefined, !v.isNull { out += (out.isEmpty ? "" : "\n") + "=> \(v.toString() ?? "")" }
         return out.isEmpty ? "(no output)" : out
     }
-
-    private static func reader(_ url: String) async -> String {
-        guard let u = URL(string: "https://r.jina.ai/\(url)") else { return "" }
-        var req = URLRequest(url: u); req.setValue("markdown", forHTTPHeaderField: "X-Return-Format"); req.timeoutInterval = 30
-        if let (d, r) = try? await URLSession.shared.data(for: req),
-           let h = r as? HTTPURLResponse, (200..<300).contains(h.statusCode),
-           let s = String(data: d, encoding: .utf8) { return s }
-        return ""
-    }
-    private static func webSearch(_ query: String) async -> String {
-        let q = query.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? query
-        var out = await reader("https://lite.duckduckgo.com/lite/?q=\(q)")
-        if let re = try? NSRegularExpression(pattern: "uddg=([^&)\\s]+)") {
-            let ns = out as NSString
-            for m in re.matches(in: out, range: NSRange(location: 0, length: ns.length)).reversed() {
-                if let dec = ns.substring(with: m.range(at: 1)).removingPercentEncoding {
-                    out = (out as NSString).replacingCharacters(in: m.range, with: dec)
-                }
-            }
-        }
-        out = out.trimmingCharacters(in: .whitespacesAndNewlines)
-        return out.count > 100 ? String(out.prefix(6000)) : "No live results. Don't invent facts."
-    }
-    private static func browse(_ url: String) async -> String {
-        let u = url.hasPrefix("http") ? url : "https://\(url)"
-        let t = await reader(u); return t.isEmpty ? "Couldn't fetch \(url)." : String(t.prefix(6000))
-    }
-    private static func worldCup() async -> String {
-        let day = ISO8601DateFormatter(); day.formatOptions = [.withFullDate]
-        let today = day.string(from: Date())
-        if let (d, _) = try? await URLSession.shared.data(from: URL(string: "https://www.thesportsdb.com/api/v1/json/3/eventsday.php?d=\(today)&s=Soccer")!),
-           let j = try? JSONSerialization.jsonObject(with: d) as? [String: Any],
-           let events = j["events"] as? [[String: Any]] {
-            let wc = events.filter { ("\($0["strLeague"] ?? "")").localizedCaseInsensitiveContains("world cup") }
-            if !wc.isEmpty {
-                let lines = wc.prefix(12).map { e in "- \(e["strHomeTeam"] ?? "?") vs \(e["strAwayTeam"] ?? "?") (\(e["dateEvent"] ?? ""))" }
-                return "FIFA World Cup (\(today)):\n" + lines.joined(separator: "\n")
-            }
-        }
-        return await webSearch("FIFA World Cup 2026 latest results fixtures standings")
-    }
-    private static func weather(_ location: String) async -> String {
-        let q = location.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? location
-        guard let (gd, _) = try? await URLSession.shared.data(from: URL(string: "https://geocoding-api.open-meteo.com/v1/search?count=1&name=\(q)")!),
-              let gj = try? JSONSerialization.jsonObject(with: gd) as? [String: Any],
-              let res = (gj["results"] as? [[String: Any]])?.first,
-              let lat = res["latitude"] as? Double, let lon = res["longitude"] as? Double else { return "Couldn't find \(location)." }
-        guard let (wd, _) = try? await URLSession.shared.data(from: URL(string: "https://api.open-meteo.com/v1/forecast?latitude=\(lat)&longitude=\(lon)&current=temperature_2m,wind_speed_10m,relative_humidity_2m")!),
-              let wj = try? JSONSerialization.jsonObject(with: wd) as? [String: Any],
-              let cur = wj["current"] as? [String: Any] else { return "Weather unavailable." }
-        return "Weather in \(res["name"] ?? location): \(cur["temperature_2m"] ?? "?")°C, humidity \(cur["relative_humidity_2m"] ?? "?")%, wind \(cur["wind_speed_10m"] ?? "?") km/h."
-    }
-    private static func calculate(_ expr: String) -> String {
-        let e = expr.replacingOccurrences(of: "^", with: "**")
-        let r = runJS("return (\(e))")
-        return "\(expr) = \(r.replacingOccurrences(of: "=> ", with: ""))"
-    }
-
     private static func clean(_ s: String) -> String {
-        s.replacingOccurrences(of: "(?s)<think>.*?</think>", with: "", options: .regularExpression)
-         .trimmingCharacters(in: .whitespacesAndNewlines)
+        s.replacingOccurrences(of: "(?s)<think>.*?</think>", with: "", options: .regularExpression).trimmingCharacters(in: .whitespacesAndNewlines)
     }
 }

@@ -1,7 +1,7 @@
 import SwiftUI
 
 enum ShellSheet: String, Identifiable {
-    case agents, apps, activity, jobs, knowledge, integrations, channels
+    case agents, apps, activity, jobs, knowledge, integrations, channels, ranks
     var id: String { rawValue }
 }
 
@@ -56,6 +56,7 @@ struct RootShell: View {
                 case .knowledge: KnowledgeView().environmentObject(app)
                 case .integrations: IntegrationsView().environmentObject(app)
                 case .channels: ChannelsView().environmentObject(app)
+                case .ranks: RanksView().environmentObject(app)
                 }
             }
             .tint(Theme.accent)

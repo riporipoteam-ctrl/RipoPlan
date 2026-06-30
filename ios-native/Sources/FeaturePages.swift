@@ -383,22 +383,102 @@ struct ChannelChatView: View {
     @EnvironmentObject var app: AppState
     let channel: Channel
     @State private var messages: [Message] = []
+    @State private var text = ""
+    @State private var sending = false
+    @State private var atts: [Attachment] = []
 
     var body: some View {
-        ZStack {
+        ZStack(alignment: .bottom) {
             AuroraBackground()
-            ScrollView {
-                LazyVStack(spacing: 16) {
-                    ForEach(messages) { m in MessageBubble(message: m) }
-                }.padding(16)
+            ScrollViewReader { proxy in
+                ScrollView {
+                    LazyVStack(spacing: 16) {
+                        ForEach(messages) { m in MessageBubble(message: m).id(m.id) }
+                        Color.clear.frame(height: 1).id("end")
+                    }.padding(16).padding(.bottom, 80)
+                }
+                .onChange(of: messages.count) { _ in withAnimation { proxy.scrollTo("end", anchor: .bottom) } }
             }
+            InputBar(text: $text, attachments: $atts, sending: sending, uploading: false,
+                     onSend: send, onPickPhoto: {}, onPickFile: {})
+                .padding(.horizontal, 12).padding(.bottom, 8)
         }
-        .navigationTitle(channel.name).navigationBarTitleDisplayMode(.inline)
+        .navigationTitle("#\(channel.name)").navigationBarTitleDisplayMode(.inline)
         .task {
             while !Task.isCancelled {
                 messages = (try? await Supa.shared.select("messages?channel_id=eq.\(channel.id)&thread_id=is.null&select=*&order=created_at.asc&limit=200")) ?? []
-                try? await Task.sleep(nanoseconds: 3_000_000_000)
+                try? await Task.sleep(nanoseconds: 2_500_000_000)
             }
         }
+    }
+    private func send() {
+        let body = text; text = ""; sending = true
+        Task {
+            await app.sendToChannel(channelId: channel.id, text: body)
+            messages = (try? await Supa.shared.select("messages?channel_id=eq.\(channel.id)&thread_id=is.null&select=*&order=created_at.asc&limit=200")) ?? []
+            sending = false
+        }
+    }
+}
+
+// MARK: - Ranks
+
+struct RanksView: View {
+    @EnvironmentObject var app: AppState
+    @State private var ranks: [RankRow] = []
+    @State private var loading = true
+    @State private var showAdd = false
+    @State private var name = ""
+
+    var body: some View {
+        NavigationStack {
+            ZStack {
+                AuroraBackground()
+                if loading { ProgressView() }
+                else if ranks.isEmpty {
+                    VStack(spacing: 10) {
+                        Image(systemName: "rosette").font(.largeTitle).foregroundStyle(Theme.muted)
+                        Text("No ranks yet").foregroundStyle(Theme.text).font(.headline)
+                        Text("Create titled badges and assign them to your agents.")
+                            .font(.subheadline).foregroundStyle(Theme.muted).multilineTextAlignment(.center).padding(.horizontal, 36)
+                    }
+                } else {
+                    ScrollView {
+                        LazyVStack(spacing: 10) {
+                            ForEach(ranks) { r in
+                                HStack(spacing: 12) {
+                                    Image(systemName: "rosette").foregroundStyle(Color(hexString: r.color)).frame(width: 28)
+                                    Text(r.name).foregroundStyle(Theme.text).fontWeight(.semibold)
+                                    Spacer()
+                                    Text(r.badge ?? "star").font(.caption).foregroundStyle(Theme.muted)
+                                }
+                                .card(radius: 16, padding: 14)
+                                .contextMenu {
+                                    Button(role: .destructive) { Task { try? await Supa.shared.delete("ranks?id=eq.\(r.id)"); await load() } } label: { Label("Delete", systemImage: "trash") }
+                                }
+                            }
+                        }.padding(16)
+                    }
+                }
+            }
+            .sheetChrome("Ranks")
+            .toolbar { ToolbarItem(placement: .navigationBarTrailing) { Button { showAdd = true } label: { Image(systemName: "plus").fontWeight(.semibold).foregroundStyle(Theme.text) } } }
+            .alert("New rank", isPresented: $showAdd) {
+                TextField("Rank name", text: $name)
+                Button("Cancel", role: .cancel) {}
+                Button("Create") { Task { await add() } }
+            }
+            .task { await load() }
+        }
+    }
+    private func load() async {
+        guard let ws = app.workspace?.id else { return }
+        ranks = (try? await Supa.shared.select("ranks?workspace_id=eq.\(ws)&select=id,name,badge,color&order=position")) ?? []
+        loading = false
+    }
+    private func add() async {
+        guard let ws = app.workspace?.id, !name.isEmpty else { return }
+        _ = try? await Supa.shared.insert("ranks", ["workspace_id": ws, "name": name, "badge": "star", "color": "#6e6e80", "position": 100], returning: false) as [RankRow]
+        name = ""; await load()
     }
 }
