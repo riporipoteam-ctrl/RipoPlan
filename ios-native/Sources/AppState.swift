@@ -617,6 +617,37 @@ final class AppState: ObservableObject {
         await loadAgents()
     }
 
+    /// Onboarding: name the workspace and make sure a starting team exists.
+    func setupWorkspace(name: String) async {
+        let nm = name.trimmingCharacters(in: .whitespaces)
+        if let ws = workspace?.id, !nm.isEmpty, nm != workspace?.name {
+            try? await Supa.shared.update("workspaces?id=eq.\(ws)", ["name": nm])
+            if var w = workspace { w.name = nm; workspace = w }
+        }
+        // Seed a default team only if the workspace has essentially none.
+        if agents.filter({ $0.status != "archived" }).count < 2 {
+            let team: [(String, String, String, String, Bool)] = [
+                ("AskAI", "Chief of Staff", "Coordinates the team and gets things done.", "#0D0D0D", true),
+                ("Researcher", "Research Analyst", "Digs into web research and fact-finding.", "#3b82f6", false),
+                ("Builder", "Automation Builder", "Builds apps, code, and automations.", "#8b5cf6", false),
+                ("Writer", "Content Writer", "Writes emails, docs, and posts.", "#10b981", false),
+            ]
+            guard let ws = workspace?.id else { return }
+            for (n, role, desc, color, sup) in team where !agents.contains(where: { $0.name.lowercased() == n.lowercased() }) {
+                var row: [String: Any] = [
+                    "workspace_id": ws, "name": n, "handle": n.lowercased(),
+                    "role": role, "description": desc, "emoji": "robot", "avatar_color": color,
+                    "is_supervisor": sup, "tools": AppState.hermesTools,
+                    "system_prompt": AppState.hermesPrompt(name: n, role: role, desc: desc)
+                ]
+                if let uid = Supa.shared.userId { row["created_by"] = uid }
+                _ = try? await Supa.shared.insert("agents", row, returning: false) as [Agent]
+            }
+            await loadAgents()
+            UserDefaults.standard.set(supervisor?.id, forKey: "askai.supervisor")
+        }
+    }
+
     /// Manual agent edit from the UI. Pass only the fields you want to change.
     func updateAgent(id: String, name: String? = nil, role: String? = nil,
                      description: String? = nil, emoji: String? = nil,
