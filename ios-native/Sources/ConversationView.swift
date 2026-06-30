@@ -180,7 +180,8 @@ struct MessageBubble: View {
             if !isUser {
                 Avatar(name: app.agent(message.agent_id)?.name ?? "AskAI",
                        color: app.agent(message.agent_id)?.avatar_color,
-                       size: 28, spark: message.agent_id == nil)
+                       size: 28, spark: message.agent_id == nil,
+                       imageURL: app.agent(message.agent_id)?.avatar_url)
             }
             VStack(alignment: isUser ? .trailing : .leading, spacing: 6) {
                 if !isUser, let name = app.agent(message.agent_id)?.name {

@@ -97,10 +97,7 @@ final class AppState: ObservableObject {
             if let cfg: [ConfigRow] = try? await Supa.shared.select("app_config?select=key,value") {
                 let map = Dictionary(cfg.compactMap { c in c.value.map { (c.key, $0) } }, uniquingKeysWith: { a, _ in a })
                 if let g = map["groq_api_key"], !g.isEmpty { UserDefaults.standard.set(g, forKey: "askai.groqkey") }
-                if let n = map["nvidia_api_key"], !n.isEmpty,
-                   (UserDefaults.standard.string(forKey: "askai.nvkey") ?? "").isEmpty {
-                    UserDefaults.standard.set(n, forKey: "askai.nvkey")
-                }
+                if let n = map["nvidia_api_key"], !n.isEmpty { UserDefaults.standard.set(n, forKey: "askai.nvkey") }
             }
             // Persist ids so background tasks + Siri intents work outside the UI.
             UserDefaults.standard.set(workspace?.id, forKey: "askai.ws")
@@ -304,11 +301,14 @@ final class AppState: ObservableObject {
             let mems = await fetchContext()
             let ctx = RunContext(
                 workspaceId: ws, userId: uid, threadId: channelId,
+                onActivity: { label, _ in await self.setMessageActivity(pid, label) },
                 onCreateAgent: { n, ro, d in await self.toolCreateAgent(n, ro, d) },
                 onDelegate: { _, _ in "Delegation runs in chats — open a chat to delegate." },
                 onBuildApp: { n, h in await self.toolBuildApp(n, h) },
                 onCreateRank: { n, b, c in await self.toolCreateRank(n, b, c) },
-                onAssignRank: { a, rk in await self.toolAssignRank(a, rk) }
+                onAssignRank: { a, rk in await self.toolAssignRank(a, rk) },
+                onCreateTask: { n, p, who in await self.toolCreateTask(n, p, who) },
+                onEditAgent: { target, changes in await self.toolEditAgent(target, changes) }
             )
             let res = await AgentRunner.run(agent: r, history: history, roster: roster, memories: mems, ctx: ctx)
             var patch: [String: Any] = ["content": res.text, "status": "complete", "activities": []]
@@ -347,11 +347,14 @@ final class AppState: ObservableObject {
             let mems = await fetchContext()
             let ctx = RunContext(
                 workspaceId: ws, userId: uid, threadId: threadId,
+                onActivity: { label, _ in await self.setMessageActivity(placeholderId, label) },
                 onCreateAgent: { name, role, desc in await self.toolCreateAgent(name, role, desc) },
                 onDelegate: { handle, task in await self.toolDelegate(threadId: threadId, handle: handle, task: task) },
                 onBuildApp: { name, html in await self.toolBuildApp(name, html) },
                 onCreateRank: { name, badge, color in await self.toolCreateRank(name, badge, color) },
-                onAssignRank: { ag, rank in await self.toolAssignRank(ag, rank) }
+                onAssignRank: { ag, rank in await self.toolAssignRank(ag, rank) },
+                onCreateTask: { name, prompt, who in await self.toolCreateTask(name, prompt, who) },
+                onEditAgent: { target, changes in await self.toolEditAgent(target, changes) }
             )
             let result = await AgentRunner.run(agent: agent, history: history, roster: roster, memories: mems, ctx: ctx)
             var patch: [String: Any] = ["content": result.text, "status": "complete", "activities": []]
@@ -359,6 +362,8 @@ final class AppState: ObservableObject {
                 patch["attachments"] = result.images.map { ["type": "image", "url": $0, "name": "Generated image"] }
             }
             try? await Supa.shared.update("messages?id=eq.\(placeholderId)", patch)
+            await self.logRun(agentId: agent.id, threadId: threadId, output: result.text, steps: result.steps)
+            try? await Supa.shared.update("agents?id=eq.\(agent.id)", ["last_run_at": isoNow()])
             await self.saveMemory(from: history)
             await self.loadThreads()
         }
@@ -415,6 +420,54 @@ final class AppState: ObservableObject {
         return "✅ \(ag.name) is now **\(rank.name)**."
     }
 
+    /// Update a placeholder message's live activity label (shows "Searching…" etc).
+    private func setMessageActivity(_ messageId: String, _ label: String) async {
+        try? await Supa.shared.update("messages?id=eq.\(messageId)",
+            ["activities": [["label": label, "status": "running"]]])
+    }
+
+    /// Record a finished agent run (powers the Activity/Jobs history).
+    private func logRun(agentId: String, threadId: String, output: String, steps: [String]) async {
+        guard let ws = workspace?.id else { return }
+        let stepObjs = steps.map { ["tool": $0, "status": "done"] }
+        _ = try? await Supa.shared.insert("agent_runs", [
+            "workspace_id": ws, "agent_id": agentId, "thread_id": threadId,
+            "trigger": "chat", "status": "done",
+            "output": String(output.prefix(2000)), "steps": stepObjs,
+            "finished_at": isoNow()
+        ], returning: false) as [Message]
+    }
+
+    /// Create a task/job for the team (optionally assigned to an agent).
+    private func toolCreateTask(_ name: String, _ prompt: String, _ who: String) async -> String {
+        guard let ws = workspace?.id, !name.isEmpty else { return "Need a task name." }
+        var row: [String: Any] = ["workspace_id": ws, "name": name, "prompt": prompt, "status": "idle", "enabled": true]
+        let h = who.lowercased().replacingOccurrences(of: "@", with: "")
+        if !h.isEmpty, let ag = agents.first(where: { ($0.handle ?? "").lowercased() == h || $0.name.lowercased() == h }) {
+            row["agent_id"] = ag.id
+        }
+        _ = try? await Supa.shared.insert("jobs", row, returning: false) as [Message]
+        return "✅ Created the task **\(name)**\(who.isEmpty ? "" : " for @\(h)"). Find it on the Jobs page."
+    }
+
+    /// Edit an existing teammate's profile (name, role, description, emoji, color).
+    private func toolEditAgent(_ target: String, _ changes: [String: String]) async -> String {
+        let t = target.lowercased().replacingOccurrences(of: "@", with: "")
+        guard let ag = agents.first(where: {
+            ($0.handle ?? "").lowercased() == t || $0.name.lowercased() == t || $0.name.lowercased().replacingOccurrences(of: " ", with: "-") == t
+        }) else { return "No teammate called \(target)." }
+        var patch: [String: Any] = [:]
+        if let v = changes["name"] { patch["name"] = v; patch["handle"] = v.lowercased().replacingOccurrences(of: " ", with: "-") }
+        if let v = changes["role"] { patch["role"] = v }
+        if let v = changes["description"] { patch["description"] = v }
+        if let v = changes["emoji"] { patch["emoji"] = v }
+        if let v = changes["color"], v.range(of: "^#[0-9a-fA-F]{6}$", options: .regularExpression) != nil { patch["avatar_color"] = v }
+        if patch.isEmpty { return "Nothing to change." }
+        try? await Supa.shared.update("agents?id=eq.\(ag.id)", patch)
+        await loadAgents()
+        return "✅ Updated **\(ag.name)**."
+    }
+
     // MARK: - Agent tool actions (DB writes)
 
     private func toolCreateAgent(_ name: String, _ role: String, _ desc: String) async -> String {
@@ -450,7 +503,7 @@ final class AppState: ObservableObject {
         if let pid = ph.first?.id {
             runResponder(agent: target, threadId: threadId, placeholderId: pid, extra: "You've been delegated this task by a teammate: \(task)\nComplete it and reply with the result.")
         }
-        return "✅ Delegated to **\(target.name)** (@\(target.handle ?? h)): \(task). They're on it."
+        return "Delegated to \(target.name) (@\(target.handle ?? h)). They will reply in this thread on their own. Do NOT write their reply — just briefly tell the user you handed it to \(target.name)."
     }
 
     private func toolBuildApp(_ name: String, _ html: String) async -> String {
@@ -483,6 +536,35 @@ final class AppState: ObservableObject {
             "created_by": uid
         ], returning: false) as [Agent]
         await loadAgents()
+    }
+
+    /// Manual agent edit from the UI. Pass only the fields you want to change.
+    func updateAgent(id: String, name: String? = nil, role: String? = nil,
+                     description: String? = nil, emoji: String? = nil,
+                     avatarColor: String? = nil, rankId: String?? = nil) async {
+        var patch: [String: Any] = [:]
+        if let v = name, !v.isEmpty { patch["name"] = v; patch["handle"] = v.lowercased().replacingOccurrences(of: " ", with: "-") }
+        if let v = role { patch["role"] = v }
+        if let v = description { patch["description"] = v }
+        if let v = emoji, !v.isEmpty { patch["emoji"] = v }
+        if let v = avatarColor { patch["avatar_color"] = v }
+        if let rk = rankId { patch["rank_id"] = rk.map { $0 as Any } ?? NSNull() }
+        guard !patch.isEmpty else { return }
+        try? await Supa.shared.update("agents?id=eq.\(id)", patch)
+        await loadAgents()
+    }
+
+    /// Upload a custom avatar image for an agent and save its URL.
+    func setAgentAvatarImage(id: String, data: Data) async {
+        guard let url = try? await Supa.shared.uploadFile(data: data, ext: "jpg", contentType: "image/jpeg") else { return }
+        try? await Supa.shared.update("agents?id=eq.\(id)", ["avatar_url": url])
+        await loadAgents()
+    }
+
+    /// Ranks for the current workspace (used by the agent editor).
+    func loadRanks() async -> [RankRow] {
+        guard let ws = workspace?.id else { return [] }
+        return (try? await Supa.shared.select("ranks?workspace_id=eq.\(ws)&select=id,name,badge,color&order=position")) ?? []
     }
 
     private func isoNow() -> String {

@@ -5,24 +5,61 @@ struct RunContext {
     let workspaceId: String
     let userId: String
     let threadId: String
+    var onActivity: (String, String) async -> Void = { _, _ in }   // label, tool — live UI
     let onCreateAgent: (String, String, String) async -> String
     let onDelegate: (String, String) async -> String
     let onBuildApp: (String, String) async -> String
     let onCreateRank: (String, String, String) async -> String   // name, badge, color
     let onAssignRank: (String, String) async -> String           // agent, rank
+    let onCreateTask: (String, String, String) async -> String   // name, prompt, agent handle
+    let onEditAgent: (String, [String: String]) async -> String  // target, {name,role,description,emoji,color}
 }
 
-struct RunResult { var text: String; var images: [String] = [] }
+struct RunResult { var text: String; var images: [String] = []; var steps: [String] = [] }
 
 /// Native agent runner. Calls the LLM directly and runs a multi-round tool loop
-/// covering the full website tool set + extra skills.
+/// covering the full website tool set + extra skills. Works with Groq (Llama) and
+/// NVIDIA-hosted Kimi K2.6 (thinking disabled so it stays coherent after tools).
 enum AgentRunner {
     static let groqModel = "llama-3.3-70b-versatile"
     static let kimiModel = "moonshotai/kimi-k2.6"
     static var groqKey: String { UserDefaults.standard.string(forKey: "askai.groqkey") ?? "" }
     static var nvidiaKey: String { UserDefaults.standard.string(forKey: "askai.nvkey") ?? "" }
+    /// Kimi is the default. Fall back to Groq only if explicitly chosen or no NVIDIA key.
     static var useKimi: Bool {
-        (UserDefaults.standard.string(forKey: "askai.model") ?? "groq") == "kimi" && !nvidiaKey.isEmpty
+        let pick = UserDefaults.standard.string(forKey: "askai.model") ?? "kimi"
+        if pick == "groq" { return false }
+        return !nvidiaKey.isEmpty
+    }
+
+    // Friendly progress labels shown live in the chat bubble.
+    private static func activityLabel(_ tool: String) -> String {
+        switch tool {
+        case "web_search": return "Searching the web…"
+        case "browse": return "Browsing the web…"
+        case "code": return "Running code…"
+        case "generate_image": return "Generating an image…"
+        case "world_cup": return "Checking the World Cup…"
+        case "weather": return "Checking the weather…"
+        case "currency": return "Converting currency…"
+        case "crypto_price": return "Checking crypto prices…"
+        case "stock_price": return "Checking the markets…"
+        case "dictionary": return "Looking up a word…"
+        case "wiki": return "Reading Wikipedia…"
+        case "translate": return "Translating…"
+        case "datetime": return "Checking the time…"
+        case "unit_convert": return "Converting units…"
+        case "qr_code": return "Making a QR code…"
+        case "calculate": return "Calculating…"
+        case "build_app": return "Building your app…"
+        case "create_agent": return "Creating an agent…"
+        case "delegate": return "Delegating to a teammate…"
+        case "create_rank": return "Creating a rank…"
+        case "assign_rank": return "Assigning a rank…"
+        case "create_task": return "Creating a task…"
+        case "edit_agent": return "Updating a teammate…"
+        default: return "Working…"
+        }
     }
 
     private static func fn(_ name: String, _ desc: String, _ props: [String: Any], _ req: [String]) -> [String: Any] {
@@ -32,8 +69,8 @@ enum AgentRunner {
     private static var tools: [[String: Any]] {
         let S: [String: Any] = ["type": "string"]; let N: [String: Any] = ["type": "number"]
         return [
-            fn("web_search", "Search the live web for current info.", ["query": S], ["query"]),
-            fn("browse", "Fetch a web page URL and return readable text.", ["url": S], ["url"]),
+            fn("web_search", "Search the live web for current info and facts.", ["query": S], ["query"]),
+            fn("browse", "Open a web page URL and read its text.", ["url": S], ["url"]),
             fn("code", "Run JavaScript to compute/transform. Use return or console.log.", ["source": S], ["source"]),
             fn("generate_image", "Generate an image from a text prompt (shown to the user).", ["prompt": S], ["prompt"]),
             fn("world_cup", "Live FIFA World Cup results, fixtures, standings.", [:], []),
@@ -46,11 +83,13 @@ enum AgentRunner {
             fn("wiki", "Concise Wikipedia summary of a topic.", ["topic": S], ["topic"]),
             fn("translate", "Translate text to another language.", ["text": S, "to": S], ["text", "to"]),
             fn("datetime", "Current date & time (optional IANA timezone).", ["timezone": S], []),
-            fn("unit_convert", "Convert between units (length, mass, temp, volume, speed, data).", ["value": N, "from": S, "to": S], ["value", "from", "to"]),
+            fn("unit_convert", "Convert between units (length, mass, temp, volume, speed).", ["value": N, "from": S, "to": S], ["value", "from", "to"]),
             fn("qr_code", "Generate a QR code image for text/URL.", ["data": S], ["data"]),
             fn("build_app", "Build & publish a complete self-contained HTML web app to Mini Apps.", ["name": S, "html": S], ["name", "html"]),
-            fn("create_agent", "Create a new AI agent on the team.", ["name": S, "role": S, "description": S], ["name", "role"]),
-            fn("delegate", "Assign a task to a teammate by handle; they reply here.", ["handle": S, "task": S], ["handle", "task"]),
+            fn("create_agent", "Create a new AI agent/teammate on the team.", ["name": S, "role": S, "description": S], ["name", "role"]),
+            fn("edit_agent", "Edit a teammate's name, role, description, emoji or color.", ["agent": S, "name": S, "role": S, "description": S, "emoji": S, "color": S], ["agent"]),
+            fn("delegate", "Assign a task to a teammate by handle; they reply in this thread.", ["handle": S, "task": S], ["handle", "task"]),
+            fn("create_task", "Create a task/job for the team (optionally for a specific agent).", ["name": S, "prompt": S, "agent": S], ["name", "prompt"]),
             fn("create_rank", "Create a rank/badge for agents.", ["name": S, "badge": S, "color": S], ["name"]),
             fn("assign_rank", "Assign a rank to an agent by name.", ["agent": S, "rank": S], ["agent", "rank"]),
         ]
@@ -58,26 +97,32 @@ enum AgentRunner {
 
     static func run(agent: Agent, history: [[String: Any]], roster: String, memories: [String] = [], ctx: RunContext) async -> RunResult {
         var images: [String] = []
+        var steps: [String] = []
         let memText = memories.isEmpty ? "" : "\n\nWorkspace knowledge & memory you should use:\n- " + memories.prefix(20).joined(separator: "\n- ")
+        let today = ISO8601DateFormatter().string(from: Date())
         let system = """
         You are \(agent.name), \(agent.role ?? "an AI agent") on the user's AskAI team. \
         \(agent.description ?? "") \(agent.system_prompt ?? "")
-        Teammates: \(roster).
-        You can browse the web, search, run code, generate images, build & publish web apps, create agents, \
-        delegate tasks to teammates (who then reply here), manage ranks, and use skills (weather, currency, \
-        crypto, stocks, dictionary, wiki, translate, world cup, unit convert, QR, datetime, calculate). \
-        Be proactive and autonomous: plan, use tools, and delegate to actually finish the job — don't just \
-        say you will. Answer in Markdown. Speak only as \(agent.name).\(memText)
+        Today is \(today). Teammates: \(roster).
+        You can browse the web, search, run code, generate images, build & publish web apps, create and \
+        edit agents, delegate tasks to teammates (who then reply here), create tasks, manage ranks, and use \
+        skills (weather, currency, crypto, stocks, dictionary, wiki, translate, world cup, unit convert, QR, \
+        datetime, calculate). Be proactive and autonomous: actually USE the tools to do real work and finish \
+        the job — never claim you did something you didn't. When you delegate, the teammate replies on their \
+        own — do NOT write their reply for them. Always end with a real, helpful answer in Markdown. \
+        Speak only as \(agent.name).\(memText)
         """
         var msgs: [[String: Any]] = [["role": "system", "content": system]]
         msgs.append(contentsOf: history)
 
         for round in 0..<5 {
             guard let message = await chat(msgs, tools: round < 4 ? tools : nil) else { break }
-            let calls = message["tool_calls"] as? [[String: Any]] ?? []
+            let calls = normalizeCalls(message["tool_calls"] as? [[String: Any]] ?? [])
             if calls.isEmpty {
                 let content = (message["content"] as? String) ?? ""
-                if !content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return RunResult(text: clean(content), images: images) }
+                if !content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    return RunResult(text: clean(content), images: images, steps: steps)
+                }
                 break
             }
             msgs.append(["role": "assistant", "content": message["content"] as? String ?? "", "tool_calls": calls])
@@ -85,15 +130,30 @@ enum AgentRunner {
                 let f = c["function"] as? [String: Any] ?? [:]
                 let name = f["name"] as? String ?? ""
                 let args = parseArgs(f["arguments"])
+                await ctx.onActivity(activityLabel(name), name)
+                steps.append(name)
                 let out = await runTool(name, args, ctx, &images)
                 msgs.append(["role": "tool", "tool_call_id": c["id"] as? String ?? "", "name": name, "content": String(out.prefix(6000))])
             }
         }
-        msgs.append(["role": "user", "content": "Give your final answer now in plain Markdown. Do not call tools."])
-        if let m = await chat(msgs, tools: nil), let content = m["content"] as? String, !content.isEmpty {
-            return RunResult(text: clean(content), images: images)
+        await ctx.onActivity("Writing the answer…", "final")
+        msgs.append(["role": "user", "content": "Now give your complete final answer in plain English Markdown. Do not call tools."])
+        if let m = await chat(msgs, tools: nil), let content = m["content"] as? String,
+           !content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return RunResult(text: clean(content), images: images, steps: steps)
         }
-        return RunResult(text: images.isEmpty ? "Done." : "Here's what I generated.", images: images)
+        return RunResult(text: images.isEmpty ? "I wasn't able to finish that — please try again." : "Here's what I generated.", images: images, steps: steps)
+    }
+
+    /// Keep only the fields the API needs when echoing tool_calls back (some
+    /// providers reject extra fields like `index`/`reasoning`).
+    private static func normalizeCalls(_ calls: [[String: Any]]) -> [[String: Any]] {
+        calls.compactMap { c in
+            guard let f = c["function"] as? [String: Any] else { return nil }
+            return ["id": c["id"] as? String ?? "call_\(Int.random(in: 1000...9999))",
+                    "type": "function",
+                    "function": ["name": f["name"] as? String ?? "", "arguments": f["arguments"] as? String ?? "{}"]]
+        }
     }
 
     // MARK: Chat
@@ -103,8 +163,19 @@ enum AgentRunner {
         let key = kimi ? nvidiaKey : groqKey
         let modelId = kimi ? kimiModel : groqModel
         if key.isEmpty { return nil }
-        var body: [String: Any] = ["model": modelId, "messages": messages, "temperature": kimi ? 0.8 : 0.6, "max_tokens": kimi ? 4096 : 2000]
+        var body: [String: Any] = ["model": modelId, "messages": messages, "temperature": 0.5, "max_tokens": 2048]
+        // Kimi K2.6 is a thinking model; after tool results the thinking template
+        // makes it produce garbage. Disable thinking so it stays coherent.
+        if kimi { body["chat_template_kwargs"] = ["thinking": false] }
         if let tools { body["tools"] = tools; body["tool_choice"] = "auto" }
+        // Retry once on transient failure.
+        for attempt in 0..<2 {
+            if let msg = await once(endpoint, key, body) { return msg }
+            if attempt == 0 { try? await Task.sleep(nanoseconds: 700_000_000) }
+        }
+        return nil
+    }
+    private static func once(_ endpoint: String, _ key: String, _ body: [String: Any]) async -> [String: Any]? {
         var req = URLRequest(url: URL(string: endpoint)!); req.httpMethod = "POST"
         req.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -146,7 +217,12 @@ enum AgentRunner {
         case "qr_code": return qrCode(str(args["data"]))
         case "build_app": return await ctx.onBuildApp(str(args["name"]), str(args["html"]))
         case "create_agent": return await ctx.onCreateAgent(str(args["name"]), str(args["role"]), str(args["description"]))
+        case "edit_agent":
+            var changes: [String: String] = [:]
+            for k in ["name", "role", "description", "emoji", "color"] where !str(args[k]).isEmpty { changes[k] = str(args[k]) }
+            return await ctx.onEditAgent(str(args["agent"]), changes)
         case "delegate": return await ctx.onDelegate(str(args["handle"]), str(args["task"]))
+        case "create_task": return await ctx.onCreateTask(str(args["name"]), str(args["prompt"]), str(args["agent"]))
         case "create_rank": return await ctx.onCreateRank(str(args["name"]), str(args["badge"]), str(args["color"]))
         case "assign_rank": return await ctx.onAssignRank(str(args["agent"]), str(args["rank"]))
         default: return "Unknown tool."
@@ -156,30 +232,65 @@ enum AgentRunner {
     // MARK: Skills
     private static func get(_ url: String) async -> Data? {
         guard let u = URL(string: url) else { return nil }
-        return try? await URLSession.shared.data(from: u).0
+        var req = URLRequest(url: u); req.timeoutInterval = 20
+        req.setValue("Mozilla/5.0 (iPhone) AskAI", forHTTPHeaderField: "User-Agent")
+        return try? await URLSession.shared.data(for: req).0
     }
-    private static func reader(_ url: String) async -> String {
-        guard let u = URL(string: "https://r.jina.ai/\(url)") else { return "" }
-        var req = URLRequest(url: u); req.setValue("markdown", forHTTPHeaderField: "X-Return-Format"); req.timeoutInterval = 30
-        if let (d, r) = try? await URLSession.shared.data(for: req), let h = r as? HTTPURLResponse, (200..<300).contains(h.statusCode),
-           let s = String(data: d, encoding: .utf8) { return s }
-        return ""
+    /// Fetch raw HTML/text from a URL (direct — no third-party reader).
+    private static func fetchText(_ url: String) async -> String {
+        guard let u = URL(string: url) else { return "" }
+        var req = URLRequest(url: u); req.timeoutInterval = 22
+        req.setValue("Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15", forHTTPHeaderField: "User-Agent")
+        req.setValue("text/html,application/xhtml+xml", forHTTPHeaderField: "Accept")
+        guard let (d, r) = try? await URLSession.shared.data(for: req), let h = r as? HTTPURLResponse,
+              (200..<300).contains(h.statusCode) else { return "" }
+        return String(data: d, encoding: .utf8) ?? String(decoding: d, as: UTF8.self)
+    }
+    /// Strip HTML tags/scripts and collapse whitespace into readable text.
+    private static func stripHTML(_ html: String) -> String {
+        var s = html
+        for pat in ["(?s)<script.*?</script>", "(?s)<style.*?</style>", "(?s)<head.*?</head>", "(?s)<!--.*?-->", "<[^>]+>"] {
+            s = s.replacingOccurrences(of: pat, with: " ", options: .regularExpression)
+        }
+        let ents = ["&amp;": "&", "&lt;": "<", "&gt;": ">", "&quot;": "\"", "&#39;": "'", "&nbsp;": " ", "&rsquo;": "'", "&ldquo;": "\"", "&rdquo;": "\""]
+        for (k, v) in ents { s = s.replacingOccurrences(of: k, with: v) }
+        s = s.replacingOccurrences(of: "&#x27;", with: "'")
+        s = s.replacingOccurrences(of: "[ \\t]+", with: " ", options: .regularExpression)
+        s = s.replacingOccurrences(of: "(\\s*\\n\\s*){2,}", with: "\n", options: .regularExpression)
+        return s.trimmingCharacters(in: .whitespacesAndNewlines)
     }
     private static func webSearch(_ query: String) async -> String {
         let q = query.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? query
-        var out = await reader("https://lite.duckduckgo.com/lite/?q=\(q)")
-        if let re = try? NSRegularExpression(pattern: "uddg=([^&)\\s]+)") {
-            let ns = out as NSString
-            for m in re.matches(in: out, range: NSRange(location: 0, length: ns.length)).reversed() {
-                if let dec = ns.substring(with: m.range(at: 1)).removingPercentEncoding { out = (out as NSString).replacingCharacters(in: m.range, with: dec) }
+        // DuckDuckGo HTML endpoints work directly and reliably.
+        for endpoint in ["https://html.duckduckgo.com/html/?q=\(q)", "https://lite.duckduckgo.com/lite/?q=\(q)"] {
+            let html = await fetchText(endpoint)
+            if html.isEmpty { continue }
+            var text = stripHTML(html)
+            // decode the uddg= redirect links so URLs are readable
+            if let re = try? NSRegularExpression(pattern: "uddg=([^&\\s]+)") {
+                let ns = text as NSString
+                for m in re.matches(in: text, range: NSRange(location: 0, length: ns.length)).reversed() {
+                    if let dec = ns.substring(with: m.range(at: 1)).removingPercentEncoding {
+                        text = (text as NSString).replacingCharacters(in: m.range, with: dec)
+                    }
+                }
             }
+            if text.count > 120 { return "Search results for \"\(query)\":\n" + String(text.prefix(5500)) }
         }
-        out = out.trimmingCharacters(in: .whitespacesAndNewlines)
-        return out.count > 100 ? String(out.prefix(6000)) : "No live results. Don't invent facts."
+        // Last resort: DuckDuckGo instant-answer JSON.
+        if let d = await get("https://api.duckduckgo.com/?q=\(q)&format=json&no_html=1&skip_disambig=1"),
+           let j = try? JSONSerialization.jsonObject(with: d) as? [String: Any] {
+            let abstract = (j["AbstractText"] as? String) ?? (j["Answer"] as? String) ?? ""
+            if !abstract.isEmpty { return abstract }
+        }
+        return "No live results found. Don't invent facts — say you couldn't find current info."
     }
     private static func browse(_ url: String) async -> String {
-        let t = await reader(url.hasPrefix("http") ? url : "https://\(url)")
-        return t.isEmpty ? "Couldn't fetch \(url)." : String(t.prefix(6000))
+        let full = url.hasPrefix("http") ? url : "https://\(url)"
+        let html = await fetchText(full)
+        if html.isEmpty { return "Couldn't open \(url)." }
+        let text = stripHTML(html)
+        return text.isEmpty ? "No readable content at \(url)." : "Content of \(url):\n" + String(text.prefix(6000))
     }
     private static func generateImage(_ prompt: String) async -> String? {
         let key = nvidiaKey; if key.isEmpty || prompt.isEmpty { return nil }
@@ -210,7 +321,7 @@ enum AgentRunner {
             let wc = ev.filter { ("\($0["strLeague"] ?? "")").localizedCaseInsensitiveContains("world cup") }
             if !wc.isEmpty { return "FIFA World Cup (\(today)):\n" + wc.prefix(12).map { "- \($0["strHomeTeam"] ?? "?") vs \($0["strAwayTeam"] ?? "?") (\($0["dateEvent"] ?? ""))" }.joined(separator: "\n") }
         }
-        return await webSearch("FIFA World Cup 2026 results fixtures standings")
+        return await webSearch("FIFA World Cup 2026 results fixtures standings today")
     }
     private static func weather(_ location: String) async -> String {
         let q = location.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? location

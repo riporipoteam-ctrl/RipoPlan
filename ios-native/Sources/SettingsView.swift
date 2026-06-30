@@ -7,8 +7,7 @@ struct SettingsView: View {
     @AppStorage("askai.brief") private var briefOn = false
     @AppStorage("askai.briefHour") private var briefHour = 8
     @AppStorage("askai.dark") private var darkMode = false
-    @AppStorage("askai.model") private var model = "groq"
-    @AppStorage("askai.nvkey") private var nvkey = ""
+    @AppStorage("askai.model") private var model = "kimi"
     @State private var confirmSignOut = false
     @State private var editName = false
     @State private var nameDraft = ""
@@ -59,27 +58,15 @@ struct SettingsView: View {
                         VStack(alignment: .leading, spacing: 10) {
                             SectionHeader(title: "Model")
                             Picker("Model", selection: $model) {
-                                Text("Llama 3.3 70B · fast").tag("groq")
-                                Text("Kimi K2.6 · NVIDIA").tag("kimi")
+                                Text("Kimi K2.6 · smart").tag("kimi")
+                                Text("Llama 3.3 · fast").tag("groq")
                             }
                             .pickerStyle(.segmented)
                             .onChange(of: model) { _ in Haptic.selection() }
                             Text(model == "kimi"
-                                 ? "Kimi K2.6 (Moonshot) running on NVIDIA — powerful, larger context."
-                                 : "Llama 3.3 70B on Groq — very fast responses.")
+                                 ? "Kimi K2.6 — the default. Powerful reasoning, large context, full tool use."
+                                 : "Llama 3.3 70B — lightning-fast replies for quick tasks.")
                                 .font(.caption).foregroundStyle(Theme.muted)
-                            if model == "kimi" {
-                                SecureField("NVIDIA API key (nvapi-…)", text: $nvkey)
-                                    .textInputAutocapitalization(.never).autocorrectionDisabled()
-                                    .foregroundStyle(Theme.text).tint(Theme.accent)
-                                    .padding(.horizontal, 12).padding(.vertical, 10)
-                                    .background(Theme.ink3, in: RoundedRectangle(cornerRadius: 12))
-                                    .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.stroke, lineWidth: 1))
-                                Text(nvkey.isEmpty
-                                     ? "Paste your NVIDIA key (build.nvidia.com) to enable Kimi. Stored only on this device."
-                                     : "Key saved on this device. Kimi K2.6 is active.")
-                                    .font(.caption2).foregroundStyle(nvkey.isEmpty ? Theme.warn : Theme.good)
-                            }
                         }
                         .card(radius: 16)
 

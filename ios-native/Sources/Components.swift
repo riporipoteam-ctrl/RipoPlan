@@ -9,12 +9,21 @@ struct Avatar: View {
     var color: String?
     var size: CGFloat = 36
     var spark: Bool = false
+    var imageURL: String? = nil
 
     var body: some View {
         ZStack {
             Circle().fill(Theme.ink2)
             Circle().stroke(Theme.stroke, lineWidth: 1)
-            if spark {
+            if let s = imageURL, !s.isEmpty, let u = URL(string: s) {
+                AsyncImage(url: u) { img in
+                    img.resizable().scaledToFill()
+                } placeholder: {
+                    Text(initial).font(.system(size: size * 0.42, weight: .semibold)).foregroundStyle(Theme.text)
+                }
+                .frame(width: size, height: size)
+                .clipShape(Circle())
+            } else if spark {
                 SparkMark(size: size * 0.5, color: Theme.text)
             } else {
                 Text(initial).font(.system(size: size * 0.42, weight: .semibold)).foregroundStyle(Theme.text)

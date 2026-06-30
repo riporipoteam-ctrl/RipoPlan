@@ -34,6 +34,8 @@ struct Agent: Codable, Identifiable, Hashable {
     var is_supervisor: Bool?
     var model: String?
     var system_prompt: String?
+    var avatar_url: String?
+    var rank_id: String?
     var last_run_at: String?
 
     static func == (l: Agent, r: Agent) -> Bool { l.id == r.id }
