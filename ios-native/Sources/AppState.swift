@@ -283,15 +283,72 @@ final class AppState: ObservableObject {
         agents.map { "\($0.name) (\($0.role ?? "agent"))" }.joined(separator: ", ")
     }
 
-    /// Fire-and-forget: run the agent natively and fill in its placeholder message.
-    private func runResponder(agent: Agent, threadId: String, placeholderId: String) {
+    /// Fire-and-forget: run the agent natively (with full tools) and fill in its
+    /// placeholder message. `extra` injects a delegated-task instruction.
+    private func runResponder(agent: Agent, threadId: String, placeholderId: String, extra: String? = nil) {
+        guard let ws = workspace?.id, let uid = Supa.shared.userId else { return }
         let roster = rosterString()
         Task {
-            let history = await buildHistory(threadId: threadId, selfAgentId: agent.id)
-            let reply = await AgentRunner.run(agent: agent, history: history, roster: roster)
+            var history = await buildHistory(threadId: threadId, selfAgentId: agent.id)
+            if let extra { history.append(["role": "user", "content": extra]) }
+            let ctx = RunContext(
+                workspaceId: ws, userId: uid, threadId: threadId,
+                onCreateAgent: { name, role, desc in await self.toolCreateAgent(name, role, desc) },
+                onDelegate: { handle, task in await self.toolDelegate(threadId: threadId, handle: handle, task: task) },
+                onBuildApp: { name, html in await self.toolBuildApp(name, html) }
+            )
+            let reply = await AgentRunner.run(agent: agent, history: history, roster: roster, ctx: ctx)
             try? await Supa.shared.update("messages?id=eq.\(placeholderId)",
                                           ["content": reply, "status": "complete", "activities": []])
+            await self.loadThreads()
         }
+    }
+
+    // MARK: - Agent tool actions (DB writes)
+
+    private func toolCreateAgent(_ name: String, _ role: String, _ desc: String) async -> String {
+        guard let ws = workspace?.id else { return "No workspace." }
+        let clean = name.trimmingCharacters(in: .whitespaces)
+        if clean.isEmpty { return "Need a name for the agent." }
+        if agents.contains(where: { $0.name.lowercased() == clean.lowercased() }) { return "An agent named \(clean) already exists." }
+        let handle = clean.lowercased().replacingOccurrences(of: " ", with: "-")
+        let r = role.isEmpty ? "AI Agent" : role
+        var row: [String: Any] = [
+            "workspace_id": ws, "name": clean, "handle": handle, "role": r,
+            "description": desc.isEmpty ? "\(clean) — a \(r)." : desc,
+            "emoji": "robot", "avatar_color": "#6e6e80",
+            "tools": ["web_search", "browse", "code"],
+            "system_prompt": "You are \(clean), \(r). \(desc) Use your tools to do real work. Speak only as yourself."
+        ]
+        if let uid = Supa.shared.userId { row["created_by"] = uid }
+        _ = try? await Supa.shared.insert("agents", row, returning: false) as [Agent]
+        await loadAgents()
+        return "✅ Created **\(clean)** (\(r)) and added them to the team. Delegate tasks to @\(handle)."
+    }
+
+    private func toolDelegate(threadId: String, handle: String, task: String) async -> String {
+        let h = handle.lowercased().replacingOccurrences(of: "@", with: "")
+        guard let target = agents.first(where: {
+            ($0.handle ?? "").lowercased() == h || $0.name.lowercased() == h || $0.name.lowercased().replacingOccurrences(of: " ", with: "-") == h
+        }) else { return "No teammate with handle @\(handle). Create one first with create_agent." }
+        guard let ws = workspace?.id else { return "No workspace." }
+        let ph: [Message] = (try? await Supa.shared.insert("messages", [
+            "workspace_id": ws, "thread_id": threadId, "sender_type": "agent", "agent_id": target.id,
+            "content": "", "status": "thinking", "activities": [["label": "Working on a delegated task", "status": "running"]]
+        ])) ?? []
+        if let pid = ph.first?.id {
+            runResponder(agent: target, threadId: threadId, placeholderId: pid, extra: "You've been delegated this task by a teammate: \(task)\nComplete it and reply with the result.")
+        }
+        return "✅ Delegated to **\(target.name)** (@\(target.handle ?? h)): \(task). They're on it."
+    }
+
+    private func toolBuildApp(_ name: String, _ html: String) async -> String {
+        guard let ws = workspace?.id else { return "No workspace." }
+        let nm = name.isEmpty ? "Web App" : name
+        var row: [String: Any] = ["workspace_id": ws, "name": nm, "html": html, "status": "ready"]
+        if let uid = Supa.shared.userId { row["created_by"] = uid }
+        _ = try? await Supa.shared.insert("mini_apps", row, returning: false) as [Message]
+        return "✅ Published **\(nm)** to Mini Apps — open the Apps page to preview it."
     }
 
     func renameThread(_ id: String, to title: String) async {
