@@ -9,9 +9,13 @@ struct AskAIApp: App {
     @Environment(\.scenePhase) private var phase
 
     init() {
+        let env = ProcessInfo.processInfo.environment
         // CI/screenshot hook: force dark mode for the dark-theme capture.
-        if ProcessInfo.processInfo.environment["ASKAI_DARK"] == "1" {
-            UserDefaults.standard.set(true, forKey: "askai.dark")
+        if env["ASKAI_DARK"] == "1" { UserDefaults.standard.set(true, forKey: "askai.dark") }
+        // When CI injects a session, skip onboarding so screens capture directly
+        // (unless explicitly capturing onboarding).
+        if env["ASKAI_ACCESS"] != nil && env["ASKAI_SCREEN"] != "onboarding" {
+            UserDefaults.standard.set(true, forKey: "askai.onboarded")
         }
         NotifManager.shared.configure()
         BGTaskScheduler.shared.register(forTaskWithIdentifier: kRefreshTaskId, using: nil) { task in

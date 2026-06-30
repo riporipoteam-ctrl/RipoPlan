@@ -80,12 +80,11 @@ jobs:
           }
 
           # Light theme (default)
+          snap onboarding   0 askai-onboarding.png
           snap home         0 askai-home.png
           snap sidebar      0 askai-sidebar.png
           snap chat         0 askai-chat.png
           snap agents       0 askai-agents.png
-          snap jobs         0 askai-jobs.png
-          snap integrations 0 askai-integrations.png
           snap settings     0 askai-settings.png
           # Dark theme (last — it persists the dark default)
           snap home         1 askai-home-dark.png
