@@ -178,9 +178,9 @@ struct MessageBubble: View {
         HStack(alignment: .top, spacing: 10) {
             if isUser { Spacer(minLength: 40) }
             if !isUser {
-                Avatar(name: app.agent(message.agent_id)?.name ?? "AskAI",
+                AgentAvatar(name: app.agent(message.agent_id)?.name ?? "AskAI",
                        color: app.agent(message.agent_id)?.avatar_color,
-                       size: 28, spark: message.agent_id == nil,
+                       size: 30, online: false, spark: message.agent_id == nil,
                        imageURL: app.agent(message.agent_id)?.avatar_url)
             }
             VStack(alignment: isUser ? .trailing : .leading, spacing: 6) {

@@ -76,7 +76,7 @@ struct AgentCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
-                Avatar(name: agent.name, color: agent.avatar_color, size: 42, spark: agent.is_supervisor == true, imageURL: agent.avatar_url)
+                AgentAvatar(name: agent.name, color: agent.avatar_color, size: 46, online: agent.status != "paused", spark: agent.is_supervisor == true, imageURL: agent.avatar_url)
                 Spacer()
                 if agent.is_supervisor == true {
                     Text("Chief").font(.caption2.bold()).foregroundStyle(Theme.warn)
@@ -123,8 +123,7 @@ struct AgentDetailView: View {
             Theme.backdrop.ignoresSafeArea()
             ScrollView {
                 VStack(spacing: 18) {
-                    Avatar(name: live.name, color: live.avatar_color, size: 84, spark: live.is_supervisor == true, imageURL: live.avatar_url)
-                        .shadow(color: Color(hexString: live.avatar_color).opacity(0.5), radius: 20, y: 10)
+                    AgentAvatar(name: live.name, color: live.avatar_color, size: 92, online: live.status != "paused", spark: live.is_supervisor == true, imageURL: live.avatar_url)
                     Text(live.name).font(.title.bold()).foregroundStyle(Theme.text)
                     Text(live.role ?? "AI Agent").font(.subheadline).foregroundStyle(Theme.accent)
                     if let rn = rankName {

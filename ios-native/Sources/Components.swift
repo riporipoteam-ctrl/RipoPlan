@@ -34,6 +34,49 @@ struct Avatar: View {
     private var initial: String { String(name.trimmingCharacters(in: .whitespaces).prefix(1)).uppercased() }
 }
 
+/// Nebula-style colorful agent tile: rounded square with a gradient fill (from the
+/// agent's color), bold white initial (or custom image), and a green online dot.
+struct AgentAvatar: View {
+    var name: String
+    var color: String?
+    var size: CGFloat = 44
+    var online: Bool = true
+    var spark: Bool = false
+    var imageURL: String? = nil
+
+    private var base: Color { Color(hexString: color ?? "#6e6e80") }
+    var body: some View {
+        let r = size * 0.30
+        ZStack(alignment: .bottomTrailing) {
+            ZStack {
+                RoundedRectangle(cornerRadius: r, style: .continuous)
+                    .fill(LinearGradient(colors: [base.opacity(0.95), base.opacity(0.65)],
+                                         startPoint: .topLeading, endPoint: .bottomTrailing))
+                if let s = imageURL, !s.isEmpty, let u = URL(string: s) {
+                    AsyncImage(url: u) { img in img.resizable().scaledToFill() } placeholder: { Color.clear }
+                        .frame(width: size, height: size)
+                        .clipShape(RoundedRectangle(cornerRadius: r, style: .continuous))
+                } else if spark {
+                    SparkMark(size: size * 0.5, color: .white)
+                } else {
+                    Text(String(name.trimmingCharacters(in: .whitespaces).prefix(1)).uppercased())
+                        .font(.system(size: size * 0.44, weight: .bold)).foregroundStyle(.white)
+                }
+            }
+            .frame(width: size, height: size)
+            .overlay(RoundedRectangle(cornerRadius: r, style: .continuous).stroke(.white.opacity(0.18), lineWidth: 1))
+            .shadow(color: base.opacity(0.35), radius: 6, y: 3)
+            if online {
+                Circle().fill(Theme.good)
+                    .frame(width: size * 0.26, height: size * 0.26)
+                    .overlay(Circle().stroke(Theme.ink, lineWidth: size * 0.05))
+                    .offset(x: size * 0.06, y: size * 0.06)
+            }
+        }
+        .frame(width: size, height: size)
+    }
+}
+
 /// Animated "thinking" dots.
 struct TypingDots: View {
     @State private var t = 0.0
