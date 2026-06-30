@@ -325,7 +325,9 @@ final class AppState: ObservableObject {
                 onCreateRank: { n, b, c in await self.toolCreateRank(n, b, c) },
                 onAssignRank: { a, rk in await self.toolAssignRank(a, rk) },
                 onCreateTask: { n, p, who in await self.toolCreateTask(n, p, who) },
-                onEditAgent: { target, changes in await self.toolEditAgent(target, changes) }
+                onEditAgent: { target, changes in await self.toolEditAgent(target, changes) },
+                onCreateChannel: { name, desc in await self.toolCreateChannel(name, desc) },
+                onSaveKnowledge: { title, content in await self.toolSaveKnowledge(title, content) }
             )
             let res = await AgentRunner.run(agent: r, history: history, roster: roster, memories: mems, ctx: ctx)
             var patch: [String: Any] = ["content": res.text, "status": "complete", "activities": []]
@@ -371,7 +373,9 @@ final class AppState: ObservableObject {
                 onCreateRank: { name, badge, color in await self.toolCreateRank(name, badge, color) },
                 onAssignRank: { ag, rank in await self.toolAssignRank(ag, rank) },
                 onCreateTask: { name, prompt, who in await self.toolCreateTask(name, prompt, who) },
-                onEditAgent: { target, changes in await self.toolEditAgent(target, changes) }
+                onEditAgent: { target, changes in await self.toolEditAgent(target, changes) },
+                onCreateChannel: { name, desc in await self.toolCreateChannel(name, desc) },
+                onSaveKnowledge: { title, content in await self.toolSaveKnowledge(title, content) }
             )
             let result = await AgentRunner.run(agent: agent, history: history, roster: roster, memories: mems, ctx: ctx)
             var patch: [String: Any] = ["content": result.text, "status": "complete", "activities": []]
@@ -495,6 +499,30 @@ final class AppState: ObservableObject {
         try? await Supa.shared.update("agents?id=eq.\(ag.id)", patch)
         await loadAgents()
         return "✅ Updated **\(ag.name)**."
+    }
+
+    /// Create a team chat channel (used by agents and the UI).
+    private func toolCreateChannel(_ name: String, _ desc: String) async -> String {
+        let clean = name.trimmingCharacters(in: .whitespaces).replacingOccurrences(of: "#", with: "")
+        guard let ws = workspace?.id, !clean.isEmpty else { return "Need a channel name." }
+        var row: [String: Any] = ["workspace_id": ws, "name": clean.lowercased().replacingOccurrences(of: " ", with: "-"), "description": desc]
+        if let uid = Supa.shared.userId { row["created_by"] = uid }
+        _ = try? await Supa.shared.insert("channels", row, returning: false) as [Message]
+        return "✅ Created the #\(clean) channel."
+    }
+
+    /// Save a fact/note into the workspace knowledge base.
+    private func toolSaveKnowledge(_ title: String, _ content: String) async -> String {
+        guard let ws = workspace?.id, !title.isEmpty || !content.isEmpty else { return "Nothing to save." }
+        var row: [String: Any] = ["workspace_id": ws, "title": title.isEmpty ? "Note" : title, "content": content, "source": "agent"]
+        if let uid = Supa.shared.userId { row["created_by"] = uid }
+        _ = try? await Supa.shared.insert("knowledge", row, returning: false) as [Message]
+        return "✅ Saved \"\(title.isEmpty ? "note" : title)\" to the knowledge base."
+    }
+
+    /// Public channel create for the UI.
+    func createChannel(name: String, description: String) async {
+        _ = await toolCreateChannel(name, description)
     }
 
     // MARK: - Agent tool actions (DB writes)

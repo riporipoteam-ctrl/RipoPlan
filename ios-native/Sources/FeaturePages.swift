@@ -334,6 +334,9 @@ struct ChannelsView: View {
     @EnvironmentObject var app: AppState
     @State private var channels: [Channel] = []
     @State private var loading = true
+    @State private var showAdd = false
+    @State private var newName = ""
+    @State private var newDesc = ""
 
     var body: some View {
         NavigationStack {
@@ -344,6 +347,12 @@ struct ChannelsView: View {
                     VStack(spacing: 10) {
                         Image(systemName: "number").font(.largeTitle).foregroundStyle(Theme.muted)
                         Text("No channels").foregroundStyle(Theme.text).font(.headline)
+                        Button { showAdd = true } label: {
+                            Label("New channel", systemImage: "plus")
+                                .font(.subheadline.weight(.semibold)).foregroundStyle(Theme.onAccent)
+                                .padding(.horizontal, 16).padding(.vertical, 10)
+                                .background(Theme.accent, in: Capsule())
+                        }
                     }
                 } else {
                     ScrollView {
@@ -369,6 +378,15 @@ struct ChannelsView: View {
                 }
             }
             .sheetChrome("Channels")
+            .toolbar { ToolbarItem(placement: .navigationBarTrailing) {
+                Button { showAdd = true } label: { Image(systemName: "plus").fontWeight(.semibold).foregroundStyle(Theme.text) }
+            } }
+            .alert("New channel", isPresented: $showAdd) {
+                TextField("Channel name", text: $newName)
+                TextField("Description (optional)", text: $newDesc)
+                Button("Cancel", role: .cancel) {}
+                Button("Create") { Task { await app.createChannel(name: newName, description: newDesc); newName = ""; newDesc = ""; await load() } }
+            }
             .task { await load() }
         }
     }

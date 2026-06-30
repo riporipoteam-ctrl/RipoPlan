@@ -13,6 +13,8 @@ struct RunContext {
     let onAssignRank: (String, String) async -> String           // agent, rank
     let onCreateTask: (String, String, String) async -> String   // name, prompt, agent handle
     let onEditAgent: (String, [String: String]) async -> String  // target, {name,role,description,emoji,color}
+    var onCreateChannel: (String, String) async -> String = { _, _ in "Channels can't be created here." }
+    var onSaveKnowledge: (String, String) async -> String = { _, _ in "Knowledge saved." }
 }
 
 struct RunResult { var text: String; var images: [String] = []; var steps: [String] = [] }
@@ -92,6 +94,17 @@ enum AgentRunner {
             fn("create_task", "Create a task/job for the team (optionally for a specific agent).", ["name": S, "prompt": S, "agent": S], ["name", "prompt"]),
             fn("create_rank", "Create a rank/badge for agents.", ["name": S, "badge": S, "color": S], ["name"]),
             fn("assign_rank", "Assign a rank to an agent by name.", ["agent": S, "rank": S], ["agent", "rank"]),
+            fn("create_channel", "Create a team chat channel.", ["name": S, "description": S], ["name"]),
+            fn("save_knowledge", "Save a fact/note to the workspace knowledge base for later.", ["title": S, "content": S], ["title", "content"]),
+            fn("news", "Latest news headlines on a topic (or top world news).", ["topic": S], []),
+            fn("hacker_news", "Top Hacker News stories about a topic.", ["query": S], ["query"]),
+            fn("reddit", "Top Reddit posts for a query or subreddit.", ["query": S], ["query"]),
+            fn("github_search", "Search GitHub repositories.", ["query": S], ["query"]),
+            fn("jokes", "Get a random joke.", [:], []),
+            fn("quote", "Get an inspirational quote.", [:], []),
+            fn("advice", "Get a random piece of advice.", [:], []),
+            fn("random_fact", "Get a random interesting fact.", [:], []),
+            fn("summarize_url", "Fetch a URL and return its key content to summarize.", ["url": S], ["url"]),
         ]
     }
 
@@ -116,6 +129,7 @@ enum AgentRunner {
         var msgs: [[String: Any]] = [["role": "system", "content": system]]
         msgs.append(contentsOf: history)
 
+        var lastToolOutput = ""
         for round in 0..<6 {
             guard let message = await chat(msgs, tools: tools) else { break }
             let rawContent = (message["content"] as? String) ?? ""
@@ -137,6 +151,7 @@ enum AgentRunner {
                 await ctx.onActivity(activityLabel(name), name)
                 steps.append(name)
                 let out = await runTool(name, args, ctx, &images)
+                if !out.isEmpty { lastToolOutput = out }
                 msgs.append(["role": "tool", "tool_call_id": c["id"] as? String ?? "", "name": name, "content": String(out.prefix(6000))])
             }
         }
@@ -146,7 +161,10 @@ enum AgentRunner {
             let cleaned = clean((m["content"] as? String) ?? "")
             if !cleaned.isEmpty { return RunResult(text: cleaned, images: images, steps: steps) }
         }
-        return RunResult(text: images.isEmpty ? "I wasn't able to finish that — please try again." : "Here's what I generated.", images: images, steps: steps)
+        // Last resort: never show a blank/failure — summarize what the tools found.
+        if !images.isEmpty { return RunResult(text: "Here's what I generated.", images: images, steps: steps) }
+        if !lastToolOutput.isEmpty { return RunResult(text: clean(lastToolOutput), images: images, steps: steps) }
+        return RunResult(text: "I couldn't complete that just now — please try again in a moment.", images: images, steps: steps)
     }
 
     /// Parse Kimi/K2-style tool calls emitted as plain text special tokens, e.g.
@@ -190,8 +208,16 @@ enum AgentRunner {
     }
 
     // MARK: Chat
+    /// Try the chosen provider; if it fails or returns nothing usable, automatically
+    /// fall back to the other provider so an agent always answers.
     private static func chat(_ messages: [[String: Any]], tools: [[String: Any]]?) async -> [String: Any]? {
-        let kimi = useKimi
+        let primaryKimi = useKimi
+        if let m = await callProvider(kimi: primaryKimi, messages: messages, tools: tools) { return m }
+        // Fallback to the other provider (Kimi⇄Groq) if its key exists.
+        if let m = await callProvider(kimi: !primaryKimi, messages: messages, tools: tools) { return m }
+        return nil
+    }
+    private static func callProvider(kimi: Bool, messages: [[String: Any]], tools: [[String: Any]]?) async -> [String: Any]? {
         let endpoint = kimi ? "https://integrate.api.nvidia.com/v1/chat/completions" : "https://api.groq.com/openai/v1/chat/completions"
         let key = kimi ? nvidiaKey : groqKey
         let modelId = kimi ? kimiModel : groqModel
@@ -204,7 +230,7 @@ enum AgentRunner {
         // Retry once on transient failure.
         for attempt in 0..<2 {
             if let msg = await once(endpoint, key, body) { return msg }
-            if attempt == 0 { try? await Task.sleep(nanoseconds: 700_000_000) }
+            if attempt == 0 { try? await Task.sleep(nanoseconds: 600_000_000) }
         }
         return nil
     }
@@ -258,6 +284,17 @@ enum AgentRunner {
         case "create_task": return await ctx.onCreateTask(str(args["name"]), str(args["prompt"]), str(args["agent"]))
         case "create_rank": return await ctx.onCreateRank(str(args["name"]), str(args["badge"]), str(args["color"]))
         case "assign_rank": return await ctx.onAssignRank(str(args["agent"]), str(args["rank"]))
+        case "create_channel": return await ctx.onCreateChannel(str(args["name"]), str(args["description"]))
+        case "save_knowledge": return await ctx.onSaveKnowledge(str(args["title"]), str(args["content"]))
+        case "news": return await news(str(args["topic"]))
+        case "hacker_news": return await hackerNews(str(args["query"]))
+        case "reddit": return await reddit(str(args["query"]))
+        case "github_search": return await githubSearch(str(args["query"]))
+        case "jokes": return await joke()
+        case "quote": return await quote()
+        case "advice": return await advice()
+        case "random_fact": return await randomFact()
+        case "summarize_url": return await browse(str(args["url"]))
         default: return "Unknown tool."
         }
     }
@@ -406,6 +443,68 @@ enum AgentRunner {
               let j = try? JSONSerialization.jsonObject(with: d) as? [String: Any], let extract = j["extract"] as? String, !extract.isEmpty
         else { return await webSearch("\(topic) wikipedia") }
         return "**\(j["title"] as? String ?? topic)**\n\(extract)"
+    }
+    private static func news(_ topic: String) async -> String {
+        let t = topic.isEmpty ? "world" : topic
+        let hn = await hackerNews(t)
+        let rd = await reddit(topic.isEmpty ? "worldnews" : t)
+        let combined = [hn, rd].filter { !$0.isEmpty && !$0.hasPrefix("No ") }.joined(separator: "\n\n")
+        return combined.isEmpty ? await webSearch("\(t) latest news today") : "Latest on \(t):\n\(combined)"
+    }
+    private static func hackerNews(_ query: String) async -> String {
+        let q = query.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? query
+        guard let d = await get("https://hn.algolia.com/api/v1/search?tags=story&query=\(q)&hitsPerPage=6"),
+              let j = try? JSONSerialization.jsonObject(with: d) as? [String: Any], let hits = j["hits"] as? [[String: Any]], !hits.isEmpty
+        else { return "No Hacker News stories for \(query)." }
+        return "Hacker News — \(query):\n" + hits.prefix(6).compactMap { h in
+            guard let title = h["title"] as? String else { return nil }
+            return "- \(title) (\(h["points"] as? Int ?? 0) pts) \(h["url"] as? String ?? "")"
+        }.joined(separator: "\n")
+    }
+    private static func reddit(_ query: String) async -> String {
+        let isSub = !query.contains(" ") && !query.isEmpty
+        let path = isSub ? "https://www.reddit.com/r/\(query)/top.json?limit=6&t=week"
+                         : "https://www.reddit.com/search.json?q=\(query.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? query)&limit=6&sort=top"
+        guard let d = await get(path), let j = try? JSONSerialization.jsonObject(with: d) as? [String: Any],
+              let data = j["data"] as? [String: Any], let children = data["children"] as? [[String: Any]], !children.isEmpty
+        else { return "No Reddit posts for \(query)." }
+        return "Reddit — \(query):\n" + children.prefix(6).compactMap { c in
+            guard let p = c["data"] as? [String: Any], let title = p["title"] as? String else { return nil }
+            return "- \(title) (r/\(p["subreddit"] as? String ?? "?"), \(p["ups"] as? Int ?? 0)↑)"
+        }.joined(separator: "\n")
+    }
+    private static func githubSearch(_ query: String) async -> String {
+        let q = query.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? query
+        guard let d = await get("https://api.github.com/search/repositories?q=\(q)&sort=stars&per_page=6"),
+              let j = try? JSONSerialization.jsonObject(with: d) as? [String: Any], let items = j["items"] as? [[String: Any]], !items.isEmpty
+        else { return "No GitHub repos for \(query)." }
+        return "GitHub — \(query):\n" + items.prefix(6).compactMap { r in
+            guard let name = r["full_name"] as? String else { return nil }
+            return "- \(name) ⭐\(r["stargazers_count"] as? Int ?? 0) — \(r["description"] as? String ?? "")"
+        }.joined(separator: "\n")
+    }
+    private static func joke() async -> String {
+        if let d = await get("https://official-joke-api.appspot.com/random_joke"),
+           let j = try? JSONSerialization.jsonObject(with: d) as? [String: Any],
+           let s = j["setup"] as? String, let p = j["punchline"] as? String { return "\(s)\n\(p)" }
+        return "Why don't scientists trust atoms? Because they make up everything."
+    }
+    private static func quote() async -> String {
+        if let d = await get("https://zenquotes.io/api/random"),
+           let arr = try? JSONSerialization.jsonObject(with: d) as? [[String: Any]], let q = arr.first,
+           let text = q["q"] as? String, let auth = q["a"] as? String { return "\"\(text)\" — \(auth)" }
+        return "\"The best way to predict the future is to invent it.\" — Alan Kay"
+    }
+    private static func advice() async -> String {
+        if let d = await get("https://api.adviceslip.com/advice"),
+           let j = try? JSONSerialization.jsonObject(with: d) as? [String: Any],
+           let slip = j["slip"] as? [String: Any], let a = slip["advice"] as? String { return a }
+        return "Take a deep breath and start with one small step."
+    }
+    private static func randomFact() async -> String {
+        if let d = await get("https://uselessfacts.jsph.pl/api/v2/facts/random?language=en"),
+           let j = try? JSONSerialization.jsonObject(with: d) as? [String: Any], let t = j["text"] as? String { return t }
+        return "Honey never spoils — edible honey has been found in ancient Egyptian tombs."
     }
     private static func translate(_ text: String, _ to: String) async -> String {
         let q = text.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? text
