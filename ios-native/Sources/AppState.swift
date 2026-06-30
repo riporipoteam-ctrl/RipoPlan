@@ -31,6 +31,26 @@ final class AppState: ObservableObject {
         "translate", "datetime", "unit_convert", "qr_code", "build_app",
         "create_agent", "edit_agent", "delegate", "create_task", "create_rank", "assign_rank"
     ]
+    /// Turn a list of executed tool names into activity rows for the message trail.
+    static func stepActivities(_ steps: [String]) -> [[String: Any]] {
+        let label: [String: String] = [
+            "web_search": "Searched the web", "browse": "Browsed a page", "code": "Ran code",
+            "generate_image": "Generated an image", "world_cup": "Checked the World Cup", "weather": "Checked weather",
+            "currency": "Converted currency", "crypto_price": "Checked crypto", "stock_price": "Checked markets",
+            "dictionary": "Looked up a word", "wiki": "Read Wikipedia", "translate": "Translated",
+            "datetime": "Checked the time", "unit_convert": "Converted units", "qr_code": "Made a QR code",
+            "calculate": "Calculated", "build_app": "Built an app", "create_agent": "Created an agent",
+            "edit_agent": "Updated a teammate", "delegate": "Delegated a task", "create_task": "Created a task",
+            "create_rank": "Created a rank", "assign_rank": "Assigned a rank", "create_channel": "Created a channel",
+            "save_knowledge": "Saved knowledge", "news": "Checked the news", "hacker_news": "Read Hacker News",
+            "reddit": "Checked Reddit", "github_search": "Searched GitHub", "jokes": "Told a joke",
+            "quote": "Found a quote", "advice": "Gave advice", "random_fact": "Shared a fact",
+            "summarize_url": "Summarized a page", "country_info": "Looked up a country", "holidays": "Checked holidays",
+            "books": "Searched books", "trivia": "Pulled trivia", "ip_info": "Looked up an IP", "color_palette": "Made a palette"
+        ]
+        return steps.prefix(20).map { ["label": label[$0] ?? "Used \($0)", "tool": $0, "status": "done"] }
+    }
+
     static func hermesPrompt(name: String, role: String, desc: String) -> String {
         "You are \(name), \(role). \(desc) You run on the Hermes agent engine with full tool access — "
         + "you can browse the web, search, run code, generate images, build apps, manage the team and use "
@@ -330,7 +350,8 @@ final class AppState: ObservableObject {
                 onSaveKnowledge: { title, content in await self.toolSaveKnowledge(title, content) }
             )
             let res = await AgentRunner.run(agent: r, history: history, roster: roster, memories: mems, ctx: ctx)
-            var patch: [String: Any] = ["content": res.text, "status": "complete", "activities": []]
+            var patch: [String: Any] = ["content": res.text, "status": "complete",
+                                        "activities": AppState.stepActivities(res.steps)]
             if !res.images.isEmpty { patch["attachments"] = res.images.map { ["type": "image", "url": $0, "name": "Generated image"] } }
             try? await Supa.shared.update("messages?id=eq.\(pid)", patch)
         }
@@ -378,7 +399,8 @@ final class AppState: ObservableObject {
                 onSaveKnowledge: { title, content in await self.toolSaveKnowledge(title, content) }
             )
             let result = await AgentRunner.run(agent: agent, history: history, roster: roster, memories: mems, ctx: ctx)
-            var patch: [String: Any] = ["content": result.text, "status": "complete", "activities": []]
+            var patch: [String: Any] = ["content": result.text, "status": "complete",
+                                        "activities": AppState.stepActivities(result.steps)]
             if !result.images.isEmpty {
                 patch["attachments"] = result.images.map { ["type": "image", "url": $0, "name": "Generated image"] }
             }

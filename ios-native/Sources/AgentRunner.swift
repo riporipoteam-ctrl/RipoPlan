@@ -105,6 +105,12 @@ enum AgentRunner {
             fn("advice", "Get a random piece of advice.", [:], []),
             fn("random_fact", "Get a random interesting fact.", [:], []),
             fn("summarize_url", "Fetch a URL and return its key content to summarize.", ["url": S], ["url"]),
+            fn("country_info", "Facts about a country (capital, population, region, currency).", ["country": S], ["country"]),
+            fn("holidays", "Upcoming public holidays for a country code (e.g. US, GB).", ["country_code": S], ["country_code"]),
+            fn("books", "Search books by title/author.", ["query": S], ["query"]),
+            fn("trivia", "Get a trivia question with the answer.", [:], []),
+            fn("ip_info", "Geolocation & ISP info for an IP address.", ["ip": S], ["ip"]),
+            fn("color_palette", "Generate a hex color palette from a base color or theme.", ["base": S], []),
         ]
     }
 
@@ -295,6 +301,12 @@ enum AgentRunner {
         case "advice": return await advice()
         case "random_fact": return await randomFact()
         case "summarize_url": return await browse(str(args["url"]))
+        case "country_info": return await countryInfo(str(args["country"]))
+        case "holidays": return await holidays(str(args["country_code"]))
+        case "books": return await books(str(args["query"]))
+        case "trivia": return await trivia()
+        case "ip_info": return await ipInfo(str(args["ip"]))
+        case "color_palette": return colorPalette(str(args["base"]))
         default: return "Unknown tool."
         }
     }
@@ -518,6 +530,62 @@ enum AgentRunner {
         if let d = await get("https://uselessfacts.jsph.pl/api/v2/facts/random?language=en"),
            let j = try? JSONSerialization.jsonObject(with: d) as? [String: Any], let t = j["text"] as? String { return t }
         return "Honey never spoils — edible honey has been found in ancient Egyptian tombs."
+    }
+    private static func countryInfo(_ country: String) async -> String {
+        let q = country.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? country
+        guard let d = await get("https://restcountries.com/v3.1/name/\(q)?fields=name,capital,population,region,subregion,currencies,languages,flag"),
+              let arr = try? JSONSerialization.jsonObject(with: d) as? [[String: Any]], let c = arr.first else { return "No info for \(country)." }
+        let name = (c["name"] as? [String: Any])?["common"] as? String ?? country
+        let cap = (c["capital"] as? [String])?.first ?? "?"
+        let pop = c["population"] as? Int ?? 0
+        let cur = (c["currencies"] as? [String: Any])?.values.compactMap { ($0 as? [String: Any])?["name"] as? String }.first ?? "?"
+        let langs = (c["languages"] as? [String: String])?.values.joined(separator: ", ") ?? "?"
+        return "\(c["flag"] as? String ?? "") **\(name)** — capital \(cap), population \(pop.formatted()), \(c["region"] as? String ?? "")/\(c["subregion"] as? String ?? ""), currency \(cur), languages: \(langs)."
+    }
+    private static func holidays(_ code: String) async -> String {
+        let cc = code.uppercased().trimmingCharacters(in: .whitespaces)
+        guard let d = await get("https://date.nager.at/api/v3/NextPublicHolidays/\(cc)"),
+              let arr = try? JSONSerialization.jsonObject(with: d) as? [[String: Any]], !arr.isEmpty else { return "No holidays for \(code)." }
+        return "Upcoming holidays in \(cc):\n" + arr.prefix(8).compactMap { h in
+            guard let date = h["date"] as? String, let name = h["name"] as? String else { return nil }
+            return "- \(date): \(name)"
+        }.joined(separator: "\n")
+    }
+    private static func books(_ query: String) async -> String {
+        let q = query.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? query
+        guard let d = await get("https://openlibrary.org/search.json?q=\(q)&limit=5&fields=title,author_name,first_publish_year"),
+              let j = try? JSONSerialization.jsonObject(with: d) as? [String: Any], let docs = j["docs"] as? [[String: Any]], !docs.isEmpty else { return "No books for \(query)." }
+        return "Books — \(query):\n" + docs.prefix(5).compactMap { b in
+            guard let title = b["title"] as? String else { return nil }
+            let auth = (b["author_name"] as? [String])?.first ?? "?"
+            return "- \(title) by \(auth) (\(b["first_publish_year"] as? Int ?? 0))"
+        }.joined(separator: "\n")
+    }
+    private static func trivia() async -> String {
+        guard let d = await get("https://opentdb.com/api.php?amount=1&type=multiple"),
+              let j = try? JSONSerialization.jsonObject(with: d) as? [String: Any],
+              let results = j["results"] as? [[String: Any]], let q = results.first,
+              let question = q["question"] as? String, let answer = q["correct_answer"] as? String else { return "No trivia available." }
+        let decoded = stripHTML(question)
+        return "Trivia (\(q["category"] as? String ?? "")): \(decoded)\nAnswer: \(stripHTML(answer))"
+    }
+    private static func ipInfo(_ ip: String) async -> String {
+        let target = ip.trimmingCharacters(in: .whitespaces)
+        guard let d = await get("https://ipapi.co/\(target)/json/"),
+              let j = try? JSONSerialization.jsonObject(with: d) as? [String: Any], j["error"] == nil else { return "No info for IP \(ip)." }
+        return "IP \(target): \(j["city"] ?? "?"), \(j["region"] ?? "?"), \(j["country_name"] ?? "?") — ISP: \(j["org"] ?? "?"), timezone \(j["timezone"] ?? "?")."
+    }
+    private static func colorPalette(_ base: String) -> String {
+        // Generate a 5-color palette. If a hex base is given, build around it; else random.
+        func hex(_ r: Int, _ g: Int, _ b: Int) -> String { String(format: "#%02X%02X%02X", max(0, min(255, r)), max(0, min(255, g)), max(0, min(255, b))) }
+        var r = Int.random(in: 30...220), g = Int.random(in: 30...220), b = Int.random(in: 30...220)
+        if base.range(of: "^#?[0-9a-fA-F]{6}$", options: .regularExpression) != nil {
+            let h = base.replacingOccurrences(of: "#", with: "")
+            r = Int(h.prefix(2), radix: 16) ?? r; g = Int(h.dropFirst(2).prefix(2), radix: 16) ?? g; b = Int(h.dropFirst(4).prefix(2), radix: 16) ?? b
+        }
+        let steps = [-60, -30, 0, 40, 80]
+        let pal = steps.map { hex(r + $0, g + $0, b + $0) }
+        return "Palette\(base.isEmpty ? "" : " (\(base))"): " + pal.joined(separator: " ") + "\n" + pal.map { "![\($0)](https://singlecolorimage.com/get/\($0.dropFirst())/80x80)" }.joined(separator: " ")
     }
     private static func translate(_ text: String, _ to: String) async -> String {
         let q = text.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? text

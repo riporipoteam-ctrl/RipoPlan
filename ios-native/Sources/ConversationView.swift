@@ -170,9 +170,14 @@ struct ConversationView: View {
 struct MessageBubble: View {
     @EnvironmentObject var app: AppState
     let message: Message
+    @State private var showTrail = false
 
     var isUser: Bool { message.sender_type == "user" }
     var thinking: Bool { message.status == "thinking" }
+    private var doneActivities: [Activity] {
+        guard !isUser, message.status == "complete" else { return [] }
+        return (message.activities ?? []).filter { ($0.status ?? "") == "done" && ($0.label != nil) }
+    }
 
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
@@ -214,9 +219,40 @@ struct MessageBubble: View {
                             .textSelection(.enabled)
                     }
                 }
+                if !doneActivities.isEmpty { activityTrail }
             }
             if !isUser { Spacer(minLength: 40) }
         }
+    }
+
+    // Nebula-style "N actions · view" trail under a completed agent message.
+    @ViewBuilder private var activityTrail: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Button { withAnimation(.easeInOut(duration: 0.2)) { showTrail.toggle() } } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: "bolt.fill").font(.caption2)
+                    Text("\(doneActivities.count) action\(doneActivities.count == 1 ? "" : "s")").font(.caption.weight(.semibold))
+                    Image(systemName: showTrail ? "chevron.up" : "chevron.down").font(.caption2)
+                }
+                .foregroundStyle(Theme.muted)
+                .padding(.horizontal, 10).padding(.vertical, 5)
+                .background(Theme.ink2, in: Capsule())
+            }
+            .buttonStyle(.plain)
+            if showTrail {
+                VStack(alignment: .leading, spacing: 4) {
+                    ForEach(Array(doneActivities.enumerated()), id: \.offset) { _, a in
+                        HStack(spacing: 7) {
+                            Image(systemName: "checkmark.circle.fill").font(.caption2).foregroundStyle(Theme.good)
+                            Text(a.label ?? "").font(.caption).foregroundStyle(Theme.muted)
+                        }
+                    }
+                }
+                .padding(.leading, 4)
+                .transition(.opacity.combined(with: .move(edge: .top)))
+            }
+        }
+        .padding(.top, 2)
     }
 
     @ViewBuilder private var activityOrDots: some View {
