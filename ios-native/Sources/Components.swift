@@ -77,6 +77,20 @@ struct AgentAvatar: View {
     }
 }
 
+/// Centered date separator between days of messages (Nebula-style).
+struct DayDivider: View {
+    let label: String
+    var body: some View {
+        HStack(spacing: 10) {
+            Rectangle().fill(Theme.stroke).frame(height: 1)
+            Text(label).font(.caption2.weight(.semibold)).foregroundStyle(Theme.muted)
+                .fixedSize()
+            Rectangle().fill(Theme.stroke).frame(height: 1)
+        }
+        .padding(.vertical, 2)
+    }
+}
+
 /// Animated "thinking" dots.
 struct TypingDots: View {
     @State private var t = 0.0
@@ -187,6 +201,7 @@ struct InputBar: View {
             .padding(.horizontal, 6)
             .padding(.vertical, 6)
             .liquidGlass(26)
+            .overlay(RoundedRectangle(cornerRadius: 26, style: .continuous).stroke(Theme.stroke, lineWidth: 1))
         }
     }
 

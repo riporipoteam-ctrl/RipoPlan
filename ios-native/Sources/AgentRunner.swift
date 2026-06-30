@@ -111,6 +111,10 @@ enum AgentRunner {
             fn("trivia", "Get a trivia question with the answer.", [:], []),
             fn("ip_info", "Geolocation & ISP info for an IP address.", ["ip": S], ["ip"]),
             fn("color_palette", "Generate a hex color palette from a base color or theme.", ["base": S], []),
+            fn("recipe", "Find a cooking recipe with ingredients & steps.", ["dish": S], ["dish"]),
+            fn("cocktail", "Get a cocktail recipe.", ["name": S], ["name"]),
+            fn("pokemon", "Look up a Pokémon's stats and types.", ["name": S], ["name"]),
+            fn("sunrise_sunset", "Sunrise & sunset times for a place.", ["location": S], ["location"]),
         ]
     }
 
@@ -307,6 +311,10 @@ enum AgentRunner {
         case "trivia": return await trivia()
         case "ip_info": return await ipInfo(str(args["ip"]))
         case "color_palette": return colorPalette(str(args["base"]))
+        case "recipe": return await recipe(str(args["dish"]))
+        case "cocktail": return await cocktail(str(args["name"]))
+        case "pokemon": return await pokemon(str(args["name"]))
+        case "sunrise_sunset": return await sunriseSunset(str(args["location"]))
         default: return "Unknown tool."
         }
     }
@@ -586,6 +594,57 @@ enum AgentRunner {
         let steps = [-60, -30, 0, 40, 80]
         let pal = steps.map { hex(r + $0, g + $0, b + $0) }
         return "Palette\(base.isEmpty ? "" : " (\(base))"): " + pal.joined(separator: " ") + "\n" + pal.map { "![\($0)](https://singlecolorimage.com/get/\($0.dropFirst())/80x80)" }.joined(separator: " ")
+    }
+    private static func recipe(_ dish: String) async -> String {
+        let q = dish.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? dish
+        guard let d = await get("https://www.themealdb.com/api/json/v1/1/search.php?s=\(q)"),
+              let j = try? JSONSerialization.jsonObject(with: d) as? [String: Any],
+              let meals = j["meals"] as? [[String: Any]], let m = meals.first else { return "No recipe found for \(dish)." }
+        var ingredients: [String] = []
+        for i in 1...20 {
+            let ing = (m["strIngredient\(i)"] as? String)?.trimmingCharacters(in: .whitespaces) ?? ""
+            let mea = (m["strMeasure\(i)"] as? String)?.trimmingCharacters(in: .whitespaces) ?? ""
+            if !ing.isEmpty { ingredients.append("\(mea) \(ing)".trimmingCharacters(in: .whitespaces)) }
+        }
+        let steps = (m["strInstructions"] as? String ?? "").prefix(1200)
+        return "**\(m["strMeal"] as? String ?? dish)**\nIngredients: \(ingredients.joined(separator: ", "))\n\nSteps: \(steps)"
+    }
+    private static func cocktail(_ name: String) async -> String {
+        let q = name.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? name
+        guard let d = await get("https://www.thecocktaildb.com/api/json/v1/1/search.php?s=\(q)"),
+              let j = try? JSONSerialization.jsonObject(with: d) as? [String: Any],
+              let drinks = j["drinks"] as? [[String: Any]], let dr = drinks.first else { return "No cocktail found for \(name)." }
+        var ingredients: [String] = []
+        for i in 1...15 {
+            let ing = (dr["strIngredient\(i)"] as? String)?.trimmingCharacters(in: .whitespaces) ?? ""
+            let mea = (dr["strMeasure\(i)"] as? String)?.trimmingCharacters(in: .whitespaces) ?? ""
+            if !ing.isEmpty { ingredients.append("\(mea) \(ing)".trimmingCharacters(in: .whitespaces)) }
+        }
+        return "🍸 **\(dr["strDrink"] as? String ?? name)** (\(dr["strAlcoholic"] as? String ?? ""))\nIngredients: \(ingredients.joined(separator: ", "))\n\(dr["strInstructions"] as? String ?? "")"
+    }
+    private static func pokemon(_ name: String) async -> String {
+        let n = name.lowercased().trimmingCharacters(in: .whitespaces)
+        guard let d = await get("https://pokeapi.co/api/v2/pokemon/\(n)"),
+              let j = try? JSONSerialization.jsonObject(with: d) as? [String: Any] else { return "No Pokémon called \(name)." }
+        let types = (j["types"] as? [[String: Any]])?.compactMap { (($0["type"] as? [String: Any])?["name"] as? String) }.joined(separator: ", ") ?? "?"
+        let abilities = (j["abilities"] as? [[String: Any]])?.prefix(3).compactMap { (($0["ability"] as? [String: Any])?["name"] as? String) }.joined(separator: ", ") ?? "?"
+        let h = (j["height"] as? Int).map { Double($0) / 10 } ?? 0
+        let w = (j["weight"] as? Int).map { Double($0) / 10 } ?? 0
+        return "**\(name.capitalized)** (#\(j["id"] as? Int ?? 0)) — type: \(types), abilities: \(abilities), height \(h)m, weight \(w)kg."
+    }
+    private static func sunriseSunset(_ location: String) async -> String {
+        let q = location.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? location
+        guard let gd = await get("https://geocoding-api.open-meteo.com/v1/search?count=1&name=\(q)"),
+              let gj = try? JSONSerialization.jsonObject(with: gd) as? [String: Any],
+              let res = (gj["results"] as? [[String: Any]])?.first, let lat = res["latitude"] as? Double, let lon = res["longitude"] as? Double
+        else { return "Couldn't find \(location)." }
+        guard let d = await get("https://api.sunrise-sunset.org/json?lat=\(lat)&lng=\(lon)&formatted=0"),
+              let j = try? JSONSerialization.jsonObject(with: d) as? [String: Any], let r = j["results"] as? [String: Any] else { return "Sun times unavailable." }
+        func t(_ k: String) -> String {
+            guard let s = r[k] as? String, let dt = ISO8601DateFormatter().date(from: s) else { return "?" }
+            let f = DateFormatter(); f.dateFormat = "HH:mm 'UTC'"; f.timeZone = TimeZone(identifier: "UTC"); return f.string(from: dt)
+        }
+        return "Sun times for \(res["name"] ?? location): sunrise \(t("sunrise")), sunset \(t("sunset")), day length \((r["day_length"] as? Int).map { "\($0/3600)h \(($0%3600)/60)m" } ?? "?")."
     }
     private static func translate(_ text: String, _ to: String) async -> String {
         let q = text.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? text

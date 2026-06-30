@@ -99,7 +99,10 @@ struct ConversationView: View {
             ScrollView {
                 LazyVStack(spacing: 16) {
                     if !loaded { ProgressView().tint(Theme.muted).padding(.top, 40) }
-                    ForEach(messages) { m in MessageBubble(message: m).id(m.id) }
+                    ForEach(Array(messages.enumerated()), id: \.element.id) { idx, m in
+                        if let label = dayDivider(at: idx) { DayDivider(label: label) }
+                        MessageBubble(message: m).id(m.id)
+                    }
                     Color.clear.frame(height: 1).id("end")
                 }
                 .padding(16)
@@ -112,6 +115,17 @@ struct ConversationView: View {
     }
 
     private var lastStamp: String { (messages.last?.status ?? "") + String(messages.last?.content?.count ?? 0) }
+
+    /// Returns a date label ("Today"/"Yesterday"/"Mar 5") when the message at
+    /// `idx` starts a new day vs the previous message.
+    private func dayDivider(at idx: Int) -> String? {
+        guard idx < messages.count, let d = RelTime.parse(messages[idx].created_at) else { return nil }
+        let cal = Calendar.current
+        if idx > 0, let prev = RelTime.parse(messages[idx - 1].created_at), cal.isDate(prev, inSameDayAs: d) { return nil }
+        if cal.isDateInToday(d) { return "Today" }
+        if cal.isDateInYesterday(d) { return "Yesterday" }
+        let f = DateFormatter(); f.dateFormat = "MMM d"; return f.string(from: d)
+    }
 
     private func poll() async {
         guard let tid = threadId else { messages = []; loaded = false; return }
