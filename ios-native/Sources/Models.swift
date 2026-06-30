@@ -33,6 +33,7 @@ struct Agent: Codable, Identifiable, Hashable {
     var status: String?
     var is_supervisor: Bool?
     var model: String?
+    var system_prompt: String?
     var last_run_at: String?
 
     static func == (l: Agent, r: Agent) -> Bool { l.id == r.id }
