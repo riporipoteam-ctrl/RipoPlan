@@ -237,6 +237,9 @@ final class AppState: ObservableObject {
                 ])
                 if let pid = ph.first?.id {
                     runResponder(agent: r, threadId: threadIdReal, placeholderId: pid)
+                    // Safety net: enqueue a server-side task so the Cloudflare worker
+                    // finishes this reply even if the app is closed mid-run.
+                    await enqueueBackgroundTask(messageId: pid, threadId: threadIdReal, agentId: r.id, prompt: promptText)
                 }
             }
             _ = promptText  // (kept for clarity; history is rebuilt per responder)
@@ -432,6 +435,18 @@ final class AppState: ObservableObject {
         try? await Supa.shared.update("agents?id=eq.\(ag.id)", ["rank_id": rank.id])
         await loadAgents()
         return "✅ \(ag.name) is now **\(rank.name)**."
+    }
+
+    /// Enqueue a background task so the server (Cloudflare worker cron) completes
+    /// this agent reply even if the app is closed before the native runner finishes.
+    private func enqueueBackgroundTask(messageId: String, threadId: String, agentId: String, prompt: String) async {
+        guard let ws = workspace?.id else { return }
+        var row: [String: Any] = [
+            "workspace_id": ws, "thread_id": threadId, "agent_id": agentId,
+            "message_id": messageId, "prompt": prompt, "status": "pending"
+        ]
+        if let uid = Supa.shared.userId { row["created_by"] = uid }
+        _ = try? await Supa.shared.insert("background_tasks", row, returning: false) as [Message]
     }
 
     /// Update a placeholder message's live activity label (shows "Searching…" etc).

@@ -296,9 +296,21 @@ async function runServerAgent(env: Env, system: string, history: any[]): Promise
 async function processTasks(env: Env, limit = 5): Promise<number> {
   const db = sb(env);
   if (!db.ok) return 0;
-  const tasks = await db.get(`background_tasks?status=eq.pending&order=created_at.asc&limit=${limit}`);
+  // Only act as a fallback: pick tasks at least ~45s old, so the in-app native
+  // runner gets first crack. If its message is already complete, skip.
+  const cutoff = new Date(Date.now() - 90000).toISOString();
+  const tasks = await db.get(`background_tasks?status=eq.pending&created_at=lt.${cutoff}&order=created_at.asc&limit=${limit}`);
   let done = 0;
   for (const t of tasks as any[]) {
+    // If the app already finished this reply, don't redo it.
+    if (t.message_id) {
+      const mrow = await db.get(`messages?id=eq.${t.message_id}&select=status`);
+      const st = (mrow as any[])[0]?.status;
+      if (st === "complete" || st === "error") {
+        await db.patch(`background_tasks?id=eq.${t.id}`, { status: "done", updated_at: new Date().toISOString() });
+        continue;
+      }
+    }
     await db.patch(`background_tasks?id=eq.${t.id}`, { status: "running", attempts: (t.attempts || 0) + 1, updated_at: new Date().toISOString() });
     try {
       const agentRows = t.agent_id ? await db.get(`agents?id=eq.${t.agent_id}`) : [];
