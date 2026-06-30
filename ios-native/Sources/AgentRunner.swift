@@ -363,23 +363,36 @@ enum AgentRunner {
         return text.isEmpty ? "No readable content at \(url)." : "Content of \(url):\n" + String(text.prefix(6000))
     }
     private static func generateImage(_ prompt: String) async -> String? {
-        let key = nvidiaKey; if key.isEmpty || prompt.isEmpty { return nil }
-        for model in ["black-forest-labs/flux.2-klein-4b", "black-forest-labs/flux.1-dev"] {
-            let payload: [String: Any] = model.contains("klein")
-                ? ["prompt": prompt, "width": 1024, "height": 1024, "seed": Int.random(in: 0..<1_000_000), "steps": 4]
-                : ["prompt": prompt, "mode": "base", "width": 1024, "height": 1024, "steps": 30, "cfg_scale": 4.5, "samples": 1, "seed": Int.random(in: 0..<1_000_000)]
-            var req = URLRequest(url: URL(string: "https://ai.api.nvidia.com/v1/genai/\(model)")!)
-            req.httpMethod = "POST"; req.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
-            req.setValue("application/json", forHTTPHeaderField: "Content-Type"); req.setValue("application/json", forHTTPHeaderField: "Accept")
-            req.timeoutInterval = 120; req.httpBody = try? JSONSerialization.data(withJSONObject: payload)
-            guard let (d, r) = try? await URLSession.shared.data(for: req), let h = r as? HTTPURLResponse, (200..<300).contains(h.statusCode),
-                  let j = try? JSONSerialization.jsonObject(with: d) as? [String: Any] else { continue }
-            var b64 = ""
-            if let arts = j["artifacts"] as? [[String: Any]], let s = arts.first?["base64"] as? String { b64 = s }
-            else if let arr = j["data"] as? [[String: Any]], let s = arr.first?["b64_json"] as? String { b64 = s }
-            else if let s = j["image"] as? String { b64 = s.replacingOccurrences(of: "^data:image/\\w+;base64,", with: "", options: .regularExpression) }
-            guard !b64.isEmpty, let data = Data(base64Encoded: b64), data.count > 5000 else { continue }
-            if let url = try? await Supa.shared.uploadFile(data: data, ext: "jpg", contentType: "image/jpeg") { return url }
+        if prompt.isEmpty { return nil }
+        // 1) NVIDIA FLUX (high quality) when a key is present.
+        let key = nvidiaKey
+        if !key.isEmpty {
+            for model in ["black-forest-labs/flux.2-klein-4b", "black-forest-labs/flux.1-dev"] {
+                let payload: [String: Any] = model.contains("klein")
+                    ? ["prompt": prompt, "width": 1024, "height": 1024, "seed": Int.random(in: 0..<1_000_000), "steps": 4]
+                    : ["prompt": prompt, "mode": "base", "width": 1024, "height": 1024, "steps": 30, "cfg_scale": 4.5, "samples": 1, "seed": Int.random(in: 0..<1_000_000)]
+                var req = URLRequest(url: URL(string: "https://ai.api.nvidia.com/v1/genai/\(model)")!)
+                req.httpMethod = "POST"; req.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
+                req.setValue("application/json", forHTTPHeaderField: "Content-Type"); req.setValue("application/json", forHTTPHeaderField: "Accept")
+                req.timeoutInterval = 120; req.httpBody = try? JSONSerialization.data(withJSONObject: payload)
+                guard let (d, r) = try? await URLSession.shared.data(for: req), let h = r as? HTTPURLResponse, (200..<300).contains(h.statusCode),
+                      let j = try? JSONSerialization.jsonObject(with: d) as? [String: Any] else { continue }
+                var b64 = ""
+                if let arts = j["artifacts"] as? [[String: Any]], let s = arts.first?["base64"] as? String { b64 = s }
+                else if let arr = j["data"] as? [[String: Any]], let s = arr.first?["b64_json"] as? String { b64 = s }
+                else if let s = j["image"] as? String { b64 = s.replacingOccurrences(of: "^data:image/\\w+;base64,", with: "", options: .regularExpression) }
+                guard !b64.isEmpty, let data = Data(base64Encoded: b64), data.count > 5000 else { continue }
+                if let url = try? await Supa.shared.uploadFile(data: data, ext: "jpg", contentType: "image/jpeg") { return url }
+            }
+        }
+        // 2) Free fallback: Pollinations.ai (FLUX, no key) — always available.
+        let enc = prompt.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? prompt
+        let purl = "https://image.pollinations.ai/prompt/\(enc)?width=1024&height=1024&nologo=true&seed=\(Int.random(in: 0..<1_000_000))"
+        if let u = URL(string: purl) {
+            var req = URLRequest(url: u); req.timeoutInterval = 120
+            if let (d, r) = try? await URLSession.shared.data(for: req), let h = r as? HTTPURLResponse,
+               (200..<300).contains(h.statusCode), d.count > 5000,
+               let url = try? await Supa.shared.uploadFile(data: d, ext: "jpg", contentType: "image/jpeg") { return url }
         }
         return nil
     }
