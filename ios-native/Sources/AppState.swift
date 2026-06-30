@@ -23,6 +23,20 @@ final class AppState: ObservableObject {
         s.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? s
     }
 
+    /// Every agent runs on the Hermes engine with the full tool set (browser,
+    /// search, code, images + all skills). Used when creating agents.
+    static let hermesTools: [String] = [
+        "web_search", "browse", "code", "generate_image", "world_cup", "weather",
+        "calculate", "currency", "crypto_price", "stock_price", "dictionary", "wiki",
+        "translate", "datetime", "unit_convert", "qr_code", "build_app",
+        "create_agent", "edit_agent", "delegate", "create_task", "create_rank", "assign_rank"
+    ]
+    static func hermesPrompt(name: String, role: String, desc: String) -> String {
+        "You are \(name), \(role). \(desc) You run on the Hermes agent engine with full tool access — "
+        + "you can browse the web, search, run code, generate images, build apps, manage the team and use "
+        + "every skill. Be proactive: actually use your tools to finish the job. Speak only as yourself."
+    }
+
     // MARK: - Boot / auth
 
     func boot() async {
@@ -481,13 +495,13 @@ final class AppState: ObservableObject {
             "workspace_id": ws, "name": clean, "handle": handle, "role": r,
             "description": desc.isEmpty ? "\(clean) — a \(r)." : desc,
             "emoji": "robot", "avatar_color": "#6e6e80",
-            "tools": ["web_search", "browse", "code"],
-            "system_prompt": "You are \(clean), \(r). \(desc) Use your tools to do real work. Speak only as yourself."
+            "tools": AppState.hermesTools,
+            "system_prompt": AppState.hermesPrompt(name: clean, role: r, desc: desc)
         ]
         if let uid = Supa.shared.userId { row["created_by"] = uid }
         _ = try? await Supa.shared.insert("agents", row, returning: false) as [Agent]
         await loadAgents()
-        return "✅ Created **\(clean)** (\(r)) and added them to the team. Delegate tasks to @\(handle)."
+        return "✅ Created **\(clean)** (\(r)) on the Hermes engine with full tool access (browser, search, code, images & more). Delegate tasks to @\(handle)."
     }
 
     private func toolDelegate(threadId: String, handle: String, task: String) async -> String {
@@ -530,9 +544,9 @@ final class AppState: ObservableObject {
         _ = try? await Supa.shared.insert("agents", [
             "workspace_id": ws, "name": name, "handle": handle, "role": role,
             "description": description,
-            "emoji": "robot", "avatar_color": "#a855f7",
-            "tools": ["web_search", "browse", "code"],
-            "system_prompt": "You are \(name), \(role). \(description) Use your tools to do real work. Speak only as yourself.",
+            "emoji": "robot", "avatar_color": "#6e6e80",
+            "tools": AppState.hermesTools,
+            "system_prompt": AppState.hermesPrompt(name: name, role: role, desc: description),
             "created_by": uid
         ], returning: false) as [Agent]
         await loadAgents()

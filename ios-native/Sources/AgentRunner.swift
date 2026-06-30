@@ -101,7 +101,8 @@ enum AgentRunner {
         let memText = memories.isEmpty ? "" : "\n\nWorkspace knowledge & memory you should use:\n- " + memories.prefix(20).joined(separator: "\n- ")
         let today = ISO8601DateFormatter().string(from: Date())
         let system = """
-        You are \(agent.name), \(agent.role ?? "an AI agent") on the user's AskAI team. \
+        You are \(agent.name), \(agent.role ?? "an AI agent") on the user's AskAI team, running on the \
+        Hermes agent engine with full tool access. \
         \(agent.description ?? "") \(agent.system_prompt ?? "")
         Today is \(today). Teammates: \(roster).
         You can browse the web, search, run code, generate images, build & publish web apps, create and \

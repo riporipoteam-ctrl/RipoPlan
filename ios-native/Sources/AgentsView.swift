@@ -102,8 +102,9 @@ struct AgentDetailView: View {
                     }
 
                     VStack(alignment: .leading, spacing: 12) {
-                        infoRow("Skills", "Web · Search · Code · Images · 15+ tools")
-                        infoRow("Model", live.is_supervisor == true ? "Kimi K2.6" : (live.model ?? "Kimi K2.6"))
+                        infoRow("Engine", "Hermes · full tool access")
+                        infoRow("Skills", "Browser · Search · Code · Images · 20+ tools")
+                        infoRow("Model", "Kimi K2.6")
                         infoRow("Last active", live.last_run_at != nil ? RelTime.ago(live.last_run_at) + " ago" : "—")
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
