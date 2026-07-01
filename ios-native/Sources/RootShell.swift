@@ -15,6 +15,7 @@ struct RootShell: View {
     @State private var sheet: ShellSheet?
     @State private var dragX: CGFloat = 0
     @StateObject private var updater = UpdateChecker()
+    @AppStorage("askai.model") private var model = "kimi"
 
     private let sidebarWidth: CGFloat = 300
 
@@ -22,11 +23,16 @@ struct RootShell: View {
         ZStack(alignment: .leading) {
             // Main column — content scrolls under the frosted top bar.
             ZStack(alignment: .top) {
-                ConversationView(threadId: $current, topInset: 50)
+                ConversationView(threadId: $current, topInset: 54)
                 VStack(spacing: 0) {
                     topBar
                     UpdateBanner(updater: updater)
                 }
+                .background(
+                    LinearGradient(colors: [Theme.ink, Theme.ink.opacity(0.85), Theme.ink.opacity(0)],
+                                   startPoint: .top, endPoint: .bottom)
+                        .frame(height: 90).allowsHitTesting(false), alignment: .top
+                )
             }
             .background(AuroraBackground())
             .disabled(showSidebar)
@@ -70,24 +76,40 @@ struct RootShell: View {
         .task { await updater.check() }
     }
 
+    // Gemini-style floating top bar: circular menu, center model selector pill,
+    // circular new-chat. Content scrolls underneath.
     private var topBar: some View {
-        ZStack {
-            Text(current == nil ? "AskAI" : (app.threads.first { $0.id == current }?.title ?? "Chat"))
-                .font(.headline).foregroundStyle(Theme.text).lineLimit(1).padding(.horizontal, 60)
-            HStack {
-                Button { Haptic.light(); setSidebar(true) } label: {
-                    Image(systemName: "line.3.horizontal").font(.system(size: 19, weight: .semibold)).foregroundStyle(Theme.text)
-                }
-                Spacer()
-                Button { Haptic.light(); current = nil } label: {
-                    Image(systemName: "square.and.pencil").font(.system(size: 18, weight: .medium)).foregroundStyle(Theme.text)
-                }
+        HStack(spacing: 10) {
+            Button { Haptic.light(); setSidebar(true) } label: {
+                Image(systemName: "line.3.horizontal").font(.system(size: 18, weight: .semibold)).foregroundStyle(Theme.text)
+                    .frame(width: 40, height: 40).background(.ultraThinMaterial, in: Circle())
+                    .overlay(Circle().stroke(Theme.stroke, lineWidth: 1))
             }
-            .padding(.horizontal, 16)
+            Spacer(minLength: 0)
+            Menu {
+                Picker("Model", selection: $model) {
+                    Label("Kimi K2.6 · smart", systemImage: "sparkles").tag("kimi")
+                    Label("Llama 3.3 · fast", systemImage: "bolt.fill").tag("groq")
+                }
+            } label: {
+                HStack(spacing: 6) {
+                    SparkMark(size: 15, color: Theme.text)
+                    Text(model == "groq" ? "Llama 3.3" : "Kimi K2.6").font(.subheadline.weight(.semibold)).foregroundStyle(Theme.text)
+                    Image(systemName: "chevron.down").font(.caption2.weight(.bold)).foregroundStyle(Theme.muted)
+                }
+                .padding(.horizontal, 14).padding(.vertical, 9)
+                .background(.ultraThinMaterial, in: Capsule())
+                .overlay(Capsule().stroke(Theme.stroke, lineWidth: 1))
+            }
+            .onChange(of: model) { _ in Haptic.selection() }
+            Spacer(minLength: 0)
+            Button { Haptic.light(); current = nil } label: {
+                Image(systemName: "square.and.pencil").font(.system(size: 17, weight: .medium)).foregroundStyle(Theme.text)
+                    .frame(width: 40, height: 40).background(.ultraThinMaterial, in: Circle())
+                    .overlay(Circle().stroke(Theme.stroke, lineWidth: 1))
+            }
         }
-        .frame(height: 50)
-        .background(.ultraThinMaterial)
-        .overlay(Divider().overlay(Theme.stroke), alignment: .bottom)
+        .padding(.horizontal, 14).padding(.top, 6).padding(.bottom, 4)
     }
 
     private var edgeDrag: some Gesture {

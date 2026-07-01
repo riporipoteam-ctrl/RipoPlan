@@ -9,6 +9,12 @@ struct Suggestion: Identifiable {
     let seed: String
 }
 
+/// Tracks the chat's bottom marker position to toggle the scroll-to-bottom button.
+struct BottomOffsetKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = nextValue() }
+}
+
 let SUGGESTIONS: [Suggestion] = [
     .init(icon: "soccerball", label: "Follow the World Cup", seed: "Give me a live World Cup update — recent results, today's fixtures, and the standings."),
     .init(icon: "photo", label: "Create an image", seed: "Create an image of "),
@@ -35,6 +41,7 @@ struct ConversationView: View {
     @State private var showPhoto = false
     @State private var showFiles = false
     @State private var heroIn = false
+    @State private var showScrollDown = false
 
     var body: some View {
         ZStack(alignment: .bottom) {
@@ -104,21 +111,46 @@ struct ConversationView: View {
     // MARK: Existing thread
     private var thread: some View {
         ScrollViewReader { proxy in
-            ScrollView {
-                LazyVStack(spacing: 16) {
-                    if !loaded { ProgressView().tint(Theme.muted).padding(.top, 40) }
-                    ForEach(Array(messages.enumerated()), id: \.element.id) { idx, m in
-                        if let label = dayDivider(at: idx) { DayDivider(label: label) }
-                        MessageBubble(message: m).id(m.id)
+            GeometryReader { geo in
+                ScrollView {
+                    LazyVStack(spacing: 16) {
+                        if !loaded { ProgressView().tint(Theme.muted).padding(.top, 40) }
+                        ForEach(Array(messages.enumerated()), id: \.element.id) { idx, m in
+                            if let label = dayDivider(at: idx) { DayDivider(label: label) }
+                            MessageBubble(message: m).id(m.id)
+                        }
+                        Color.clear.frame(height: 1).id("end")
+                            .background(GeometryReader { g in
+                                Color.clear.preference(key: BottomOffsetKey.self,
+                                                       value: g.frame(in: .named("scroll")).maxY)
+                            })
                     }
-                    Color.clear.frame(height: 1).id("end")
+                    .padding(16)
+                    .padding(.top, topInset)
+                    .padding(.bottom, 84)
                 }
-                .padding(16)
-                .padding(.top, topInset)
-                .padding(.bottom, 84)
+                .coordinateSpace(name: "scroll")
+                .onPreferenceChange(BottomOffsetKey.self) { y in
+                    // Bottom marker below the visible area → user scrolled up.
+                    showScrollDown = y > geo.size.height + 120
+                }
             }
             .onChange(of: messages.count) { _ in withAnimation(.easeOut(duration: 0.2)) { proxy.scrollTo("end", anchor: .bottom) } }
             .onChange(of: lastStamp) { _ in withAnimation(.easeOut(duration: 0.2)) { proxy.scrollTo("end", anchor: .bottom) } }
+            .overlay(alignment: .bottom) {
+                if showScrollDown {
+                    Button { withAnimation { proxy.scrollTo("end", anchor: .bottom) } } label: {
+                        Image(systemName: "arrow.down").font(.system(size: 16, weight: .semibold)).foregroundStyle(Theme.text)
+                            .frame(width: 38, height: 38)
+                            .background(.ultraThinMaterial, in: Circle())
+                            .overlay(Circle().stroke(Theme.stroke, lineWidth: 1))
+                            .shadow(color: .black.opacity(0.15), radius: 6, y: 3)
+                    }
+                    .buttonStyle(.plain)
+                    .padding(.bottom, 92)
+                    .transition(.scale.combined(with: .opacity))
+                }
+            }
         }
     }
 
@@ -218,9 +250,14 @@ struct MessageBubble: View {
                 if let atts = message.attachments, !atts.isEmpty {
                     ForEach(atts) { a in
                         if a.type == "image" {
-                            AsyncImage(url: URL(string: a.url)) { i in i.resizable().scaledToFit() } placeholder: { Theme.ink3 }
-                                .frame(maxWidth: 220, maxHeight: 220)
-                                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                            AsyncImage(url: URL(string: a.url)) { i in i.resizable().scaledToFit() } placeholder: {
+                                RoundedRectangle(cornerRadius: 18, style: .continuous).fill(Theme.ink3)
+                                    .frame(height: 220)
+                                    .overlay(ProgressView().tint(Theme.muted))
+                            }
+                            .frame(maxWidth: 300)
+                            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                            .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).stroke(Theme.stroke, lineWidth: 1))
                         } else if a.type == "link" {
                             BrowserPreviewCard(url: a.url, host: a.name, shot: a.preview)
                         } else {
