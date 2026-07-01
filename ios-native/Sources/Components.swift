@@ -83,6 +83,8 @@ struct BrowserPreviewCard: View {
     let url: String
     let host: String
     var shot: String?
+    var live: Bool = false
+    @State private var pulse = false
     @Environment(\.openURL) private var openURL
 
     var body: some View {
@@ -90,12 +92,23 @@ struct BrowserPreviewCard: View {
             Haptic.light(); if let u = URL(string: url) { openURL(u) }
         } label: {
             VStack(alignment: .leading, spacing: 0) {
-                ZStack {
+                ZStack(alignment: .topLeading) {
                     Theme.ink3
                     if let s = shot, let u = URL(string: s) {
                         AsyncImage(url: u) { i in i.resizable().scaledToFill() } placeholder: {
                             HStack(spacing: 6) { ProgressView().scaleEffect(0.7); Text("Loading live view…").font(.caption).foregroundStyle(Theme.muted) }
                         }
+                    }
+                    if live {
+                        HStack(spacing: 5) {
+                            Circle().fill(.red).frame(width: 6, height: 6)
+                                .opacity(pulse ? 1 : 0.3)
+                            Text("LIVE").font(.caption2.weight(.heavy)).foregroundStyle(.white)
+                        }
+                        .padding(.horizontal, 8).padding(.vertical, 4)
+                        .background(.black.opacity(0.6), in: Capsule())
+                        .padding(8)
+                        .onAppear { withAnimation(.easeInOut(duration: 0.7).repeatForever()) { pulse = true } }
                     }
                 }
                 .frame(width: 240, height: 150).clipped()

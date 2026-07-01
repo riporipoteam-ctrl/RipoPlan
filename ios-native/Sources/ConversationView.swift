@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 import PhotosUI
 import UniformTypeIdentifiers
 
@@ -13,6 +14,11 @@ struct Suggestion: Identifiable {
 struct BottomOffsetKey: PreferenceKey {
     static var defaultValue: CGFloat = 0
     static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = nextValue() }
+}
+
+/// Dismiss the keyboard from anywhere (tap-to-read in chat).
+func hideKeyboard() {
+    UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
 }
 
 let SUGGESTIONS: [Suggestion] = [
@@ -130,6 +136,8 @@ struct ConversationView: View {
                     .padding(.bottom, 84)
                 }
                 .coordinateSpace(name: "scroll")
+                .scrollDismissesKeyboard(.interactively)
+                .onTapGesture { hideKeyboard() }
                 .onPreferenceChange(BottomOffsetKey.self) { y in
                     // Bottom marker below the visible area → user scrolled up.
                     showScrollDown = y > geo.size.height + 120
@@ -259,7 +267,7 @@ struct MessageBubble: View {
                             .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
                             .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).stroke(Theme.stroke, lineWidth: 1))
                         } else if a.type == "link" {
-                            BrowserPreviewCard(url: a.url, host: a.name, shot: a.preview)
+                            BrowserPreviewCard(url: a.url, host: a.name, shot: a.preview, live: thinking)
                         } else {
                             HStack(spacing: 6) { Image(systemName: "doc.fill"); Text(a.name).lineLimit(1) }
                                 .font(.footnote).foregroundStyle(Theme.muted)

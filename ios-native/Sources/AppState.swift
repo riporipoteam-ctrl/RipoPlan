@@ -56,7 +56,8 @@ final class AppState: ObservableObject {
             "books": "Searched books", "trivia": "Pulled trivia", "ip_info": "Looked up an IP", "color_palette": "Made a palette",
             "recipe": "Found a recipe", "cocktail": "Mixed a cocktail", "pokemon": "Looked up a Pokémon", "sunrise_sunset": "Checked sun times",
             "synonyms": "Found synonyms", "npm_package": "Looked up an npm package", "github_user": "Checked a GitHub user", "crypto_top": "Checked top crypto",
-            "on_this_day": "Checked history", "air_quality": "Checked air quality"
+            "on_this_day": "Checked history", "air_quality": "Checked air quality",
+            "music_search": "Searched music", "app_search": "Searched the App Store", "urban_dictionary": "Checked slang"
         ]
         return steps.prefix(20).map { ["label": label[$0] ?? "Used \($0)", "tool": $0, "status": "done"] }
     }
@@ -356,6 +357,7 @@ final class AppState: ObservableObject {
             let ctx = RunContext(
                 workspaceId: ws, userId: uid, threadId: channelId,
                 onActivity: { label, _ in await self.setMessageActivity(pid, label) },
+                onPagePreview: { page in await self.appendLivePreview(pid, page) },
                 onCreateAgent: { n, ro, d in await self.toolCreateAgent(n, ro, d) },
                 onDelegate: { _, _ in "Delegation runs in chats — open a chat to delegate." },
                 onBuildApp: { n, h in await self.toolBuildApp(n, h) },
@@ -406,6 +408,7 @@ final class AppState: ObservableObject {
             let ctx = RunContext(
                 workspaceId: ws, userId: uid, threadId: threadId,
                 onActivity: { label, _ in await self.setMessageActivity(placeholderId, label) },
+                onPagePreview: { page in await self.appendLivePreview(placeholderId, page) },
                 onCreateAgent: { name, role, desc in await self.toolCreateAgent(name, role, desc) },
                 onDelegate: { handle, task in await self.toolDelegate(threadId: threadId, handle: handle, task: task) },
                 onBuildApp: { name, html in await self.toolBuildApp(name, html) },
@@ -490,6 +493,21 @@ final class AppState: ObservableObject {
         ]
         if let uid = Supa.shared.userId { row["created_by"] = uid }
         _ = try? await Supa.shared.insert("background_tasks", row, returning: false) as [Message]
+    }
+
+    /// Append a live browser-preview card to a thinking message so the user sees
+    /// the page WHILE the agent is browsing it (not after).
+    private func appendLivePreview(_ messageId: String, _ page: [String: String]) async {
+        let rows: [Message] = (try? await Supa.shared.select("messages?id=eq.\(messageId)&select=*&limit=1")) ?? []
+        var atts: [[String: Any]] = (rows.first?.attachments ?? []).map { a in
+            var d: [String: Any] = ["type": a.type, "url": a.url, "name": a.name]
+            if let m = a.mime { d["mime"] = m }
+            if let p = a.preview { d["preview"] = p }
+            return d
+        }
+        guard !atts.contains(where: { ($0["url"] as? String) == page["url"] }) else { return }
+        atts.append(["type": "link", "url": page["url"] ?? "", "name": page["host"] ?? "Page", "preview": page["shot"] ?? ""])
+        try? await Supa.shared.update("messages?id=eq.\(messageId)", ["attachments": atts])
     }
 
     /// Update a placeholder message's live activity label (shows "Searching…" etc).

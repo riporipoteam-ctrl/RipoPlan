@@ -6,6 +6,7 @@ struct RunContext {
     let userId: String
     let threadId: String
     var onActivity: (String, String) async -> Void = { _, _ in }   // label, tool — live UI
+    var onPagePreview: ([String: String]) async -> Void = { _ in } // live browser card while browsing
     let onCreateAgent: (String, String, String) async -> String
     let onDelegate: (String, String) async -> String
     let onBuildApp: (String, String) async -> String
@@ -121,6 +122,9 @@ enum AgentRunner {
             fn("crypto_top", "Top crypto coins by market cap with prices.", [:], []),
             fn("on_this_day", "Notable historical events that happened on today's date.", [:], []),
             fn("air_quality", "Current air quality (US AQI) for a place.", ["location": S], ["location"]),
+            fn("music_search", "Find songs/albums/artists (iTunes).", ["query": S], ["query"]),
+            fn("app_search", "Find iOS apps on the App Store.", ["query": S], ["query"]),
+            fn("urban_dictionary", "Slang definition from Urban Dictionary.", ["term": S], ["term"]),
         ]
     }
 
@@ -140,7 +144,10 @@ enum AgentRunner {
         datetime, calculate). Be proactive and autonomous: actually USE the tools to do real work and finish \
         the job — never claim you did something you didn't. If the user asks a different teammate to do \
         something, use the delegate tool so THAT teammate answers — never role-play or write a reply as \
-        another agent, and never invent their response. Always end with a real, helpful answer in Markdown. \
+        another agent, and never invent their response. Write rich, detailed answers in Markdown: use ## \
+        headings, bullet lists, and **bold** key facts; include concrete numbers, dates, and sources when \
+        you have them. When a visual would help (people, places, products, designs, diagrams-as-art), \
+        proactively call generate_image so the user sees a picture with your answer. \
         Speak only as \(agent.name).\(memText)
         """
         var msgs: [[String: Any]] = [["role": "system", "content": system]]
@@ -168,13 +175,17 @@ enum AgentRunner {
                 let args = parseArgs(f["arguments"])
                 await ctx.onActivity(activityLabel(name), name)
                 steps.append(name)
-                let out = await runTool(name, args, ctx, &images)
-                if !out.isEmpty { lastToolOutput = out }
-                // Capture a live browser preview for pages the agent opened.
+                // LIVE browser view: push the page card to the chat BEFORE reading the
+                // page, so the user watches the browse as it happens (not after).
                 if name == "browse" || name == "summarize_url" {
                     let raw = str(args["url"])
-                    if !raw.isEmpty, !out.hasPrefix("Couldn't"), let p = pagePreview(raw) { pages.append(p) }
+                    if !raw.isEmpty, let p = pagePreview(raw) {
+                        pages.append(p)
+                        await ctx.onPagePreview(p)
+                    }
                 }
+                let out = await runTool(name, args, ctx, &images)
+                if !out.isEmpty { lastToolOutput = out }
                 msgs.append(["role": "tool", "tool_call_id": c["id"] as? String ?? "", "name": name, "content": String(out.prefix(6000))])
             }
         }
@@ -342,6 +353,9 @@ enum AgentRunner {
         case "crypto_top": return await cryptoTop()
         case "on_this_day": return await onThisDay()
         case "air_quality": return await airQuality(str(args["location"]))
+        case "music_search": return await musicSearch(str(args["query"]))
+        case "app_search": return await appSearch(str(args["query"]))
+        case "urban_dictionary": return await urbanDictionary(str(args["term"]))
         default: return "Unknown tool."
         }
     }
@@ -727,6 +741,36 @@ enum AgentRunner {
         let aqi = cur["us_aqi"] as? Int ?? 0
         let level = aqi <= 50 ? "Good" : aqi <= 100 ? "Moderate" : aqi <= 150 ? "Unhealthy (sensitive)" : aqi <= 200 ? "Unhealthy" : "Very unhealthy"
         return "Air quality in \(res["name"] ?? location): US AQI \(aqi) (\(level)) — PM2.5 \(cur["pm2_5"] ?? "?"), PM10 \(cur["pm10"] ?? "?")."
+    }
+    private static func musicSearch(_ query: String) async -> String {
+        let q = query.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? query
+        guard let d = await get("https://itunes.apple.com/search?term=\(q)&media=music&limit=6"),
+              let j = try? JSONSerialization.jsonObject(with: d) as? [String: Any], let res = j["results"] as? [[String: Any]], !res.isEmpty
+        else { return "No music found for \(query)." }
+        return "Music — \(query):\n" + res.prefix(6).compactMap { r in
+            guard let track = r["trackName"] as? String, let artist = r["artistName"] as? String else { return nil }
+            return "- \(track) — \(artist) (\(r["collectionName"] as? String ?? ""))"
+        }.joined(separator: "\n")
+    }
+    private static func appSearch(_ query: String) async -> String {
+        let q = query.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? query
+        guard let d = await get("https://itunes.apple.com/search?term=\(q)&entity=software&limit=5"),
+              let j = try? JSONSerialization.jsonObject(with: d) as? [String: Any], let res = j["results"] as? [[String: Any]], !res.isEmpty
+        else { return "No apps found for \(query)." }
+        return "Apps — \(query):\n" + res.prefix(5).compactMap { r in
+            guard let name = r["trackName"] as? String else { return nil }
+            let rating = (r["averageUserRating"] as? Double).map { String(format: "%.1f★", $0) } ?? ""
+            return "- \(name) \(rating) — \(r["primaryGenreName"] as? String ?? "") (\(r["formattedPrice"] as? String ?? "Free"))"
+        }.joined(separator: "\n")
+    }
+    private static func urbanDictionary(_ term: String) async -> String {
+        let q = term.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? term
+        guard let d = await get("https://api.urbandictionary.com/v0/define?term=\(q)"),
+              let j = try? JSONSerialization.jsonObject(with: d) as? [String: Any],
+              let list = j["list"] as? [[String: Any]], let top = list.first,
+              let def = top["definition"] as? String else { return "No slang definition for \(term)." }
+        let cleanDef = def.replacingOccurrences(of: "[", with: "").replacingOccurrences(of: "]", with: "")
+        return "**\(term)** (Urban Dictionary): \(String(cleanDef.prefix(400)))"
     }
     private static func translate(_ text: String, _ to: String) async -> String {
         let q = text.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? text
