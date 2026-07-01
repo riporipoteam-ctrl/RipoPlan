@@ -115,6 +115,10 @@ enum AgentRunner {
             fn("cocktail", "Get a cocktail recipe.", ["name": S], ["name"]),
             fn("pokemon", "Look up a Pokémon's stats and types.", ["name": S], ["name"]),
             fn("sunrise_sunset", "Sunrise & sunset times for a place.", ["location": S], ["location"]),
+            fn("synonyms", "Find synonyms for a word.", ["word": S], ["word"]),
+            fn("npm_package", "Look up an npm package's latest version & info.", ["name": S], ["name"]),
+            fn("github_user", "GitHub profile stats for a username.", ["username": S], ["username"]),
+            fn("crypto_top", "Top crypto coins by market cap with prices.", [:], []),
         ]
     }
 
@@ -330,6 +334,10 @@ enum AgentRunner {
         case "cocktail": return await cocktail(str(args["name"]))
         case "pokemon": return await pokemon(str(args["name"]))
         case "sunrise_sunset": return await sunriseSunset(str(args["location"]))
+        case "synonyms": return await synonyms(str(args["word"]))
+        case "npm_package": return await npmPackage(str(args["name"]))
+        case "github_user": return await githubUser(str(args["username"]))
+        case "crypto_top": return await cryptoTop()
         default: return "Unknown tool."
         }
     }
@@ -660,6 +668,37 @@ enum AgentRunner {
             let f = DateFormatter(); f.dateFormat = "HH:mm 'UTC'"; f.timeZone = TimeZone(identifier: "UTC"); return f.string(from: dt)
         }
         return "Sun times for \(res["name"] ?? location): sunrise \(t("sunrise")), sunset \(t("sunset")), day length \((r["day_length"] as? Int).map { "\($0/3600)h \(($0%3600)/60)m" } ?? "?")."
+    }
+    private static func synonyms(_ word: String) async -> String {
+        let q = word.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? word
+        guard let d = await get("https://api.datamuse.com/words?rel_syn=\(q)&max=12"),
+              let arr = try? JSONSerialization.jsonObject(with: d) as? [[String: Any]], !arr.isEmpty else { return "No synonyms for \(word)." }
+        let words = arr.compactMap { $0["word"] as? String }
+        return "Synonyms for \(word): " + words.joined(separator: ", ")
+    }
+    private static func npmPackage(_ name: String) async -> String {
+        let n = name.trimmingCharacters(in: .whitespaces)
+        guard let d = await get("https://registry.npmjs.org/\(n)/latest"),
+              let j = try? JSONSerialization.jsonObject(with: d) as? [String: Any], let ver = j["version"] as? String else { return "No npm package '\(name)'." }
+        let desc = j["description"] as? String ?? ""
+        let license = j["license"] as? String ?? "?"
+        let home = j["homepage"] as? String ?? ""
+        return "**\(n)** v\(ver) — \(desc) (license: \(license)) \(home)"
+    }
+    private static func githubUser(_ username: String) async -> String {
+        let u = username.replacingOccurrences(of: "@", with: "").trimmingCharacters(in: .whitespaces)
+        guard let d = await get("https://api.github.com/users/\(u)"),
+              let j = try? JSONSerialization.jsonObject(with: d) as? [String: Any], j["login"] != nil else { return "No GitHub user '\(username)'." }
+        return "**\(j["name"] as? String ?? u)** (@\(j["login"] as? String ?? u)) — \(j["public_repos"] as? Int ?? 0) repos, \(j["followers"] as? Int ?? 0) followers. \(j["bio"] as? String ?? "")"
+    }
+    private static func cryptoTop() async -> String {
+        guard let d = await get("https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&order=market_cap_desc&per_page=8&page=1"),
+              let arr = try? JSONSerialization.jsonObject(with: d) as? [[String: Any]], !arr.isEmpty else { return "Crypto data unavailable." }
+        return "Top crypto by market cap:\n" + arr.prefix(8).compactMap { c in
+            guard let sym = c["symbol"] as? String, let price = c["current_price"] else { return nil }
+            let ch = (c["price_change_percentage_24h"] as? Double).map { String(format: "%.1f", $0) } ?? "?"
+            return "- \(sym.uppercased()): $\(price) (24h \(ch)%)"
+        }.joined(separator: "\n")
     }
     private static func translate(_ text: String, _ to: String) async -> String {
         let q = text.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? text

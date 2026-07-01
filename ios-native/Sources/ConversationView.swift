@@ -34,6 +34,7 @@ struct ConversationView: View {
     @State private var photoItem: PhotosPickerItem?
     @State private var showPhoto = false
     @State private var showFiles = false
+    @State private var heroIn = false
 
     var body: some View {
         ZStack(alignment: .bottom) {
@@ -68,22 +69,28 @@ struct ConversationView: View {
             VStack(spacing: 18) {
                 Spacer(minLength: 70 + topInset)
                 SparkMark(size: 40, color: Theme.text)
+                    .scaleEffect(heroIn ? 1 : 0.7).opacity(heroIn ? 1 : 0)
                 Text("How can I help\(app.firstName.isEmpty ? "" : ", \(app.firstName)")?")
                     .font(.system(size: 24, weight: .semibold))
                     .foregroundStyle(Theme.text)
                     .multilineTextAlignment(.center)
+                    .opacity(heroIn ? 1 : 0).offset(y: heroIn ? 0 : 8)
                 VStack(spacing: 8) {
-                    ForEach(SUGGESTIONS) { s in
+                    ForEach(Array(SUGGESTIONS.enumerated()), id: \.element.id) { i, s in
                         Button { Haptic.light(); text = s.seed } label: {
                             HStack(spacing: 12) {
-                                Image(systemName: s.icon).foregroundStyle(Theme.muted).frame(width: 22)
+                                Image(systemName: s.icon).foregroundStyle(Theme.accent).frame(width: 22)
                                 Text(s.label).foregroundStyle(Theme.text)
                                 Spacer()
+                                Image(systemName: "arrow.up.left").font(.caption2).foregroundStyle(Theme.muted)
                             }
                             .padding(.horizontal, 14).padding(.vertical, 13)
                             .liquidGlass(16, shadow: false)
                         }
                         .buttonStyle(.plain)
+                        .opacity(heroIn ? 1 : 0)
+                        .offset(y: heroIn ? 0 : 14)
+                        .animation(.spring(response: 0.45, dampingFraction: 0.85).delay(0.05 * Double(i) + 0.1), value: heroIn)
                     }
                 }
                 .padding(.horizontal, 14)
@@ -91,6 +98,7 @@ struct ConversationView: View {
             }
             .frame(maxWidth: .infinity)
         }
+        .onAppear { withAnimation(.spring(response: 0.5, dampingFraction: 0.8)) { heroIn = true } }
     }
 
     // MARK: Existing thread
@@ -185,6 +193,7 @@ struct MessageBubble: View {
     @EnvironmentObject var app: AppState
     let message: Message
     @State private var showTrail = false
+    @State private var appeared = false
 
     var isUser: Bool { message.sender_type == "user" }
     var thinking: Bool { message.status == "thinking" }
@@ -239,6 +248,9 @@ struct MessageBubble: View {
             }
             if !isUser { Spacer(minLength: 40) }
         }
+        .opacity(appeared ? 1 : 0)
+        .offset(y: appeared ? 0 : 10)
+        .onAppear { withAnimation(.spring(response: 0.4, dampingFraction: 0.85)) { appeared = true } }
     }
 
     // Nebula-style "N actions · view" trail under a completed agent message.

@@ -36,7 +36,7 @@ struct AgentsView: View {
                     LazyVGrid(columns: cols, spacing: 12) {
                         ForEach(app.agents) { a in
                             Button { Haptic.light(); path.append(a.id) } label: { AgentCard(agent: a, rank: rank(a.rank_id)) }
-                                .buttonStyle(.plain)
+                                .pressable()
                         }
                     }
                     .padding(16)
