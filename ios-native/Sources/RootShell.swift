@@ -14,6 +14,7 @@ struct RootShell: View {
     @State private var showSettings = false
     @State private var sheet: ShellSheet?
     @State private var dragX: CGFloat = 0
+    @StateObject private var updater = UpdateChecker()
 
     private let sidebarWidth: CGFloat = 300
 
@@ -22,7 +23,10 @@ struct RootShell: View {
             // Main column — content scrolls under the frosted top bar.
             ZStack(alignment: .top) {
                 ConversationView(threadId: $current, topInset: 50)
-                topBar
+                VStack(spacing: 0) {
+                    topBar
+                    UpdateBanner(updater: updater)
+                }
             }
             .background(AuroraBackground())
             .disabled(showSidebar)
@@ -63,6 +67,7 @@ struct RootShell: View {
         }
         .onChange(of: current) { _ in } // triggers ConversationView reload via binding
         .onAppear { applyScreenshotHook() }
+        .task { await updater.check() }
     }
 
     private var topBar: some View {

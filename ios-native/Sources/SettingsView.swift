@@ -11,6 +11,10 @@ struct SettingsView: View {
     @State private var confirmSignOut = false
     @State private var editName = false
     @State private var nameDraft = ""
+    @StateObject private var updater = UpdateChecker()
+    @State private var showUpdate = false
+    @State private var checking = false
+    private var appVersion: String { Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0.0" }
 
     var body: some View {
         NavigationStack {
@@ -111,6 +115,31 @@ struct SettingsView: View {
                         }
                         .card(radius: 16)
 
+                        // Updates
+                        VStack(alignment: .leading, spacing: 10) {
+                            SectionHeader(title: "Updates")
+                            HStack {
+                                Label("Version", systemImage: "app.badge").foregroundStyle(Theme.text)
+                                Spacer()
+                                Text("v\(appVersion)").foregroundStyle(Theme.muted)
+                            }.font(.subheadline)
+                            Button {
+                                checking = true
+                                Task { await updater.check(); checking = false; showUpdate = true }
+                            } label: {
+                                HStack {
+                                    if checking { ProgressView().tint(Theme.text) }
+                                    Label(updater.latest != nil ? "Update to v\(updater.latest!)" : "Set up auto-updates", systemImage: "arrow.down.circle")
+                                        .foregroundStyle(Theme.text)
+                                    Spacer()
+                                    Image(systemName: "chevron.right").font(.caption).foregroundStyle(Theme.muted)
+                                }
+                            }
+                            Text("Add AskAI's source to SideStore once and the app updates itself — no re-sideloading.")
+                                .font(.caption).foregroundStyle(Theme.muted)
+                        }
+                        .card(radius: 16)
+
                         Button(role: .destructive) { confirmSignOut = true } label: {
                             Label("Sign out", systemImage: "rectangle.portrait.and.arrow.right")
                                 .frame(maxWidth: .infinity).padding(.vertical, 14)
@@ -127,6 +156,7 @@ struct SettingsView: View {
             .navigationTitle("Settings")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Done") { dismiss() } } }
+            .sheet(isPresented: $showUpdate) { UpdateSheet(updater: updater) }
             .confirmationDialog("Sign out of AskAI?", isPresented: $confirmSignOut, titleVisibility: .visible) {
                 Button("Sign out", role: .destructive) { Haptic.warning(); app.signOut() }
                 Button("Cancel", role: .cancel) {}

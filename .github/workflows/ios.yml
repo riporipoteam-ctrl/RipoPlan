@@ -44,15 +44,57 @@ jobs:
             -sdk iphoneos -destination 'generic/platform=iOS' -derivedDataPath build \
             CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
             clean build
-      - name: Package .ipa
+      - name: Package .ipa (version-stamped)
         working-directory: ios-native
         run: |
           APP=$(find build/Build/Products/Release-iphoneos -maxdepth 1 -name "*.app" | head -1)
           echo "App: $APP"
+          VER="1.0.${{ github.run_number }}"
+          BUILD="${{ github.run_number }}"
+          # Stamp the version so the app knows it and auto-update can compare.
+          /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $VER" "$APP/Info.plist" || true
+          /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $BUILD" "$APP/Info.plist" || true
           rm -rf Payload AskAI-unsigned.ipa
           mkdir -p Payload && cp -R "$APP" Payload/
           zip -qry AskAI-unsigned.ipa Payload
           ls -lh AskAI-unsigned.ipa
+          echo "VER=$VER" >> "$GITHUB_ENV"
+      - name: Generate SideStore/AltStore source
+        working-directory: ios-native
+        run: |
+          SIZE=$(stat -f%z AskAI-unsigned.ipa 2>/dev/null || stat -c%s AskAI-unsigned.ipa)
+          DATE=$(date -u +%Y-%m-%d)
+          REPO="riporipoteam-ctrl/RipoPlan"
+          DL="https://github.com/$REPO/releases/download/ios-latest/AskAI-unsigned.ipa"
+          ICON="https://raw.githubusercontent.com/$REPO/main/ios-native/Resources/Assets.xcassets/AppIcon.appiconset/icon-1024.png"
+          cat > altstore.json <<JSON
+          {
+            "name": "AskAI",
+            "identifier": "gg.askai.source",
+            "subtitle": "Your AI agent team — auto-updated.",
+            "iconURL": "$ICON",
+            "tintColor": "0D0D0D",
+            "apps": [
+              {
+                "name": "AskAI",
+                "bundleIdentifier": "gg.askai.app",
+                "developerName": "AskAI",
+                "subtitle": "Your AI agent team.",
+                "localizedDescription": "AskAI — a native team of AI agents that chat, browse, build, and get work done. Auto-updates via this source.",
+                "iconURL": "$ICON",
+                "tintColor": "0D0D0D",
+                "category": "productivity",
+                "version": "$VER",
+                "versionDate": "$DATE",
+                "versionDescription": "Latest AskAI build (#${{ github.run_number }}).",
+                "downloadURL": "$DL",
+                "size": $SIZE
+              }
+            ],
+            "news": []
+          }
+          JSON
+          cat altstore.json
       - uses: actions/upload-artifact@v4
         with:
           name: AskAI-ipa
@@ -65,9 +107,14 @@ jobs:
           name: AskAI iOS (latest)
           prerelease: true
           body: |
-            Unsigned **AskAI.ipa** built from the native SwiftUI app.
-            Sideload with AltStore or Sideloadly (re-signs with your own Apple ID).
-          files: ios-native/AskAI-unsigned.ipa
+            Unsigned **AskAI.ipa** (v${{ env.VER }}) built from the native SwiftUI app.
+
+            **Auto-update (recommended):** add this source in SideStore/AltStore once —
+            `https://github.com/riporipoteam-ctrl/RipoPlan/releases/download/ios-latest/altstore.json`
+            — then it updates itself. Or sideload the .ipa directly with Sideloadly.
+          files: |
+            ios-native/AskAI-unsigned.ipa
+            ios-native/altstore.json
 
   screenshot:
     runs-on: macos-15
