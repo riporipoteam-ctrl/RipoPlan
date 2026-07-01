@@ -39,13 +39,13 @@ struct SidebarView: View {
             // Pages
             ScrollView {
                 VStack(spacing: 2) {
-                    navRow("person.2", "Agents") { openSheet(.agents) }
-                    navRow("number", "Channels") { openSheet(.channels) }
-                    navRow("square.grid.2x2", "Apps") { openSheet(.apps) }
-                    navRow("clock.arrow.circlepath", "Jobs") { openSheet(.jobs) }
-                    navRow("book", "Knowledge") { openSheet(.knowledge) }
-                    navRow("puzzlepiece.extension", "Integrations") { openSheet(.integrations) }
-                    navRow("bell", "Activity") { openSheet(.activity) }
+                    navRow("person.2.fill", "Agents", "#8b5cf6") { openSheet(.agents) }
+                    navRow("number", "Channels", "#3b82f6") { openSheet(.channels) }
+                    navRow("square.grid.2x2.fill", "Apps", "#10b981") { openSheet(.apps) }
+                    navRow("clock.arrow.circlepath", "Jobs", "#f59e0b") { openSheet(.jobs) }
+                    navRow("book.fill", "Knowledge", "#ec4899") { openSheet(.knowledge) }
+                    navRow("puzzlepiece.extension.fill", "Integrations", "#14b8a6") { openSheet(.integrations) }
+                    navRow("bell.fill", "Activity", "#ef4444") { openSheet(.activity) }
 
                     Text("Recents").font(.caption.weight(.semibold)).foregroundStyle(Theme.muted)
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -93,14 +93,18 @@ struct SidebarView: View {
         .overlay(alignment: .trailing) { Rectangle().fill(Theme.stroke).frame(width: 1).ignoresSafeArea() }
     }
 
-    private func navRow(_ icon: String, _ label: String, _ action: @escaping () -> Void) -> some View {
+    private func navRow(_ icon: String, _ label: String, _ tint: String, _ action: @escaping () -> Void) -> some View {
         Button { Haptic.light(); action(); close() } label: {
             HStack(spacing: 12) {
-                Image(systemName: icon).font(.system(size: 17)).foregroundStyle(Theme.text).frame(width: 24)
-                Text(label).foregroundStyle(Theme.text)
+                Image(systemName: icon).font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(Color(hexString: tint))
+                    .frame(width: 28, height: 28)
+                    .background(Color(hexString: tint).opacity(0.14), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                Text(label).foregroundStyle(Theme.text).fontWeight(.medium)
                 Spacer()
+                Image(systemName: "chevron.right").font(.caption2).foregroundStyle(Theme.muted.opacity(0.6))
             }
-            .padding(.horizontal, 14).padding(.vertical, 11)
+            .padding(.horizontal, 14).padding(.vertical, 8)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)

@@ -311,7 +311,7 @@ struct InputBar: View {
                     Image(systemName: "plus")
                         .font(.system(size: 18, weight: .semibold))
                         .foregroundStyle(Theme.text)
-                        .frame(width: 34, height: 34)
+                        .frame(width: 37, height: 37)
                         .background(Theme.ink3, in: Circle())
                 }
                 .confirmationDialog("Add attachment", isPresented: $showMenu, titleVisibility: .visible) {
@@ -325,23 +325,25 @@ struct InputBar: View {
                     .lineLimit(1...6)
                     .foregroundStyle(Theme.text)
                     .tint(Theme.text)
-                    .padding(.vertical, 7)
+                    .padding(.vertical, 9)
 
                 Button { Haptic.medium(); onSend() } label: {
                     ZStack {
                         if sending { ProgressView().tint(Theme.onAccent) }
-                        else { Image(systemName: "arrow.up").font(.system(size: 16, weight: .bold)) }
+                        else { Image(systemName: "arrow.up").font(.system(size: 17, weight: .bold)) }
                     }
-                    .frame(width: 34, height: 34)
+                    .frame(width: 37, height: 37)
                     .background(canSend ? Theme.accent : Theme.muted.opacity(0.4), in: Circle())
                     .foregroundStyle(Theme.onAccent)
+                    .scaleEffect(canSend ? 1 : 0.92)
+                    .animation(.spring(response: 0.3, dampingFraction: 0.7), value: canSend)
                 }
                 .disabled(!canSend)
             }
-            .padding(.horizontal, 6)
-            .padding(.vertical, 6)
-            .liquidGlass(26)
-            .overlay(RoundedRectangle(cornerRadius: 26, style: .continuous).stroke(Theme.stroke, lineWidth: 1))
+            .padding(.horizontal, 7)
+            .padding(.vertical, 7)
+            .liquidGlass(28)
+            .overlay(RoundedRectangle(cornerRadius: 28, style: .continuous).stroke(Theme.stroke, lineWidth: 1))
         }
     }
 

@@ -8,6 +8,7 @@ struct Suggestion: Identifiable {
     let icon: String
     let label: String
     let seed: String
+    var color: String = "#6e6e80"
 }
 
 /// Tracks the chat's bottom marker position to toggle the scroll-to-bottom button.
@@ -22,11 +23,12 @@ func hideKeyboard() {
 }
 
 let SUGGESTIONS: [Suggestion] = [
-    .init(icon: "soccerball", label: "Follow the World Cup", seed: "Give me a live World Cup update — recent results, today's fixtures, and the standings."),
-    .init(icon: "photo", label: "Create an image", seed: "Create an image of "),
-    .init(icon: "globe", label: "Build a website", seed: "Build me a website for "),
-    .init(icon: "magnifyingglass", label: "Research a topic", seed: "Research and summarize the latest on "),
-    .init(icon: "pencil", label: "Write or edit", seed: "Help me write "),
+    .init(icon: "soccerball", label: "World Cup live", seed: "Give me a live World Cup update — recent results, today's fixtures, and the standings.", color: "#10b981"),
+    .init(icon: "photo.fill", label: "Create an image", seed: "Create an image of ", color: "#8b5cf6"),
+    .init(icon: "globe", label: "Build a website", seed: "Build me a website for ", color: "#3b82f6"),
+    .init(icon: "magnifyingglass", label: "Research a topic", seed: "Research and summarize the latest on ", color: "#f59e0b"),
+    .init(icon: "pencil.and.outline", label: "Write or edit", seed: "Help me write ", color: "#ec4899"),
+    .init(icon: "newspaper.fill", label: "Today's news", seed: "Give me a detailed briefing of today's top news.", color: "#14b8a6"),
 ]
 
 /// The main surface — a new chat when `threadId` is nil, otherwise a live thread.
@@ -88,19 +90,24 @@ struct ConversationView: View {
                     .foregroundStyle(Theme.text)
                     .multilineTextAlignment(.center)
                     .opacity(heroIn ? 1 : 0).offset(y: heroIn ? 0 : 8)
-                VStack(spacing: 8) {
+                LazyVGrid(columns: [GridItem(.flexible(), spacing: 10), GridItem(.flexible(), spacing: 10)], spacing: 10) {
                     ForEach(Array(SUGGESTIONS.enumerated()), id: \.element.id) { i, s in
                         Button { Haptic.light(); text = s.seed } label: {
-                            HStack(spacing: 12) {
-                                Image(systemName: s.icon).foregroundStyle(Theme.accent).frame(width: 22)
-                                Text(s.label).foregroundStyle(Theme.text)
-                                Spacer()
-                                Image(systemName: "arrow.up.left").font(.caption2).foregroundStyle(Theme.muted)
+                            VStack(alignment: .leading, spacing: 10) {
+                                Image(systemName: s.icon)
+                                    .font(.system(size: 17, weight: .semibold))
+                                    .foregroundStyle(Color(hexString: s.color))
+                                    .frame(width: 34, height: 34)
+                                    .background(Color(hexString: s.color).opacity(0.14), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                                Text(s.label).font(.subheadline.weight(.semibold)).foregroundStyle(Theme.text)
+                                    .multilineTextAlignment(.leading).lineLimit(2)
+                                Spacer(minLength: 0)
                             }
-                            .padding(.horizontal, 14).padding(.vertical, 13)
-                            .liquidGlass(16, shadow: false)
+                            .padding(13)
+                            .frame(maxWidth: .infinity, minHeight: 104, alignment: .topLeading)
+                            .liquidGlass(18, shadow: false)
                         }
-                        .buttonStyle(.plain)
+                        .pressable()
                         .opacity(heroIn ? 1 : 0)
                         .offset(y: heroIn ? 0 : 14)
                         .animation(.spring(response: 0.45, dampingFraction: 0.85).delay(0.05 * Double(i) + 0.1), value: heroIn)
@@ -279,10 +286,15 @@ struct MessageBubble: View {
                 } else if !(message.content ?? "").isEmpty {
                     if isUser {
                         MD(text: message.content ?? "")
-                            .font(.body).foregroundStyle(Theme.text)
+                            .font(.body).foregroundStyle(Theme.onAccent)
                             .textSelection(.enabled)
-                            .padding(.horizontal, 14).padding(.vertical, 10)
-                            .liquidGlass(18, shadow: false)
+                            .padding(.horizontal, 15).padding(.vertical, 11)
+                            .background(
+                                UnevenRoundedRectangle(topLeadingRadius: 20, bottomLeadingRadius: 20,
+                                                       bottomTrailingRadius: 6, topTrailingRadius: 20, style: .continuous)
+                                    .fill(Theme.accent)
+                            )
+                            .shadow(color: Theme.accent.opacity(0.18), radius: 6, y: 3)
                     } else {
                         RichText(text: message.content ?? "")
                     }
