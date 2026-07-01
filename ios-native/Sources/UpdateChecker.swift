@@ -12,8 +12,11 @@ final class UpdateChecker: ObservableObject {
     // Stable rolling-release asset URLs.
     static let sourceURL = "https://github.com/riporipoteam-ctrl/RipoPlan/releases/download/ios-latest/altstore.json"
     static let ipaURL = "https://github.com/riporipoteam-ctrl/RipoPlan/releases/download/ios-latest/AskAI-unsigned.ipa"
-    // altstore://source?url=… adds the source to SideStore/AltStore in one tap.
-    static var addSourceURL: URL? { URL(string: "altstore://source?url=\(sourceURL)") }
+    // SideStore (on-device) deep links — one tap, no PC.
+    //   install: download + install the new build right now.
+    //   source:  add the source once so future updates install in the background.
+    static var installURL: URL? { URL(string: "sidestore://install?url=\(ipaURL)") }
+    static var addSourceURL: URL? { URL(string: "sidestore://source?url=\(sourceURL)") }
 
     var current: String { Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0.0" }
     var available: Bool { latest != nil && !dismissed }
@@ -43,26 +46,30 @@ final class UpdateChecker: ObservableObject {
 struct UpdateBanner: View {
     @ObservedObject var updater: UpdateChecker
     @State private var showSheet = false
+    @Environment(\.openURL) private var openURL
 
     var body: some View {
         if updater.available, let v = updater.latest {
-            Button { Haptic.light(); showSheet = true } label: {
-                HStack(spacing: 8) {
-                    Image(systemName: "arrow.down.circle.fill").foregroundStyle(Theme.accent)
+            HStack(spacing: 8) {
+                Image(systemName: "arrow.down.circle.fill").foregroundStyle(Theme.accent)
+                Button { Haptic.light(); showSheet = true } label: {
                     Text("Update available · v\(v)").font(.caption.weight(.semibold)).foregroundStyle(Theme.text)
-                    Spacer()
+                    Spacer(minLength: 0)
+                }.buttonStyle(.plain)
+                Spacer(minLength: 0)
+                // One press → installs the new build in SideStore, on-device, no PC.
+                Button { Haptic.medium(); if let u = UpdateChecker.installURL { openURL(u) } } label: {
                     Text("Update").font(.caption.weight(.bold)).foregroundStyle(Theme.onAccent)
-                        .padding(.horizontal, 10).padding(.vertical, 4)
+                        .padding(.horizontal, 12).padding(.vertical, 5)
                         .background(Theme.accent, in: Capsule())
-                    Button { withAnimation { updater.dismissed = true } } label: {
-                        Image(systemName: "xmark").font(.caption2).foregroundStyle(Theme.muted)
-                    }.buttonStyle(.plain)
-                }
-                .padding(.horizontal, 14).padding(.vertical, 8)
-                .background(.ultraThinMaterial)
-                .overlay(Divider().overlay(Theme.stroke), alignment: .bottom)
+                }.buttonStyle(.plain)
+                Button { withAnimation { updater.dismissed = true } } label: {
+                    Image(systemName: "xmark").font(.caption2).foregroundStyle(Theme.muted)
+                }.buttonStyle(.plain)
             }
-            .buttonStyle(.plain)
+            .padding(.horizontal, 14).padding(.vertical, 8)
+            .background(.ultraThinMaterial)
+            .overlay(Divider().overlay(Theme.stroke), alignment: .bottom)
             .transition(.move(edge: .top).combined(with: .opacity))
             .sheet(isPresented: $showSheet) { UpdateSheet(updater: updater) }
         }
@@ -89,36 +96,41 @@ struct UpdateSheet: View {
                              : "You're on v\(updater.current) — the latest. Add the source below so future updates install automatically.")
                             .font(.subheadline).foregroundStyle(Theme.muted).multilineTextAlignment(.center).padding(.horizontal, 20)
 
+                        // One press → SideStore installs the new build on-device, no PC.
+                        if updater.latest != nil {
+                            VStack(alignment: .leading, spacing: 10) {
+                                SectionHeader(title: "Update now")
+                                Text("One tap — SideStore downloads and installs it right on your iPhone. No computer.")
+                                    .font(.caption).foregroundStyle(Theme.muted)
+                                Button {
+                                    if let u = UpdateChecker.installURL { openURL(u) }
+                                } label: {
+                                    Label("Update now in SideStore", systemImage: "arrow.down.app.fill")
+                                        .fontWeight(.bold).frame(maxWidth: .infinity).padding(.vertical, 14)
+                                        .background(Theme.accent, in: RoundedRectangle(cornerRadius: 14)).foregroundStyle(Theme.onAccent)
+                                }
+                            }
+                            .card(radius: 16)
+                        }
+
                         VStack(alignment: .leading, spacing: 10) {
-                            SectionHeader(title: "Auto-update (recommended)")
-                            Text("Add AskAI's source to SideStore/AltStore once — then it updates itself in the background.")
+                            SectionHeader(title: "Auto-update (set once)")
+                            Text("Add AskAI's source to SideStore once — then every future update installs by itself in the background, zero taps.")
                                 .font(.caption).foregroundStyle(Theme.muted)
                             Button {
                                 if let u = UpdateChecker.addSourceURL { openURL(u) }
                             } label: {
                                 Label("Add source to SideStore", systemImage: "plus.app.fill")
-                                    .fontWeight(.bold).frame(maxWidth: .infinity).padding(.vertical, 13)
-                                    .background(Theme.accent, in: RoundedRectangle(cornerRadius: 14)).foregroundStyle(Theme.onAccent)
+                                    .font(.subheadline.weight(.semibold)).frame(maxWidth: .infinity).padding(.vertical, 12)
+                                    .background(Theme.ink3, in: RoundedRectangle(cornerRadius: 14)).foregroundStyle(Theme.text)
                             }
                             Button {
                                 UIPasteboard.general.string = UpdateChecker.sourceURL
                                 copied = true; Haptic.success()
                             } label: {
                                 Label(copied ? "Copied source URL" : "Copy source URL", systemImage: copied ? "checkmark" : "doc.on.doc")
-                                    .font(.subheadline).frame(maxWidth: .infinity).padding(.vertical, 11)
-                                    .background(Theme.ink3, in: RoundedRectangle(cornerRadius: 14)).foregroundStyle(Theme.text)
-                            }
-                        }
-                        .card(radius: 16)
-
-                        VStack(alignment: .leading, spacing: 10) {
-                            SectionHeader(title: "Or download the .ipa")
-                            Button {
-                                if let u = URL(string: UpdateChecker.ipaURL) { openURL(u) }
-                            } label: {
-                                Label("Download latest .ipa", systemImage: "square.and.arrow.down")
-                                    .font(.subheadline).frame(maxWidth: .infinity).padding(.vertical, 11)
-                                    .background(Theme.ink3, in: RoundedRectangle(cornerRadius: 14)).foregroundStyle(Theme.text)
+                                    .font(.caption).frame(maxWidth: .infinity).padding(.vertical, 10)
+                                    .foregroundStyle(Theme.muted)
                             }
                         }
                         .card(radius: 16)
