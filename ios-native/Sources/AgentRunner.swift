@@ -17,7 +17,7 @@ struct RunContext {
     var onSaveKnowledge: (String, String) async -> String = { _, _ in "Knowledge saved." }
 }
 
-struct RunResult { var text: String; var images: [String] = []; var steps: [String] = [] }
+struct RunResult { var text: String; var images: [String] = []; var steps: [String] = []; var pages: [[String: String]] = [] }
 
 /// Native agent runner. Calls the LLM directly and runs a multi-round tool loop
 /// covering the full website tool set + extra skills. Works with Groq (Llama) and
@@ -132,14 +132,16 @@ enum AgentRunner {
         edit agents, delegate tasks to teammates (who then reply here), create tasks, manage ranks, and use \
         skills (weather, currency, crypto, stocks, dictionary, wiki, translate, world cup, unit convert, QR, \
         datetime, calculate). Be proactive and autonomous: actually USE the tools to do real work and finish \
-        the job — never claim you did something you didn't. When you delegate, the teammate replies on their \
-        own — do NOT write their reply for them. Always end with a real, helpful answer in Markdown. \
+        the job — never claim you did something you didn't. If the user asks a different teammate to do \
+        something, use the delegate tool so THAT teammate answers — never role-play or write a reply as \
+        another agent, and never invent their response. Always end with a real, helpful answer in Markdown. \
         Speak only as \(agent.name).\(memText)
         """
         var msgs: [[String: Any]] = [["role": "system", "content": system]]
         msgs.append(contentsOf: history)
 
         var lastToolOutput = ""
+        var pages: [[String: String]] = []
         for round in 0..<6 {
             guard let message = await chat(msgs, tools: tools) else { break }
             let rawContent = (message["content"] as? String) ?? ""
@@ -149,7 +151,7 @@ enum AgentRunner {
             if calls.isEmpty { calls = parseTextToolCalls(rawContent) }
             if calls.isEmpty {
                 let cleaned = clean(rawContent)
-                if !cleaned.isEmpty { return RunResult(text: cleaned, images: images, steps: steps) }
+                if !cleaned.isEmpty { return RunResult(text: cleaned, images: images, steps: steps, pages: pages) }
                 break
             }
             // Strip any tool-token noise from the assistant content we echo back.
@@ -162,6 +164,11 @@ enum AgentRunner {
                 steps.append(name)
                 let out = await runTool(name, args, ctx, &images)
                 if !out.isEmpty { lastToolOutput = out }
+                // Capture a live browser preview for pages the agent opened.
+                if name == "browse" || name == "summarize_url" {
+                    let raw = str(args["url"])
+                    if !raw.isEmpty, !out.hasPrefix("Couldn't"), let p = pagePreview(raw) { pages.append(p) }
+                }
                 msgs.append(["role": "tool", "tool_call_id": c["id"] as? String ?? "", "name": name, "content": String(out.prefix(6000))])
             }
         }
@@ -169,12 +176,20 @@ enum AgentRunner {
         msgs.append(["role": "user", "content": "Now write your complete final answer for the user in plain English Markdown. Do NOT call any tools or output any tool/function syntax."])
         if let m = await chat(msgs, tools: nil) {
             let cleaned = clean((m["content"] as? String) ?? "")
-            if !cleaned.isEmpty { return RunResult(text: cleaned, images: images, steps: steps) }
+            if !cleaned.isEmpty { return RunResult(text: cleaned, images: images, steps: steps, pages: pages) }
         }
         // Last resort: never show a blank/failure — summarize what the tools found.
-        if !images.isEmpty { return RunResult(text: "Here's what I generated.", images: images, steps: steps) }
-        if !lastToolOutput.isEmpty { return RunResult(text: clean(lastToolOutput), images: images, steps: steps) }
-        return RunResult(text: "I couldn't complete that just now — please try again in a moment.", images: images, steps: steps)
+        if !images.isEmpty { return RunResult(text: "Here's what I generated.", images: images, steps: steps, pages: pages) }
+        if !lastToolOutput.isEmpty { return RunResult(text: clean(lastToolOutput), images: images, steps: steps, pages: pages) }
+        return RunResult(text: "I couldn't complete that just now — please try again in a moment.", images: images, steps: steps, pages: pages)
+    }
+
+    /// Build a live page preview (screenshot + host) for a browsed URL.
+    private static func pagePreview(_ url: String) -> [String: String]? {
+        let full = url.hasPrefix("http") ? url : "https://\(url)"
+        guard let u = URL(string: full), let host = u.host else { return nil }
+        let shot = "https://image.thum.io/get/width/900/\(full)"
+        return ["url": full, "host": host, "shot": shot]
     }
 
     /// Parse Kimi/K2-style tool calls emitted as plain text special tokens, e.g.

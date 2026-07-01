@@ -31,6 +31,13 @@ final class AppState: ObservableObject {
         "translate", "datetime", "unit_convert", "qr_code", "build_app",
         "create_agent", "edit_agent", "delegate", "create_task", "create_rank", "assign_rank"
     ]
+    /// Build message attachments from generated images + browsed page previews.
+    static func buildAttachments(images: [String], pages: [[String: String]]) -> [[String: Any]] {
+        var out: [[String: Any]] = images.map { ["type": "image", "url": $0, "name": "Generated image"] }
+        out += pages.map { ["type": "link", "url": $0["url"] ?? "", "name": $0["host"] ?? "Page", "preview": $0["shot"] ?? ""] }
+        return out
+    }
+
     /// Turn a list of executed tool names into activity rows for the message trail.
     static func stepActivities(_ steps: [String]) -> [[String: Any]] {
         let label: [String: String] = [
@@ -289,6 +296,13 @@ final class AppState: ObservableObject {
             }
             if !matched.isEmpty { return matched }
         }
+        // Direct name mention (no @): if the user names specific non-supervisor
+        // teammates, route to them so they answer themselves (not the chief for them).
+        let named = agents.filter { a in
+            a.is_supervisor != true && a.status != "archived" &&
+            lc.range(of: "\\b\(NSRegularExpression.escapedPattern(for: a.name.lowercased()))\\b", options: .regularExpression) != nil
+        }
+        if !named.isEmpty { return Array(named.prefix(4)) }
         if let p = threadPrimaryId, let a = agent(p) { return [a] }
         if let s = supervisor { return [s] }
         return []
@@ -353,7 +367,8 @@ final class AppState: ObservableObject {
             let res = await AgentRunner.run(agent: r, history: history, roster: roster, memories: mems, ctx: ctx)
             var patch: [String: Any] = ["content": res.text, "status": "complete",
                                         "activities": AppState.stepActivities(res.steps)]
-            if !res.images.isEmpty { patch["attachments"] = res.images.map { ["type": "image", "url": $0, "name": "Generated image"] } }
+            let atts = AppState.buildAttachments(images: res.images, pages: res.pages)
+            if !atts.isEmpty { patch["attachments"] = atts }
             try? await Supa.shared.update("messages?id=eq.\(pid)", patch)
         }
     }
@@ -402,9 +417,8 @@ final class AppState: ObservableObject {
             let result = await AgentRunner.run(agent: agent, history: history, roster: roster, memories: mems, ctx: ctx)
             var patch: [String: Any] = ["content": result.text, "status": "complete",
                                         "activities": AppState.stepActivities(result.steps)]
-            if !result.images.isEmpty {
-                patch["attachments"] = result.images.map { ["type": "image", "url": $0, "name": "Generated image"] }
-            }
+            let atts = AppState.buildAttachments(images: result.images, pages: result.pages)
+            if !atts.isEmpty { patch["attachments"] = atts }
             try? await Supa.shared.update("messages?id=eq.\(placeholderId)", patch)
             await self.logRun(agentId: agent.id, threadId: threadId, output: result.text, steps: result.steps)
             try? await Supa.shared.update("agents?id=eq.\(agent.id)", ["last_run_at": isoNow()])

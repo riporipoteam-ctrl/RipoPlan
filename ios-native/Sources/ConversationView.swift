@@ -212,6 +212,8 @@ struct MessageBubble: View {
                             AsyncImage(url: URL(string: a.url)) { i in i.resizable().scaledToFit() } placeholder: { Theme.ink3 }
                                 .frame(maxWidth: 220, maxHeight: 220)
                                 .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                        } else if a.type == "link" {
+                            BrowserPreviewCard(url: a.url, host: a.name, shot: a.preview)
                         } else {
                             HStack(spacing: 6) { Image(systemName: "doc.fill"); Text(a.name).lineLimit(1) }
                                 .font(.footnote).foregroundStyle(Theme.muted)

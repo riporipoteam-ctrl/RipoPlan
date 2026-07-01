@@ -77,6 +77,47 @@ struct AgentAvatar: View {
     }
 }
 
+/// Live browser preview card — shows a screenshot of a page an agent browsed,
+/// with a tap/button to open it live in the browser.
+struct BrowserPreviewCard: View {
+    let url: String
+    let host: String
+    var shot: String?
+    @Environment(\.openURL) private var openURL
+
+    var body: some View {
+        Button {
+            Haptic.light(); if let u = URL(string: url) { openURL(u) }
+        } label: {
+            VStack(alignment: .leading, spacing: 0) {
+                ZStack {
+                    Theme.ink3
+                    if let s = shot, let u = URL(string: s) {
+                        AsyncImage(url: u) { i in i.resizable().scaledToFill() } placeholder: {
+                            HStack(spacing: 6) { ProgressView().scaleEffect(0.7); Text("Loading live view…").font(.caption).foregroundStyle(Theme.muted) }
+                        }
+                    }
+                }
+                .frame(width: 240, height: 150).clipped()
+                HStack(spacing: 6) {
+                    Image(systemName: "globe").font(.caption2).foregroundStyle(Theme.accent)
+                    Text(host).font(.caption.weight(.medium)).foregroundStyle(Theme.text).lineLimit(1)
+                    Spacer()
+                    HStack(spacing: 3) {
+                        Image(systemName: "eye.fill").font(.caption2)
+                        Text("View live").font(.caption2.weight(.semibold))
+                    }.foregroundStyle(Theme.accent)
+                }
+                .padding(.horizontal, 10).padding(.vertical, 8)
+            }
+            .frame(width: 240)
+            .background(Theme.ink2, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(Theme.stroke, lineWidth: 1))
+        }
+        .buttonStyle(.plain)
+    }
+}
+
 /// Centered date separator between days of messages (Nebula-style).
 struct DayDivider: View {
     let label: String

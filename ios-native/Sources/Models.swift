@@ -74,11 +74,12 @@ struct Message: Codable, Identifiable {
 
 struct Attachment: Codable, Identifiable, Hashable {
     var id = UUID()
-    var type: String   // "image" | "file"
+    var type: String   // "image" | "file" | "link"
     var url: String
     var name: String
     var mime: String?
-    enum CodingKeys: String, CodingKey { case type, url, name, mime }
+    var preview: String?   // screenshot URL for "link" (browsed page) attachments
+    enum CodingKeys: String, CodingKey { case type, url, name, mime, preview }
 }
 
 struct ConfigRow: Codable { var key: String; var value: String? }
