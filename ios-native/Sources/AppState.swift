@@ -55,7 +55,8 @@ final class AppState: ObservableObject {
             "summarize_url": "Summarized a page", "country_info": "Looked up a country", "holidays": "Checked holidays",
             "books": "Searched books", "trivia": "Pulled trivia", "ip_info": "Looked up an IP", "color_palette": "Made a palette",
             "recipe": "Found a recipe", "cocktail": "Mixed a cocktail", "pokemon": "Looked up a Pokémon", "sunrise_sunset": "Checked sun times",
-            "synonyms": "Found synonyms", "npm_package": "Looked up an npm package", "github_user": "Checked a GitHub user", "crypto_top": "Checked top crypto"
+            "synonyms": "Found synonyms", "npm_package": "Looked up an npm package", "github_user": "Checked a GitHub user", "crypto_top": "Checked top crypto",
+            "on_this_day": "Checked history", "air_quality": "Checked air quality"
         ]
         return steps.prefix(20).map { ["label": label[$0] ?? "Used \($0)", "tool": $0, "status": "done"] }
     }

@@ -164,6 +164,92 @@ struct MD: View {
     }
 }
 
+/// Rich block-level Markdown: headings, bullet/numbered lists, code blocks, and
+/// inline images — so agent replies look polished (Gemini-style).
+struct RichText: View {
+    let text: String
+
+    private enum Block: Identifiable {
+        case heading(Int, String), bullet(String), ordered(String, String)
+        case code(String), image(String), paragraph(String)
+        var id: String { UUID().uuidString }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 9) {
+            ForEach(parse()) { block in
+                switch block {
+                case .heading(let lvl, let t):
+                    Text(t).font(.system(size: lvl == 1 ? 22 : lvl == 2 ? 19 : 17, weight: .bold))
+                        .foregroundStyle(Theme.text).padding(.top, 2)
+                case .bullet(let t):
+                    HStack(alignment: .top, spacing: 8) {
+                        Circle().fill(Theme.accent).frame(width: 5, height: 5).padding(.top, 8)
+                        MD(text: t).font(.body).foregroundStyle(Theme.text)
+                    }
+                case .ordered(let n, let t):
+                    HStack(alignment: .top, spacing: 8) {
+                        Text("\(n).").font(.body.weight(.semibold)).foregroundStyle(Theme.accent)
+                        MD(text: t).font(.body).foregroundStyle(Theme.text)
+                    }
+                case .code(let c):
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        Text(c).font(.system(.footnote, design: .monospaced)).foregroundStyle(Theme.text)
+                            .padding(12)
+                    }
+                    .background(Theme.ink2, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.stroke, lineWidth: 1))
+                case .image(let url):
+                    AsyncImage(url: URL(string: url)) { i in i.resizable().scaledToFit() } placeholder: {
+                        RoundedRectangle(cornerRadius: 16).fill(Theme.ink3).frame(height: 180).overlay(ProgressView().tint(Theme.muted))
+                    }
+                    .frame(maxWidth: 300).clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                    .overlay(RoundedRectangle(cornerRadius: 16).stroke(Theme.stroke, lineWidth: 1))
+                case .paragraph(let p):
+                    MD(text: p).font(.body).foregroundStyle(Theme.text).textSelection(.enabled)
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func parse() -> [Block] {
+        var out: [Block] = []
+        let lines = text.components(separatedBy: "\n")
+        var para: [String] = []
+        var code: [String] = []
+        var inCode = false
+        func flushPara() { if !para.isEmpty { out.append(.paragraph(para.joined(separator: "\n"))); para = [] } }
+        for raw in lines {
+            let line = raw
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            if trimmed.hasPrefix("```") {
+                if inCode { out.append(.code(code.joined(separator: "\n"))); code = []; inCode = false }
+                else { flushPara(); inCode = true }
+                continue
+            }
+            if inCode { code.append(line); continue }
+            if let m = firstMatch("^(#{1,3})\\s+(.*)$", line) { flushPara(); out.append(.heading(m.0.count, m.1)); continue }
+            if let m = firstMatch("^!\\[[^\\]]*\\]\\(([^)]+)\\)\\s*$", line) { flushPara(); out.append(.image(m.1)); continue }
+            if let m = firstMatch("^\\s*[-*•]\\s+(.*)$", line) { flushPara(); out.append(.bullet(m.1)); continue }
+            if let m = firstMatch("^\\s*(\\d+)[.)]\\s+(.*)$", line) { flushPara(); out.append(.ordered(m.0, m.1)); continue }
+            if trimmed.isEmpty { flushPara() } else { para.append(line) }
+        }
+        if inCode, !code.isEmpty { out.append(.code(code.joined(separator: "\n"))) }
+        flushPara()
+        return out
+    }
+
+    private func firstMatch(_ pattern: String, _ s: String) -> (String, String)? {
+        guard let re = try? NSRegularExpression(pattern: pattern) else { return nil }
+        let ns = s as NSString
+        guard let m = re.firstMatch(in: s, range: NSRange(location: 0, length: ns.length)) else { return nil }
+        let g1 = m.numberOfRanges > 1 && m.range(at: 1).location != NSNotFound ? ns.substring(with: m.range(at: 1)) : ""
+        let g2 = m.numberOfRanges > 2 && m.range(at: 2).location != NSNotFound ? ns.substring(with: m.range(at: 2)) : ""
+        return (g1, g2.isEmpty && m.numberOfRanges <= 2 ? g1 : g2)
+    }
+}
+
 struct SectionHeader: View {
     let title: String
     var trailing: String?

@@ -276,9 +276,7 @@ struct MessageBubble: View {
                             .padding(.horizontal, 14).padding(.vertical, 10)
                             .liquidGlass(18, shadow: false)
                     } else {
-                        MD(text: message.content ?? "")
-                            .font(.body).foregroundStyle(Theme.text)
-                            .textSelection(.enabled)
+                        RichText(text: message.content ?? "")
                     }
                 }
                 if !doneActivities.isEmpty { activityTrail }

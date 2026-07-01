@@ -119,6 +119,8 @@ enum AgentRunner {
             fn("npm_package", "Look up an npm package's latest version & info.", ["name": S], ["name"]),
             fn("github_user", "GitHub profile stats for a username.", ["username": S], ["username"]),
             fn("crypto_top", "Top crypto coins by market cap with prices.", [:], []),
+            fn("on_this_day", "Notable historical events that happened on today's date.", [:], []),
+            fn("air_quality", "Current air quality (US AQI) for a place.", ["location": S], ["location"]),
         ]
     }
 
@@ -338,6 +340,8 @@ enum AgentRunner {
         case "npm_package": return await npmPackage(str(args["name"]))
         case "github_user": return await githubUser(str(args["username"]))
         case "crypto_top": return await cryptoTop()
+        case "on_this_day": return await onThisDay()
+        case "air_quality": return await airQuality(str(args["location"]))
         default: return "Unknown tool."
         }
     }
@@ -699,6 +703,30 @@ enum AgentRunner {
             let ch = (c["price_change_percentage_24h"] as? Double).map { String(format: "%.1f", $0) } ?? "?"
             return "- \(sym.uppercased()): $\(price) (24h \(ch)%)"
         }.joined(separator: "\n")
+    }
+    private static func onThisDay() async -> String {
+        let f = DateFormatter(); f.dateFormat = "M"; let mo = f.string(from: Date())
+        f.dateFormat = "d"; let day = f.string(from: Date())
+        guard let d = await get("https://api.wikimedia.org/feed/v1/wikipedia/en/onthisday/events/\(mo)/\(day)"),
+              let j = try? JSONSerialization.jsonObject(with: d) as? [String: Any], let events = j["events"] as? [[String: Any]], !events.isEmpty
+        else { return "No history found for today." }
+        let picks = events.shuffled().prefix(6)
+        return "On this day (\(mo)/\(day)):\n" + picks.compactMap { e in
+            guard let text = e["text"] as? String, let year = e["year"] as? Int else { return nil }
+            return "- \(year): \(text)"
+        }.joined(separator: "\n")
+    }
+    private static func airQuality(_ location: String) async -> String {
+        let q = location.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? location
+        guard let gd = await get("https://geocoding-api.open-meteo.com/v1/search?count=1&name=\(q)"),
+              let gj = try? JSONSerialization.jsonObject(with: gd) as? [String: Any],
+              let res = (gj["results"] as? [[String: Any]])?.first, let lat = res["latitude"] as? Double, let lon = res["longitude"] as? Double
+        else { return "Couldn't find \(location)." }
+        guard let d = await get("https://air-quality-api.open-meteo.com/v1/air-quality?latitude=\(lat)&longitude=\(lon)&current=us_aqi,pm2_5,pm10"),
+              let j = try? JSONSerialization.jsonObject(with: d) as? [String: Any], let cur = j["current"] as? [String: Any] else { return "Air quality unavailable." }
+        let aqi = cur["us_aqi"] as? Int ?? 0
+        let level = aqi <= 50 ? "Good" : aqi <= 100 ? "Moderate" : aqi <= 150 ? "Unhealthy (sensitive)" : aqi <= 200 ? "Unhealthy" : "Very unhealthy"
+        return "Air quality in \(res["name"] ?? location): US AQI \(aqi) (\(level)) — PM2.5 \(cur["pm2_5"] ?? "?"), PM10 \(cur["pm10"] ?? "?")."
     }
     private static func translate(_ text: String, _ to: String) async -> String {
         let q = text.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? text
