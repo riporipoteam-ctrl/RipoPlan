@@ -20,10 +20,10 @@ struct AuthView: View {
                         .fill(.ultraThinMaterial)
                         .frame(width: 96, height: 96)
                         .overlay(SparkMark(size: 50))
-                        .shadow(color: Theme.accent.opacity(0.4), radius: 24, y: 12)
+                        .shadow(color: Color.black.opacity(0.16), radius: 24, y: 12)
                     VStack(spacing: 6) {
                         Text("AskAI").font(.system(size: 32, weight: .heavy, design: .rounded))
-                            .foregroundStyle(Theme.accentGradient)
+                            .foregroundStyle(Theme.text)
                         Text("Your team of autonomous AI agents")
                             .font(.subheadline).foregroundStyle(Theme.muted)
                     }

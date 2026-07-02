@@ -23,7 +23,7 @@ struct SidebarView: View {
             // Header
             HStack(spacing: 8) {
                 BrandSpark(size: 18)
-                Text("AskAI").font(.system(size: 22, weight: .heavy)).foregroundStyle(Theme.brandGradient)
+                Text("AskAI").font(.system(size: 22, weight: .heavy)).foregroundStyle(Theme.text)
                 Spacer()
                 Button { Haptic.light(); newChat() } label: {
                     Image(systemName: "square.and.pencil").font(.system(size: 18, weight: .medium)).foregroundStyle(Theme.text)
@@ -40,16 +40,20 @@ struct SidebarView: View {
             .background(Theme.ink2, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
             .padding(.horizontal, 14)
 
-            // Pages
+            // Pages — a compact 2-column tile grid instead of a long row list.
             ScrollView {
                 VStack(spacing: 2) {
-                    navRow("person.2.fill", "Agents", "#8b5cf6") { openSheet(.agents) }
-                    navRow("number", "Channels", "#3b82f6") { openSheet(.channels) }
-                    navRow("square.grid.2x2.fill", "Apps", "#10b981") { openSheet(.apps) }
-                    navRow("clock.arrow.circlepath", "Jobs", "#f59e0b") { openSheet(.jobs) }
-                    navRow("book.fill", "Knowledge", "#ec4899") { openSheet(.knowledge) }
-                    navRow("puzzlepiece.extension.fill", "Integrations", "#14b8a6") { openSheet(.integrations) }
-                    navRow("bell.fill", "Activity", "#ef4444") { openSheet(.activity) }
+                    LazyVGrid(columns: [GridItem(.flexible(), spacing: 8), GridItem(.flexible(), spacing: 8)], spacing: 8) {
+                        navTile("person.2.fill", "Agents") { openSheet(.agents) }
+                        navTile("number", "Channels") { openSheet(.channels) }
+                        navTile("square.grid.2x2.fill", "Apps") { openSheet(.apps) }
+                        navTile("clock.arrow.circlepath", "Jobs") { openSheet(.jobs) }
+                        navTile("book.fill", "Knowledge") { openSheet(.knowledge) }
+                        navTile("puzzlepiece.extension.fill", "Integrations") { openSheet(.integrations) }
+                        navTile("bell.fill", "Activity") { openSheet(.activity) }
+                        navTile("trophy.fill", "Ranks") { openSheet(.ranks) }
+                    }
+                    .padding(.horizontal, 6).padding(.top, 4)
 
                     Text("Recents").font(.caption.weight(.semibold)).foregroundStyle(Theme.muted)
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -109,19 +113,17 @@ struct SidebarView: View {
         }
     }
 
-    private func navRow(_ icon: String, _ label: String, _ tint: String, _ action: @escaping () -> Void) -> some View {
+    private func navTile(_ icon: String, _ label: String, _ action: @escaping () -> Void) -> some View {
         Button { Haptic.light(); action(); close() } label: {
-            HStack(spacing: 12) {
-                Image(systemName: icon).font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(Color(hexString: tint))
-                    .frame(width: 28, height: 28)
-                    .background(Color(hexString: tint).opacity(0.14), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-                Text(label).foregroundStyle(Theme.text).fontWeight(.medium)
-                Spacer()
-                Image(systemName: "chevron.right").font(.caption2).foregroundStyle(Theme.muted.opacity(0.6))
+            VStack(alignment: .leading, spacing: 8) {
+                Image(systemName: icon).font(.system(size: 15, weight: .semibold)).foregroundStyle(Theme.text)
+                Text(label).font(.footnote.weight(.semibold)).foregroundStyle(Theme.text).lineLimit(1)
             }
-            .padding(.horizontal, 14).padding(.vertical, 8)
-            .contentShape(Rectangle())
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(12)
+            .background(Theme.ink2, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(Theme.stroke, lineWidth: 1))
+            .contentShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
         }
         .buttonStyle(.plain)
     }

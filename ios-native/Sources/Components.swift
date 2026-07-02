@@ -51,7 +51,7 @@ struct AgentAvatar: View {
         ZStack(alignment: .bottomTrailing) {
             ZStack {
                 RoundedRectangle(cornerRadius: r, style: .continuous)
-                    .fill(spark ? AnyShapeStyle(Theme.brandGradient)
+                    .fill(spark ? AnyShapeStyle(Theme.accent)
                                 : AnyShapeStyle(LinearGradient(colors: [base.opacity(0.95), base.opacity(0.65)],
                                                                startPoint: .topLeading, endPoint: .bottomTrailing)))
                 if let s = imageURL, !s.isEmpty, let u = URL(string: s) {
@@ -59,7 +59,7 @@ struct AgentAvatar: View {
                         .frame(width: size, height: size)
                         .clipShape(RoundedRectangle(cornerRadius: r, style: .continuous))
                 } else if spark {
-                    SparkMark(size: size * 0.5, color: .white)
+                    SparkMark(size: size * 0.5, color: Theme.onAccent)
                 } else {
                     Text(String(name.trimmingCharacters(in: .whitespaces).prefix(1)).uppercased())
                         .font(.system(size: size * 0.44, weight: .bold)).foregroundStyle(.white)
@@ -377,45 +377,73 @@ struct InputBar: View {
                     .padding(.horizontal, 4)
                 }
             }
-            HStack(alignment: .bottom, spacing: 8) {
-                Button { Haptic.light(); showMenu = true } label: {
-                    Image(systemName: "plus")
-                        .font(.system(size: 18, weight: .semibold))
-                        .foregroundStyle(Theme.text)
-                        .frame(width: 37, height: 37)
-                        .background(Theme.ink3, in: Circle())
-                }
-                .confirmationDialog("Add attachment", isPresented: $showMenu, titleVisibility: .visible) {
-                    Button("Photo Library") { onPickPhoto() }
-                    Button("Files") { onPickFile() }
-                    Button("Cancel", role: .cancel) {}
-                }
-
+            // Two-tier composer (modern ChatGPT layout): the text field gets the
+            // full top row; actions live on their own row underneath.
+            VStack(alignment: .leading, spacing: 10) {
                 TextField(placeholder, text: $text, axis: .vertical)
                     .focused($focused)
-                    .lineLimit(1...6)
+                    .lineLimit(1...8)
+                    .font(.body)
                     .foregroundStyle(Theme.text)
                     .tint(Theme.text)
-                    .padding(.vertical, 9)
+                    .padding(.horizontal, 6)
+                    .padding(.top, 4)
 
-                Button { Haptic.medium(); onSend() } label: {
-                    ZStack {
-                        Circle().fill(canSend ? AnyShapeStyle(Theme.brandGradient) : AnyShapeStyle(Theme.muted.opacity(0.4)))
-                        if sending { ProgressView().tint(.white) }
-                        else { Image(systemName: "arrow.up").font(.system(size: 17, weight: .bold)) }
+                HStack(spacing: 12) {
+                    Button { Haptic.light(); showMenu = true } label: {
+                        Image(systemName: "plus")
+                            .font(.system(size: 17, weight: .semibold))
+                            .foregroundStyle(Theme.text)
+                            .frame(width: 34, height: 34)
+                            .background(.ultraThinMaterial, in: Circle())
+                            .overlay(Circle().stroke(Theme.stroke, lineWidth: 1))
                     }
-                    .frame(width: 37, height: 37)
-                    .foregroundStyle(.white)
-                    .shadow(color: canSend ? Theme.brandB.opacity(0.4) : .clear, radius: 6, y: 3)
-                    .scaleEffect(canSend ? 1 : 0.92)
-                    .animation(.spring(response: 0.3, dampingFraction: 0.7), value: canSend)
+                    .confirmationDialog("Add attachment", isPresented: $showMenu, titleVisibility: .visible) {
+                        Button("Photo Library") { onPickPhoto() }
+                        Button("Files") { onPickFile() }
+                        Button("Cancel", role: .cancel) {}
+                    }
+
+                    Button { Haptic.light(); text = text.isEmpty ? "Search the web for " : text } label: {
+                        HStack(spacing: 5) {
+                            Image(systemName: "globe").font(.system(size: 13, weight: .semibold))
+                            Text("Search").font(.caption.weight(.semibold))
+                        }
+                        .foregroundStyle(Theme.text)
+                        .padding(.horizontal, 11).padding(.vertical, 8)
+                        .background(.ultraThinMaterial, in: Capsule())
+                        .overlay(Capsule().stroke(Theme.stroke, lineWidth: 1))
+                    }
+                    Button { Haptic.light(); text = text.isEmpty ? "Create an image of " : text } label: {
+                        HStack(spacing: 5) {
+                            Image(systemName: "photo").font(.system(size: 13, weight: .semibold))
+                            Text("Image").font(.caption.weight(.semibold))
+                        }
+                        .foregroundStyle(Theme.text)
+                        .padding(.horizontal, 11).padding(.vertical, 8)
+                        .background(.ultraThinMaterial, in: Capsule())
+                        .overlay(Capsule().stroke(Theme.stroke, lineWidth: 1))
+                    }
+
+                    Spacer(minLength: 0)
+
+                    Button { Haptic.medium(); onSend() } label: {
+                        ZStack {
+                            Circle().fill(canSend ? AnyShapeStyle(Theme.accent) : AnyShapeStyle(Theme.muted.opacity(0.35)))
+                            if sending { ProgressView().tint(Theme.onAccent) }
+                            else { Image(systemName: "arrow.up").font(.system(size: 17, weight: .bold)) }
+                        }
+                        .frame(width: 36, height: 36)
+                        .foregroundStyle(Theme.onAccent)
+                        .scaleEffect(canSend ? 1 : 0.9)
+                        .animation(.spring(response: 0.3, dampingFraction: 0.7), value: canSend)
+                    }
+                    .disabled(!canSend)
                 }
-                .disabled(!canSend)
             }
-            .padding(.horizontal, 7)
-            .padding(.vertical, 7)
-            .liquidGlass(28)
-            .overlay(RoundedRectangle(cornerRadius: 28, style: .continuous).stroke(Theme.stroke, lineWidth: 1))
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
+            .liquidGlass(26)
         }
     }
 

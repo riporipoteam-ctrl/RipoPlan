@@ -87,36 +87,38 @@ struct ConversationView: View {
                     .scaleEffect(heroIn ? 1 : 0.7).opacity(heroIn ? 1 : 0)
                 Text(greeting)
                     .font(.system(size: 30, weight: .bold))
-                    .foregroundStyle(Theme.brandGradient)
+                    .foregroundStyle(Theme.text)
                     .multilineTextAlignment(.center)
                     .opacity(heroIn ? 1 : 0).offset(y: heroIn ? 0 : 8)
                 Text("What should your team get done?")
                     .font(.subheadline).foregroundStyle(Theme.muted)
                     .opacity(heroIn ? 1 : 0)
-                LazyVGrid(columns: [GridItem(.flexible(), spacing: 10), GridItem(.flexible(), spacing: 10)], spacing: 10) {
+                VStack(spacing: 8) {
                     ForEach(Array(SUGGESTIONS.enumerated()), id: \.element.id) { i, s in
                         Button { Haptic.light(); text = s.seed } label: {
-                            VStack(alignment: .leading, spacing: 10) {
+                            HStack(spacing: 12) {
                                 Image(systemName: s.icon)
-                                    .font(.system(size: 17, weight: .semibold))
-                                    .foregroundStyle(Color(hexString: s.color))
-                                    .frame(width: 34, height: 34)
-                                    .background(Color(hexString: s.color).opacity(0.14), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-                                Text(s.label).font(.subheadline.weight(.semibold)).foregroundStyle(Theme.text)
-                                    .multilineTextAlignment(.leading).lineLimit(2)
+                                    .font(.system(size: 15, weight: .semibold))
+                                    .foregroundStyle(Theme.text)
+                                    .frame(width: 32, height: 32)
+                                    .background(Theme.ink3, in: Circle())
+                                Text(s.label).font(.subheadline.weight(.medium)).foregroundStyle(Theme.text)
+                                    .lineLimit(1)
                                 Spacer(minLength: 0)
+                                Image(systemName: "arrow.up.right").font(.caption.weight(.semibold))
+                                    .foregroundStyle(Theme.muted.opacity(0.7))
                             }
-                            .padding(13)
-                            .frame(maxWidth: .infinity, minHeight: 104, alignment: .topLeading)
+                            .padding(.horizontal, 14).padding(.vertical, 11)
+                            .frame(maxWidth: .infinity)
                             .liquidGlass(18, shadow: false)
                         }
                         .pressable()
                         .opacity(heroIn ? 1 : 0)
                         .offset(y: heroIn ? 0 : 14)
-                        .animation(.spring(response: 0.45, dampingFraction: 0.85).delay(0.05 * Double(i) + 0.1), value: heroIn)
+                        .animation(.spring(response: 0.45, dampingFraction: 0.85).delay(0.04 * Double(i) + 0.1), value: heroIn)
                     }
                 }
-                .padding(.horizontal, 14)
+                .padding(.horizontal, 16)
                 Spacer(minLength: 110)
             }
             .frame(maxWidth: .infinity)
@@ -302,15 +304,15 @@ struct MessageBubble: View {
                 } else if !(message.content ?? "").isEmpty {
                     if isUser {
                         MD(text: message.content ?? "")
-                            .font(.body).foregroundStyle(.white)
+                            .font(.body).foregroundStyle(Theme.onAccent)
                             .textSelection(.enabled)
                             .padding(.horizontal, 15).padding(.vertical, 11)
                             .background(
                                 UnevenRoundedRectangle(topLeadingRadius: 20, bottomLeadingRadius: 20,
                                                        bottomTrailingRadius: 6, topTrailingRadius: 20, style: .continuous)
-                                    .fill(Theme.brandGradient)
+                                    .fill(Theme.accent)
                             )
-                            .shadow(color: Theme.brandB.opacity(0.3), radius: 8, y: 4)
+                            .shadow(color: .black.opacity(0.15), radius: 8, y: 4)
                     } else {
                         RichText(text: message.content ?? "")
                     }
