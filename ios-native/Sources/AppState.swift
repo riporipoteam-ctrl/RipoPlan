@@ -57,7 +57,8 @@ final class AppState: ObservableObject {
             "recipe": "Found a recipe", "cocktail": "Mixed a cocktail", "pokemon": "Looked up a Pokémon", "sunrise_sunset": "Checked sun times",
             "synonyms": "Found synonyms", "npm_package": "Looked up an npm package", "github_user": "Checked a GitHub user", "crypto_top": "Checked top crypto",
             "on_this_day": "Checked history", "air_quality": "Checked air quality",
-            "music_search": "Searched music", "app_search": "Searched the App Store", "urban_dictionary": "Checked slang"
+            "music_search": "Searched music", "app_search": "Searched the App Store", "urban_dictionary": "Checked slang",
+            "edit_app": "Updated an app", "list_apps": "Checked the apps", "post_channel": "Posted in a channel", "think": "Extended thinking"
         ]
         return steps.prefix(20).map { ["label": label[$0] ?? "Used \($0)", "tool": $0, "status": "done"] }
     }
@@ -366,7 +367,10 @@ final class AppState: ObservableObject {
                 onCreateTask: { n, p, who in await self.toolCreateTask(n, p, who) },
                 onEditAgent: { target, changes in await self.toolEditAgent(target, changes) },
                 onCreateChannel: { name, desc in await self.toolCreateChannel(name, desc) },
-                onSaveKnowledge: { title, content in await self.toolSaveKnowledge(title, content) }
+                onSaveKnowledge: { title, content in await self.toolSaveKnowledge(title, content) },
+                onEditApp: { name, html in await self.toolEditApp(name, html) },
+                onListApps: { await self.toolListApps() },
+                onPostChannel: { ch, text in await self.toolPostChannel(agentId: r.id, ch, text) }
             )
             let res = await AgentRunner.run(agent: r, history: history, roster: roster, memories: mems, ctx: ctx)
             var patch: [String: Any] = ["content": res.text, "status": "complete",
@@ -417,7 +421,10 @@ final class AppState: ObservableObject {
                 onCreateTask: { name, prompt, who in await self.toolCreateTask(name, prompt, who) },
                 onEditAgent: { target, changes in await self.toolEditAgent(target, changes) },
                 onCreateChannel: { name, desc in await self.toolCreateChannel(name, desc) },
-                onSaveKnowledge: { title, content in await self.toolSaveKnowledge(title, content) }
+                onSaveKnowledge: { title, content in await self.toolSaveKnowledge(title, content) },
+                onEditApp: { name, html in await self.toolEditApp(name, html) },
+                onListApps: { await self.toolListApps() },
+                onPostChannel: { ch, text in await self.toolPostChannel(agentId: agent.id, ch, text) }
             )
             let result = await AgentRunner.run(agent: agent, history: history, roster: roster, memories: mems, ctx: ctx)
             var patch: [String: Any] = ["content": result.text, "status": "complete",
@@ -580,6 +587,43 @@ final class AppState: ObservableObject {
     /// Public channel create for the UI.
     func createChannel(name: String, description: String) async {
         _ = await toolCreateChannel(name, description)
+    }
+
+    /// Replace an existing Mini App's HTML (agent iterating on an app).
+    private func toolEditApp(_ name: String, _ html: String) async -> String {
+        guard let ws = workspace?.id, !name.isEmpty else { return "Need the app name." }
+        guard !html.isEmpty else { return "Need the new HTML." }
+        let q = name.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? name
+        let rows: [MiniApp] = (try? await Supa.shared.select("mini_apps?workspace_id=eq.\(ws)&name=ilike.*\(q)*&select=id,name&limit=1")) ?? []
+        guard let target = rows.first else { return "No app named \"\(name)\". Use list_apps to see what exists, or build_app to create it." }
+        try? await Supa.shared.update("mini_apps?id=eq.\(target.id)", ["html": html, "updated_at": isoNow()])
+        return "✅ Updated **\(target.name)** — the new version is live on the Apps page."
+    }
+
+    /// List published Mini Apps so agents can find and iterate on them.
+    private func toolListApps() async -> String {
+        guard let ws = workspace?.id else { return "No workspace." }
+        let rows: [MiniApp] = (try? await Supa.shared.select("mini_apps?workspace_id=eq.\(ws)&select=id,name,description,html,created_at&order=created_at.desc&limit=10")) ?? []
+        guard !rows.isEmpty else { return "No apps published yet." }
+        return rows.map { a in
+            let size = a.html?.count ?? 0
+            let head = String((a.html ?? "").prefix(400))
+            return "• \(a.name) (\(size) chars)\n  Code starts: \(head)"
+        }.joined(separator: "\n")
+    }
+
+    /// Post into a channel by name as the given agent (team build workflow).
+    private func toolPostChannel(agentId: String, _ channelName: String, _ text: String) async -> String {
+        guard let ws = workspace?.id, !text.isEmpty else { return "Need channel and text." }
+        let clean = channelName.replacingOccurrences(of: "#", with: "").trimmingCharacters(in: .whitespaces)
+        let q = clean.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? clean
+        let rows: [Channel] = (try? await Supa.shared.select("channels?workspace_id=eq.\(ws)&name=ilike.*\(q)*&select=id,name&limit=1")) ?? []
+        guard let ch = rows.first else { return "No channel named #\(clean). Create it first with create_channel." }
+        _ = try? await Supa.shared.insert("messages", [
+            "workspace_id": ws, "channel_id": ch.id, "sender_type": "agent", "agent_id": agentId,
+            "content": text, "status": "complete"
+        ], returning: false) as [Message]
+        return "✅ Posted to #\(ch.name)."
     }
 
     // MARK: - Agent tool actions (DB writes)

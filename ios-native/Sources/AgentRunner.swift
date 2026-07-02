@@ -16,6 +16,9 @@ struct RunContext {
     let onEditAgent: (String, [String: String]) async -> String  // target, {name,role,description,emoji,color}
     var onCreateChannel: (String, String) async -> String = { _, _ in "Channels can't be created here." }
     var onSaveKnowledge: (String, String) async -> String = { _, _ in "Knowledge saved." }
+    var onEditApp: (String, String) async -> String = { _, _ in "Apps can't be edited here." }
+    var onListApps: () async -> String = { "No apps." }
+    var onPostChannel: (String, String) async -> String = { _, _ in "Channels unavailable here." }
 }
 
 struct RunResult { var text: String; var images: [String] = []; var steps: [String] = []; var pages: [[String: String]] = [] }
@@ -61,6 +64,11 @@ enum AgentRunner {
         case "assign_rank": return "Assigning a rank…"
         case "create_task": return "Creating a task…"
         case "edit_agent": return "Updating a teammate…"
+        case "edit_app": return "Editing the app…"
+        case "list_apps": return "Checking published apps…"
+        case "post_channel": return "Posting in the channel…"
+        case "create_channel": return "Creating a channel…"
+        case "save_knowledge": return "Saving knowledge…"
         default: return "Working…"
         }
     }
@@ -125,6 +133,9 @@ enum AgentRunner {
             fn("music_search", "Find songs/albums/artists (iTunes).", ["query": S], ["query"]),
             fn("app_search", "Find iOS apps on the App Store.", ["query": S], ["query"]),
             fn("urban_dictionary", "Slang definition from Urban Dictionary.", ["term": S], ["term"]),
+            fn("edit_app", "Replace an existing Mini App's HTML with an improved version (republish).", ["name": S, "html": S], ["name", "html"]),
+            fn("list_apps", "List the workspace's published Mini Apps (names + current code preview).", [:], []),
+            fn("post_channel", "Post a message into a team channel by channel name.", ["channel": S, "text": S], ["channel", "text"]),
         ]
     }
 
@@ -138,16 +149,27 @@ enum AgentRunner {
         Hermes agent engine with full tool access. \
         \(agent.description ?? "") \(agent.system_prompt ?? "")
         Today is \(today). Teammates: \(roster).
-        You can browse the web, search, run code, generate images, build & publish web apps, create and \
-        edit agents, delegate tasks to teammates (who then reply here), create tasks, manage ranks, and use \
-        skills (weather, currency, crypto, stocks, dictionary, wiki, translate, world cup, unit convert, QR, \
-        datetime, calculate). Be proactive and autonomous: actually USE the tools to do real work and finish \
-        the job — never claim you did something you didn't. If the user asks a different teammate to do \
-        something, use the delegate tool so THAT teammate answers — never role-play or write a reply as \
-        another agent, and never invent their response. Write rich, detailed answers in Markdown: use ## \
-        headings, bullet lists, and **bold** key facts; include concrete numbers, dates, and sources when \
-        you have them. When a visual would help (people, places, products, designs, diagrams-as-art), \
-        proactively call generate_image so the user sees a picture with your answer. \
+
+        RULE 1 — ACT IMMEDIATELY. Never ask permission, never say "want me to search?", never stall. \
+        If the question involves anything current (sports, news, prices, businesses, events), your FIRST \
+        move is web_search — before writing anything. Do the work in this turn, not a future one.
+        RULE 2 — GO DEEP. Chain tools: search, then browse the best 2-3 result pages, then answer with \
+        concrete facts (numbers, dates, names, sources). You may take many tool rounds — extended \
+        thinking is encouraged for hard tasks.
+        RULE 3 — WEBSITES MUST BE PROFESSIONAL. When asked to build a website/app: FIRST web_search the \
+        business/topic and browse for real details (address, phone, hours, services, reviews). THEN build \
+        one long self-contained HTML file with: modern CSS (custom properties, gradient hero, glassmorphism \
+        cards, smooth scroll-behavior), animations (CSS keyframes, hover transitions, reveal-on-scroll via \
+        IntersectionObserver), fully responsive layout, real content from your research (never lorem ipsum), \
+        images via https://image.pollinations.ai/prompt/{description}?width=800&height=500 for hero/section \
+        art, sections (hero, about, services with cards, gallery, testimonials, contact with real info + map \
+        link), and a sticky nav. Publish with build_app. To iterate on an existing app use list_apps then \
+        edit_app.
+        RULE 4 — TEAMWORK. For big builds: create_channel for the project, post_channel a kickoff brief, \
+        and delegate the build to the right teammate (they reply themselves — never write their reply). \
+        If the user asks a different teammate to do something, delegate to them.
+        RULE 5 — RICH OUTPUT. Answer in Markdown with ## headings, bullets, **bold** facts. Call \
+        generate_image proactively when a visual helps. Never claim you did something you didn't. \
         Speak only as \(agent.name).\(memText)
         """
         var msgs: [[String: Any]] = [["role": "system", "content": system]]
@@ -155,7 +177,9 @@ enum AgentRunner {
 
         var lastToolOutput = ""
         var pages: [[String: String]] = []
-        for round in 0..<6 {
+        for round in 0..<10 {
+            // Let the user know when the agent chooses to keep digging.
+            if round == 4 { await ctx.onActivity("Extended thinking — going deeper…", "think") }
             guard let message = await chat(msgs, tools: tools) else { break }
             let rawContent = (message["content"] as? String) ?? ""
             // Kimi sometimes emits tool calls as raw special-token text instead of
@@ -182,6 +206,18 @@ enum AgentRunner {
                     if !raw.isEmpty, let p = pagePreview(raw) {
                         pages.append(p)
                         await ctx.onPagePreview(p)
+                    }
+                }
+                // LIVE search view: show the results page the agent is looking at.
+                if name == "web_search" {
+                    let q = str(args["query"])
+                    if !q.isEmpty {
+                        let enc = q.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? q
+                        if let p = pagePreview("https://duckduckgo.com/?q=\(enc)") {
+                            var sp = p; sp["host"] = "Searching: \(String(q.prefix(40)))"
+                            pages.append(sp)
+                            await ctx.onPagePreview(sp)
+                        }
                     }
                 }
                 let out = await runTool(name, args, ctx, &images)
@@ -264,7 +300,8 @@ enum AgentRunner {
         let key = kimi ? nvidiaKey : groqKey
         let modelId = kimi ? kimiModel : groqModel
         if key.isEmpty { return nil }
-        var body: [String: Any] = ["model": modelId, "messages": messages, "temperature": 0.5, "max_tokens": 2048]
+        // Large output budget so full professional websites/code fit in one reply.
+        var body: [String: Any] = ["model": modelId, "messages": messages, "temperature": 0.5, "max_tokens": kimi ? 8192 : 6000]
         // Kimi K2.6 is a thinking model; after tool results the thinking template
         // makes it produce garbage. Disable thinking so it stays coherent.
         if kimi { body["chat_template_kwargs"] = ["thinking": false] }
@@ -356,6 +393,9 @@ enum AgentRunner {
         case "music_search": return await musicSearch(str(args["query"]))
         case "app_search": return await appSearch(str(args["query"]))
         case "urban_dictionary": return await urbanDictionary(str(args["term"]))
+        case "edit_app": return await ctx.onEditApp(str(args["name"]), str(args["html"]))
+        case "list_apps": return await ctx.onListApps()
+        case "post_channel": return await ctx.onPostChannel(str(args["channel"]), str(args["text"]))
         default: return "Unknown tool."
         }
     }
