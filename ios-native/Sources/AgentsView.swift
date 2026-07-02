@@ -169,12 +169,13 @@ struct AgentDetailView: View {
 
                     Button { startChat() } label: {
                         HStack {
-                            if busy { ProgressView().tint(Theme.onAccent) }
+                            if busy { ProgressView().tint(.white) }
                             Label("Message \(agent.name)", systemImage: "bubble.left.fill")
                         }
                         .fontWeight(.bold).frame(maxWidth: .infinity).padding(.vertical, 14)
-                        .background(Theme.accent, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-                        .foregroundStyle(Theme.onAccent)
+                        .background(Theme.brandGradient, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                        .foregroundStyle(.white)
+                        .shadow(color: Theme.brandB.opacity(0.35), radius: 10, y: 5)
                     }.pressable().disabled(busy)
                     Spacer(minLength: 80)
                 }

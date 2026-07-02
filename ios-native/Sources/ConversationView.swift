@@ -83,11 +83,11 @@ struct ConversationView: View {
         ScrollView {
             VStack(spacing: 18) {
                 Spacer(minLength: 70 + topInset)
-                SparkMark(size: 40, color: Theme.text)
+                BrandSpark(size: 42)
                     .scaleEffect(heroIn ? 1 : 0.7).opacity(heroIn ? 1 : 0)
                 Text(greeting)
-                    .font(.system(size: 26, weight: .bold))
-                    .foregroundStyle(Theme.text)
+                    .font(.system(size: 30, weight: .bold))
+                    .foregroundStyle(Theme.brandGradient)
                     .multilineTextAlignment(.center)
                     .opacity(heroIn ? 1 : 0).offset(y: heroIn ? 0 : 8)
                 Text("What should your team get done?")
@@ -302,15 +302,15 @@ struct MessageBubble: View {
                 } else if !(message.content ?? "").isEmpty {
                     if isUser {
                         MD(text: message.content ?? "")
-                            .font(.body).foregroundStyle(Theme.onAccent)
+                            .font(.body).foregroundStyle(.white)
                             .textSelection(.enabled)
                             .padding(.horizontal, 15).padding(.vertical, 11)
                             .background(
                                 UnevenRoundedRectangle(topLeadingRadius: 20, bottomLeadingRadius: 20,
                                                        bottomTrailingRadius: 6, topTrailingRadius: 20, style: .continuous)
-                                    .fill(Theme.accent)
+                                    .fill(Theme.brandGradient)
                             )
-                            .shadow(color: Theme.accent.opacity(0.18), radius: 6, y: 3)
+                            .shadow(color: Theme.brandB.opacity(0.3), radius: 8, y: 4)
                     } else {
                         RichText(text: message.content ?? "")
                     }

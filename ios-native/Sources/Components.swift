@@ -51,8 +51,9 @@ struct AgentAvatar: View {
         ZStack(alignment: .bottomTrailing) {
             ZStack {
                 RoundedRectangle(cornerRadius: r, style: .continuous)
-                    .fill(LinearGradient(colors: [base.opacity(0.95), base.opacity(0.65)],
-                                         startPoint: .topLeading, endPoint: .bottomTrailing))
+                    .fill(spark ? AnyShapeStyle(Theme.brandGradient)
+                                : AnyShapeStyle(LinearGradient(colors: [base.opacity(0.95), base.opacity(0.65)],
+                                                               startPoint: .topLeading, endPoint: .bottomTrailing)))
                 if let s = imageURL, !s.isEmpty, let u = URL(string: s) {
                     AsyncImage(url: u) { img in img.resizable().scaledToFill() } placeholder: { Color.clear }
                         .frame(width: size, height: size)
@@ -399,12 +400,13 @@ struct InputBar: View {
 
                 Button { Haptic.medium(); onSend() } label: {
                     ZStack {
-                        if sending { ProgressView().tint(Theme.onAccent) }
+                        Circle().fill(canSend ? AnyShapeStyle(Theme.brandGradient) : AnyShapeStyle(Theme.muted.opacity(0.4)))
+                        if sending { ProgressView().tint(.white) }
                         else { Image(systemName: "arrow.up").font(.system(size: 17, weight: .bold)) }
                     }
                     .frame(width: 37, height: 37)
-                    .background(canSend ? Theme.accent : Theme.muted.opacity(0.4), in: Circle())
-                    .foregroundStyle(Theme.onAccent)
+                    .foregroundStyle(.white)
+                    .shadow(color: canSend ? Theme.brandB.opacity(0.4) : .clear, radius: 6, y: 3)
                     .scaleEffect(canSend ? 1 : 0.92)
                     .animation(.spring(response: 0.3, dampingFraction: 0.7), value: canSend)
                 }

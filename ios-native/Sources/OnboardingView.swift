@@ -48,8 +48,8 @@ struct OnboardingView: View {
                     } label: {
                         Text("Continue").fontWeight(.bold)
                             .frame(maxWidth: .infinity).padding(.vertical, 15)
-                            .background(Theme.accent, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-                            .foregroundStyle(Theme.onAccent)
+                            .background(Theme.brandGradient, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                            .foregroundStyle(.white)
                     }
                     .pressable()
                     .padding(.horizontal, 24).padding(.bottom, 24)
@@ -115,8 +115,8 @@ struct WorkspaceSetupView: View {
                 } label: {
                     HStack { if busy { ProgressView().tint(Theme.onAccent) }; Text(busy ? "Building your team…" : "Create my workspace").fontWeight(.bold) }
                         .frame(maxWidth: .infinity).padding(.vertical, 15)
-                        .background(Theme.accent, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-                        .foregroundStyle(Theme.onAccent)
+                        .background(Theme.brandGradient, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                        .foregroundStyle(.white)
                 }
                 .pressable().disabled(busy).padding(.horizontal, 22)
 

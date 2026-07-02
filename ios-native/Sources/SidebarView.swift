@@ -21,8 +21,9 @@ struct SidebarView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             // Header
-            HStack {
-                Text("AskAI").font(.system(size: 22, weight: .bold)).foregroundStyle(Theme.text)
+            HStack(spacing: 8) {
+                BrandSpark(size: 18)
+                Text("AskAI").font(.system(size: 22, weight: .heavy)).foregroundStyle(Theme.brandGradient)
                 Spacer()
                 Button { Haptic.light(); newChat() } label: {
                     Image(systemName: "square.and.pencil").font(.system(size: 18, weight: .medium)).foregroundStyle(Theme.text)

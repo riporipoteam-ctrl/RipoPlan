@@ -18,12 +18,18 @@ enum Theme {
     static let warn = Color(hex: 0xD97706)
     static let bad = Color(hex: 0xE11D48)
 
-    // Kept for compatibility with existing call sites — now flat/neutral.
-    static var accentGradient: LinearGradient {
-        LinearGradient(colors: [accent, accent], startPoint: .top, endPoint: .bottom)
+    // Brand identity — an indigo→violet→pink sweep used for hero moments:
+    // wordmarks, send button, user bubbles, gradient sparks.
+    static let brandA = Color(hex: 0x6366F1)   // indigo
+    static let brandB = Color(hex: 0x8B5CF6)   // violet
+    static let brandC = Color(hex: 0xEC4899)   // pink
+    static var brandGradient: LinearGradient {
+        LinearGradient(colors: [brandA, brandB, brandC], startPoint: .topLeading, endPoint: .bottomTrailing)
     }
+
+    static var accentGradient: LinearGradient { brandGradient }
     static var coolGradient: LinearGradient {
-        LinearGradient(colors: [accent, accent], startPoint: .top, endPoint: .bottom)
+        LinearGradient(colors: [brandA, brandB], startPoint: .top, endPoint: .bottom)
     }
     static var backdrop: LinearGradient {
         LinearGradient(colors: [ink, ink], startPoint: .top, endPoint: .bottom)
@@ -164,17 +170,41 @@ struct SparkShape: Shape {
     }
 }
 
-/// Subtle ambient background so frosted glass has depth to refract. Neutral,
-/// barely-there tints (kept monochrome/ChatGPT-clean).
+/// Ambient brand background — soft drifting indigo/violet/pink blobs give every
+/// screen depth and identity (glass surfaces refract them). Gently animated.
 struct AuroraBackground: View {
+    @State private var drift = false
     var body: some View {
         ZStack {
             Theme.ink
-            Circle().fill(Color(lightUI: .black, darkUI: .white).opacity(0.04))
-                .frame(width: 360, height: 360).blur(radius: 80).offset(x: -120, y: -260)
-            Circle().fill(Color(lightUI: .black, darkUI: .white).opacity(0.035))
-                .frame(width: 320, height: 320).blur(radius: 90).offset(x: 140, y: 360)
+            Circle().fill(Theme.brandA.opacity(0.16))
+                .frame(width: 380, height: 380).blur(radius: 90)
+                .offset(x: drift ? -110 : -150, y: drift ? -270 : -230)
+            Circle().fill(Theme.brandB.opacity(0.13))
+                .frame(width: 340, height: 340).blur(radius: 95)
+                .offset(x: drift ? 150 : 110, y: drift ? 340 : 390)
+            Circle().fill(Theme.brandC.opacity(0.10))
+                .frame(width: 300, height: 300).blur(radius: 100)
+                .offset(x: drift ? 130 : 170, y: drift ? -140 : -100)
         }
         .ignoresSafeArea()
+        .onAppear {
+            withAnimation(.easeInOut(duration: 9).repeatForever(autoreverses: true)) { drift = true }
+        }
+    }
+}
+
+/// Brand-gradient spark for hero placements (home, sidebar wordmark, model pill).
+struct BrandSpark: View {
+    var size: CGFloat = 44
+    var body: some View {
+        ZStack {
+            SparkShape().fill(Theme.brandGradient).frame(width: size, height: size)
+            SparkShape().fill(Theme.brandGradient).opacity(0.85)
+                .frame(width: size * 0.36, height: size * 0.36)
+                .offset(x: size * 0.42, y: -size * 0.42)
+        }
+        .frame(width: size * 1.3, height: size * 1.3)
+        .shadow(color: Theme.brandB.opacity(0.35), radius: 10, y: 4)
     }
 }

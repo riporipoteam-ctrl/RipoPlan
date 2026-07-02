@@ -93,7 +93,7 @@ struct RootShell: View {
                 }
             } label: {
                 HStack(spacing: 6) {
-                    SparkMark(size: 15, color: Theme.text)
+                    BrandSpark(size: 13)
                     Text(model == "groq" ? "Llama 3.3" : "Kimi K2.6").font(.subheadline.weight(.semibold)).foregroundStyle(Theme.text)
                     Image(systemName: "chevron.down").font(.caption2.weight(.bold)).foregroundStyle(Theme.muted)
                 }
