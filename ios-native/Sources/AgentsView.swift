@@ -12,11 +12,33 @@ struct AgentsView: View {
     private let cols = [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)]
     private func rank(_ id: String?) -> RankRow? { id == nil ? nil : ranks.first { $0.id == id } }
 
+    private func statChip(_ value: String, _ label: String, _ icon: String, _ tint: String) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 6) {
+                Image(systemName: icon).font(.caption).foregroundStyle(Color(hexString: tint))
+                Text(label).font(.caption).foregroundStyle(Theme.muted)
+            }
+            Text(value).font(.title3.bold()).foregroundStyle(Theme.text)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(12)
+        .background(Color(hexString: tint).opacity(0.08), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 14).stroke(Color(hexString: tint).opacity(0.2), lineWidth: 1))
+    }
+
     var body: some View {
         NavigationStack(path: $path) {
             ZStack {
                 Theme.backdrop.ignoresSafeArea()
                 ScrollView {
+                    // Team stats strip.
+                    HStack(spacing: 10) {
+                        statChip("\(app.agents.count)", "Agents", "person.2.fill", "#8b5cf6")
+                        statChip("\(app.agents.filter { $0.status != "paused" }.count)", "Active", "bolt.fill", "#10b981")
+                        statChip("\(ranks.count)", "Ranks", "rosette", "#f59e0b")
+                    }
+                    .padding(.horizontal, 16).padding(.top, 12)
+
                     // Ranks strip — manage ranks right here in the Agents page.
                     Button { Haptic.light(); showRanks = true } label: {
                         HStack(spacing: 10) {

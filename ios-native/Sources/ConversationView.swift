@@ -85,11 +85,14 @@ struct ConversationView: View {
                 Spacer(minLength: 70 + topInset)
                 SparkMark(size: 40, color: Theme.text)
                     .scaleEffect(heroIn ? 1 : 0.7).opacity(heroIn ? 1 : 0)
-                Text("How can I help\(app.firstName.isEmpty ? "" : ", \(app.firstName)")?")
-                    .font(.system(size: 24, weight: .semibold))
+                Text(greeting)
+                    .font(.system(size: 26, weight: .bold))
                     .foregroundStyle(Theme.text)
                     .multilineTextAlignment(.center)
                     .opacity(heroIn ? 1 : 0).offset(y: heroIn ? 0 : 8)
+                Text("What should your team get done?")
+                    .font(.subheadline).foregroundStyle(Theme.muted)
+                    .opacity(heroIn ? 1 : 0)
                 LazyVGrid(columns: [GridItem(.flexible(), spacing: 10), GridItem(.flexible(), spacing: 10)], spacing: 10) {
                     ForEach(Array(SUGGESTIONS.enumerated()), id: \.element.id) { i, s in
                         Button { Haptic.light(); text = s.seed } label: {
@@ -130,7 +133,9 @@ struct ConversationView: View {
                         if !loaded { ProgressView().tint(Theme.muted).padding(.top, 40) }
                         ForEach(Array(messages.enumerated()), id: \.element.id) { idx, m in
                             if let label = dayDivider(at: idx) { DayDivider(label: label) }
-                            MessageBubble(message: m).id(m.id)
+                            MessageBubble(message: m, onResend: { body in
+                                Task { _ = await app.send(body, threadId: threadId) }
+                            }).id(m.id)
                         }
                         Color.clear.frame(height: 1).id("end")
                             .background(GeometryReader { g in
@@ -170,6 +175,12 @@ struct ConversationView: View {
     }
 
     private var lastStamp: String { (messages.last?.status ?? "") + String(messages.last?.content?.count ?? 0) }
+
+    private var greeting: String {
+        let h = Calendar.current.component(.hour, from: Date())
+        let base = h < 5 ? "Up late" : h < 12 ? "Good morning" : h < 18 ? "Good afternoon" : "Good evening"
+        return app.firstName.isEmpty ? "\(base)!" : "\(base), \(app.firstName)!"
+    }
 
     /// Returns a date label ("Today"/"Yesterday"/"Mar 5") when the message at
     /// `idx` starts a new day vs the previous message.
@@ -239,8 +250,10 @@ struct ConversationView: View {
 struct MessageBubble: View {
     @EnvironmentObject var app: AppState
     let message: Message
+    var onResend: ((String) -> Void)? = nil
     @State private var showTrail = false
     @State private var appeared = false
+    @State private var viewerURL: String?
 
     var isUser: Bool { message.sender_type == "user" }
     var thinking: Bool { message.status == "thinking" }
@@ -265,14 +278,17 @@ struct MessageBubble: View {
                 if let atts = message.attachments, !atts.isEmpty {
                     ForEach(atts) { a in
                         if a.type == "image" {
-                            AsyncImage(url: URL(string: a.url)) { i in i.resizable().scaledToFit() } placeholder: {
-                                RoundedRectangle(cornerRadius: 18, style: .continuous).fill(Theme.ink3)
-                                    .frame(height: 220)
-                                    .overlay(ProgressView().tint(Theme.muted))
+                            Button { Haptic.light(); viewerURL = a.url } label: {
+                                AsyncImage(url: URL(string: a.url)) { i in i.resizable().scaledToFit() } placeholder: {
+                                    RoundedRectangle(cornerRadius: 18, style: .continuous).fill(Theme.ink3)
+                                        .frame(height: 220)
+                                        .overlay(ProgressView().tint(Theme.muted))
+                                }
+                                .frame(maxWidth: 300)
+                                .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                                .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).stroke(Theme.stroke, lineWidth: 1))
                             }
-                            .frame(maxWidth: 300)
-                            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-                            .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).stroke(Theme.stroke, lineWidth: 1))
+                            .buttonStyle(.plain)
                         } else if a.type == "link" {
                             BrowserPreviewCard(url: a.url, host: a.name, shot: a.preview, live: thinking)
                         } else {
@@ -306,6 +322,22 @@ struct MessageBubble: View {
         .opacity(appeared ? 1 : 0)
         .offset(y: appeared ? 0 : 10)
         .onAppear { withAnimation(.spring(response: 0.4, dampingFraction: 0.85)) { appeared = true } }
+        .contextMenu {
+            if let body = message.content, !body.isEmpty {
+                Button { UIPasteboard.general.string = body; Haptic.success() } label: {
+                    Label("Copy", systemImage: "doc.on.doc")
+                }
+                ShareLink(item: body) { Label("Share", systemImage: "square.and.arrow.up") }
+                if isUser, let onResend {
+                    Button { Haptic.medium(); onResend(body) } label: {
+                        Label("Send again", systemImage: "arrow.clockwise")
+                    }
+                }
+            }
+        }
+        .fullScreenCover(isPresented: Binding(get: { viewerURL != nil }, set: { if !$0 { viewerURL = nil } })) {
+            if let u = viewerURL { ImageViewer(url: u) }
+        }
     }
 
     // Nebula-style "N actions · view" trail under a completed agent message.
@@ -340,12 +372,34 @@ struct MessageBubble: View {
 
     @ViewBuilder private var activityOrDots: some View {
         if let acts = message.activities, let last = acts.last(where: { $0.label != nil }) {
-            HStack(spacing: 6) {
+            HStack(spacing: 7) {
                 ProgressView().scaleEffect(0.7)
-                Text(last.label ?? "Working…").font(.caption).foregroundStyle(Theme.muted)
+                ShimmerText(text: last.label ?? "Working…")
             }
         } else {
             TypingDots()
         }
+    }
+}
+
+/// Gemini-style shimmering status text while the agent works.
+struct ShimmerText: View {
+    let text: String
+    @State private var phase: CGFloat = -1
+
+    var body: some View {
+        Text(text)
+            .font(.subheadline.weight(.medium))
+            .foregroundStyle(Theme.muted)
+            .overlay(
+                LinearGradient(colors: [.clear, Theme.text.opacity(0.9), .clear],
+                               startPoint: .leading, endPoint: .trailing)
+                    .frame(width: 70)
+                    .offset(x: phase * 160)
+                    .mask(Text(text).font(.subheadline.weight(.medium)))
+            )
+            .onAppear {
+                withAnimation(.linear(duration: 1.4).repeatForever(autoreverses: false)) { phase = 1 }
+            }
     }
 }

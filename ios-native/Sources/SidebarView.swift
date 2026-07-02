@@ -9,6 +9,9 @@ struct SidebarView: View {
     var openSheet: (ShellSheet) -> Void
 
     @State private var search = ""
+    @State private var showRename = false
+    @State private var renameTarget: String?
+    @State private var renameDraft = ""
 
     private var filtered: [ThreadRow] {
         guard !search.isEmpty else { return app.threads }
@@ -62,6 +65,9 @@ struct SidebarView: View {
                         }
                         .buttonStyle(.plain)
                         .contextMenu {
+                            Button { renameTarget = t.id; renameDraft = t.title ?? ""; showRename = true } label: {
+                                Label("Rename", systemImage: "pencil")
+                            }
                             Button(role: .destructive) { Task { await app.deleteThread(t.id); if current == t.id { current = nil } } } label: {
                                 Label("Delete", systemImage: "trash")
                             }
@@ -91,6 +97,15 @@ struct SidebarView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .background(Theme.ink.ignoresSafeArea())
         .overlay(alignment: .trailing) { Rectangle().fill(Theme.stroke).frame(width: 1).ignoresSafeArea() }
+        .alert("Rename chat", isPresented: $showRename) {
+            TextField("Chat name", text: $renameDraft)
+            Button("Cancel", role: .cancel) {}
+            Button("Save") {
+                if let id = renameTarget, !renameDraft.trimmingCharacters(in: .whitespaces).isEmpty {
+                    Task { await app.renameThread(id, to: renameDraft) }
+                }
+            }
+        }
     }
 
     private func navRow(_ icon: String, _ label: String, _ tint: String, _ action: @escaping () -> Void) -> some View {

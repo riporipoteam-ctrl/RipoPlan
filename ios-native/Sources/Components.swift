@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 import Foundation
 import PhotosUI
 import UniformTypeIdentifiers
@@ -74,6 +75,61 @@ struct AgentAvatar: View {
             }
         }
         .frame(width: size, height: size)
+    }
+}
+
+/// Full-screen image viewer: pinch to zoom, drag to pan, share/save, tap X to close.
+struct ImageViewer: View {
+    let url: String
+    @Environment(\.dismiss) private var dismiss
+    @State private var scale: CGFloat = 1
+    @State private var lastScale: CGFloat = 1
+    @State private var offset: CGSize = .zero
+    @State private var lastOffset: CGSize = .zero
+
+    var body: some View {
+        ZStack(alignment: .top) {
+            Color.black.ignoresSafeArea()
+            AsyncImage(url: URL(string: url)) { img in
+                img.resizable().scaledToFit()
+                    .scaleEffect(scale)
+                    .offset(offset)
+                    .gesture(
+                        MagnificationGesture()
+                            .onChanged { v in scale = max(1, min(5, lastScale * v)) }
+                            .onEnded { _ in lastScale = scale }
+                            .simultaneously(with: DragGesture()
+                                .onChanged { v in
+                                    offset = CGSize(width: lastOffset.width + v.translation.width,
+                                                    height: lastOffset.height + v.translation.height)
+                                }
+                                .onEnded { _ in lastOffset = offset })
+                    )
+                    .onTapGesture(count: 2) {
+                        withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
+                            if scale > 1 { scale = 1; lastScale = 1; offset = .zero; lastOffset = .zero }
+                            else { scale = 2.5; lastScale = 2.5 }
+                        }
+                    }
+            } placeholder: { ProgressView().tint(.white) }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+            HStack {
+                Button { dismiss() } label: {
+                    Image(systemName: "xmark").font(.system(size: 15, weight: .bold)).foregroundStyle(.white)
+                        .frame(width: 36, height: 36).background(.white.opacity(0.15), in: Circle())
+                }
+                Spacer()
+                if let u = URL(string: url) {
+                    ShareLink(item: u) {
+                        Image(systemName: "square.and.arrow.up").font(.system(size: 15, weight: .semibold)).foregroundStyle(.white)
+                            .frame(width: 36, height: 36).background(.white.opacity(0.15), in: Circle())
+                    }
+                }
+            }
+            .padding(.horizontal, 16).padding(.top, 8)
+        }
+        .statusBarHidden()
     }
 }
 
@@ -206,11 +262,25 @@ struct RichText: View {
                         MD(text: t).font(.body).foregroundStyle(Theme.text)
                     }
                 case .code(let c):
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        Text(c).font(.system(.footnote, design: .monospaced)).foregroundStyle(Theme.text)
-                            .padding(12)
+                    VStack(alignment: .leading, spacing: 0) {
+                        HStack {
+                            Text("CODE").font(.caption2.weight(.bold)).foregroundStyle(Theme.muted)
+                            Spacer()
+                            Button {
+                                UIPasteboard.general.string = c; Haptic.success()
+                            } label: {
+                                Label("Copy", systemImage: "doc.on.doc").font(.caption2.weight(.semibold)).foregroundStyle(Theme.muted)
+                            }.buttonStyle(.plain)
+                        }
+                        .padding(.horizontal, 12).padding(.vertical, 7)
+                        .background(Theme.ink3)
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            Text(c).font(.system(.footnote, design: .monospaced)).foregroundStyle(Theme.text)
+                                .padding(12)
+                        }
                     }
-                    .background(Theme.ink2, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .background(Theme.ink2)
+                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                     .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.stroke, lineWidth: 1))
                 case .image(let url):
                     AsyncImage(url: URL(string: url)) { i in i.resizable().scaledToFit() } placeholder: {
