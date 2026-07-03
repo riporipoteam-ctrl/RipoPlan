@@ -7,10 +7,14 @@ struct SettingsView: View {
     @AppStorage("askai.brief") private var briefOn = false
     @AppStorage("askai.briefHour") private var briefHour = 8
     @AppStorage("askai.dark") private var darkMode = false
-    @AppStorage("askai.model") private var model = "kimi"
+    @AppStorage("askai.instructions") private var instructions = ""
     @State private var confirmSignOut = false
     @State private var editName = false
     @State private var nameDraft = ""
+    @State private var editInstructions = false
+    @State private var instructionsDraft = ""
+    @State private var editWorkspace = false
+    @State private var workspaceDraft = ""
     @StateObject private var updater = UpdateChecker()
     @State private var showUpdate = false
     @State private var checking = false
@@ -58,21 +62,69 @@ struct SettingsView: View {
                         }
                         .card(radius: 16)
 
-                        // Model
-                        VStack(alignment: .leading, spacing: 10) {
-                            SectionHeader(title: "Model")
-                            Picker("Model", selection: $model) {
-                                Text("Kimi K2.6 · smart").tag("kimi")
-                                Text("Llama 3.3 · fast").tag("groq")
+                        // Personalization
+                        VStack(alignment: .leading, spacing: 12) {
+                            SectionHeader(title: "Personalization")
+                            Button {
+                                instructionsDraft = instructions; editInstructions = true
+                            } label: {
+                                HStack {
+                                    Label("Custom instructions", systemImage: "text.quote").foregroundStyle(Theme.text)
+                                    Spacer()
+                                    Text(instructions.isEmpty ? "Off" : "On")
+                                        .font(.subheadline).foregroundStyle(Theme.muted)
+                                    Image(systemName: "chevron.right").font(.caption).foregroundStyle(Theme.muted)
+                                }
                             }
-                            .pickerStyle(.segmented)
-                            .onChange(of: model) { _ in Haptic.selection() }
-                            Text(model == "kimi"
-                                 ? "Kimi K2.6 — the default. Powerful reasoning, large context, full tool use."
-                                 : "Llama 3.3 70B — lightning-fast replies for quick tasks.")
+                            Text("Tell AskAI how to talk to you and what to keep in mind — every agent follows these in every chat.")
                                 .font(.caption).foregroundStyle(Theme.muted)
+
+                            Divider().overlay(Theme.stroke)
+
+                            Button {
+                                workspaceDraft = app.workspace?.name ?? ""; editWorkspace = true
+                            } label: {
+                                HStack {
+                                    Label("Workspace name", systemImage: "building.2").foregroundStyle(Theme.text)
+                                    Spacer()
+                                    Text(app.workspace?.name ?? "—").font(.subheadline).foregroundStyle(Theme.muted).lineLimit(1)
+                                    Image(systemName: "chevron.right").font(.caption).foregroundStyle(Theme.muted)
+                                }
+                            }
                         }
                         .card(radius: 16)
+                        .alert("Rename workspace", isPresented: $editWorkspace) {
+                            TextField("Workspace name", text: $workspaceDraft)
+                            Button("Cancel", role: .cancel) {}
+                            Button("Save") { Task { await app.renameWorkspace(to: workspaceDraft) } }
+                        }
+                        .sheet(isPresented: $editInstructions) {
+                            NavigationStack {
+                                VStack(alignment: .leading, spacing: 10) {
+                                    Text("What should AskAI know about you, and how should it respond?")
+                                        .font(.subheadline).foregroundStyle(Theme.muted)
+                                    TextEditor(text: $instructionsDraft)
+                                        .frame(minHeight: 200)
+                                        .padding(10)
+                                        .scrollContentBackground(.hidden)
+                                        .background(Theme.ink2, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                                        .foregroundStyle(Theme.text)
+                                    Text("Example: \"I'm Riad from Bosnia. Keep answers short. I run a car-detailing business.\"")
+                                        .font(.caption).foregroundStyle(Theme.muted)
+                                    Spacer()
+                                }
+                                .padding(16)
+                                .background(Theme.ink.ignoresSafeArea())
+                                .navigationTitle("Custom instructions")
+                                .navigationBarTitleDisplayMode(.inline)
+                                .toolbar {
+                                    ToolbarItem(placement: .cancellationAction) { Button("Cancel") { editInstructions = false } }
+                                    ToolbarItem(placement: .confirmationAction) {
+                                        Button("Save") { instructions = instructionsDraft; editInstructions = false; Haptic.success() }
+                                    }
+                                }
+                            }
+                        }
 
                         // Notifications + Daily briefing
                         VStack(alignment: .leading, spacing: 14) {

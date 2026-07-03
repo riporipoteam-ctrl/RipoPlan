@@ -26,7 +26,7 @@ final class AppState: ObservableObject {
     /// Every agent runs on the Hermes engine with the full tool set (browser,
     /// search, code, images + all skills). Used when creating agents.
     static let hermesTools: [String] = [
-        "web_search", "browse", "code", "generate_image", "world_cup", "weather",
+        "web_search", "browse", "code", "generate_image", "find_images", "world_cup", "weather",
         "calculate", "currency", "crypto_price", "stock_price", "dictionary", "wiki",
         "translate", "datetime", "unit_convert", "qr_code", "build_app",
         "create_agent", "edit_agent", "delegate", "create_task", "create_rank", "assign_rank"
@@ -42,7 +42,8 @@ final class AppState: ObservableObject {
     static func stepActivities(_ steps: [String]) -> [[String: Any]] {
         let label: [String: String] = [
             "web_search": "Searched the web", "browse": "Browsed a page", "code": "Ran code",
-            "generate_image": "Generated an image", "world_cup": "Checked the World Cup", "weather": "Checked weather",
+            "generate_image": "Generated an image", "find_images": "Found real photos",
+            "world_cup": "Checked the World Cup", "weather": "Checked weather",
             "currency": "Converted currency", "crypto_price": "Checked crypto", "stock_price": "Checked markets",
             "dictionary": "Looked up a word", "wiki": "Read Wikipedia", "translate": "Translated",
             "datetime": "Checked the time", "unit_convert": "Converted units", "qr_code": "Made a QR code",
@@ -73,6 +74,8 @@ final class AppState: ObservableObject {
 
     func boot() async {
         booting = true; bootError = nil
+        // Kimi K2.6 is THE model — no selection anywhere.
+        UserDefaults.standard.set("kimi", forKey: "askai.model")
         authed = Supa.shared.isAuthed
         if authed {
             await Supa.shared.refreshIfPossible()
@@ -164,7 +167,20 @@ final class AppState: ObservableObject {
         guard let ws = workspace?.id else { return }
         if let t: [ThreadRow] = try? await Supa.shared.select("threads?workspace_id=eq.\(ws)&select=*&order=last_activity_at.desc&limit=60") {
             threads = t
+            // First run after the unread feature ships: everything you already
+            // have counts as read — dots only appear for NEW replies from now on.
+            if !UserDefaults.standard.bool(forKey: "askai.lastread.seeded") {
+                for th in t { lastRead[th.id] = Date().timeIntervalSince1970 }
+                UserDefaults.standard.set(lastRead, forKey: "askai.lastread")
+                UserDefaults.standard.set(true, forKey: "askai.lastread.seeded")
+            }
         }
+    }
+
+    func renameWorkspace(to name: String) async {
+        guard let ws = workspace?.id, !name.trimmingCharacters(in: .whitespaces).isEmpty else { return }
+        try? await Supa.shared.update("workspaces?id=eq.\(ws)", ["name": name])
+        if var w = workspace { w.name = name; workspace = w }
     }
 
     // MARK: Unread chats (blue dot) — last-read time per thread, kept on device.

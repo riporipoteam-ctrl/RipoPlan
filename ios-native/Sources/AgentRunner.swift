@@ -45,6 +45,7 @@ enum AgentRunner {
         case "browse": return "Browsing the web…"
         case "code": return "Running code…"
         case "generate_image": return "Generating an image…"
+        case "find_images": return "Finding real photos…"
         case "world_cup": return "Checking the World Cup…"
         case "weather": return "Checking the weather…"
         case "currency": return "Converting currency…"
@@ -83,7 +84,8 @@ enum AgentRunner {
             fn("web_search", "Search the live web for current info and facts.", ["query": S], ["query"]),
             fn("browse", "Open a web page URL and read its text.", ["url": S], ["url"]),
             fn("code", "Run JavaScript to compute/transform. Use return or console.log.", ["source": S], ["source"]),
-            fn("generate_image", "Generate an image from a text prompt (shown to the user).", ["prompt": S], ["prompt"]),
+            fn("generate_image", "Generate an image from a text prompt (shown to the user). For real brands/products, first research their look and describe it in detail in the prompt.", ["prompt": S], ["prompt"]),
+            fn("find_images", "Search the web for REAL photos (brands, cars, products, logos, people, places, teams) and show them directly in the chat.", ["query": S], ["query"]),
             fn("world_cup", "Live FIFA World Cup results, fixtures, standings.", [:], []),
             fn("weather", "Current weather + forecast for a place.", ["location": S], ["location"]),
             fn("calculate", "Evaluate a math expression.", ["expression": S], ["expression"]),
@@ -143,6 +145,8 @@ enum AgentRunner {
         var images: [String] = []
         var steps: [String] = []
         let memText = memories.isEmpty ? "" : "\n\nWorkspace knowledge & memory you should use:\n- " + memories.prefix(20).joined(separator: "\n- ")
+        let custom = UserDefaults.standard.string(forKey: "askai.instructions") ?? ""
+        let customText = custom.isEmpty ? "" : "\n\nThe user's custom instructions — ALWAYS follow them:\n\(String(custom.prefix(1200)))"
         let today = ISO8601DateFormatter().string(from: Date())
         let system = """
         You are \(agent.name), \(agent.role ?? "an AI agent") on the user's AskAI team, running on the \
@@ -169,9 +173,14 @@ enum AgentRunner {
         RULE 4 — TEAMWORK. For big builds: create_channel for the project, post_channel a kickoff brief, \
         and delegate the build to the right teammate (they reply themselves — never write their reply). \
         If the user asks a different teammate to do something, delegate to them.
-        RULE 5 — RICH OUTPUT. Answer in Markdown with ## headings, bullets, **bold** facts. Call \
-        generate_image proactively when a visual helps. Never claim you did something you didn't. \
-        Speak only as \(agent.name).\(memText)
+        RULE 5 — RICH OUTPUT. Answer in Markdown with ## headings, bullets, **bold** facts. \
+        Never claim you did something you didn't. Speak only as \(agent.name).
+        RULE 6 — IMAGES. When the user asks about anything REAL — a brand, car, product, logo, team, \
+        person, place — call find_images to show actual photos in the chat, and do it proactively when \
+        a photo would help an answer. Use generate_image only for creative/original art; if the art must \
+        depict something real (e.g. a specific car model), FIRST research its design, then write a long \
+        prompt describing its actual shape, grille, lights, colors and setting in words — a bare brand \
+        name produces blank images.\(customText)\(memText)
         """
         var msgs: [[String: Any]] = [["role": "system", "content": system]]
         msgs.append(contentsOf: history)
@@ -189,7 +198,10 @@ enum AgentRunner {
             if calls.isEmpty { calls = parseTextToolCalls(rawContent) }
             if calls.isEmpty {
                 let cleaned = clean(rawContent)
-                if !cleaned.isEmpty { return RunResult(text: cleaned, images: images, steps: steps, pages: pages) }
+                if !cleaned.isEmpty {
+                    rememberInBackground(history: history, answer: cleaned, memories: memories, ctx: ctx)
+                    return RunResult(text: cleaned, images: images, steps: steps, pages: pages)
+                }
                 break
             }
             // Strip any tool-token noise from the assistant content we echo back.
@@ -230,12 +242,78 @@ enum AgentRunner {
         msgs.append(["role": "user", "content": "Now write your complete final answer for the user in plain English Markdown. Do NOT call any tools or output any tool/function syntax."])
         if let m = await chat(msgs, tools: nil) {
             let cleaned = clean((m["content"] as? String) ?? "")
-            if !cleaned.isEmpty { return RunResult(text: cleaned, images: images, steps: steps, pages: pages) }
+            if !cleaned.isEmpty {
+                rememberInBackground(history: history, answer: cleaned, memories: memories, ctx: ctx)
+                return RunResult(text: cleaned, images: images, steps: steps, pages: pages)
+            }
         }
         // Last resort: never show a blank/failure — summarize what the tools found.
         if !images.isEmpty { return RunResult(text: "Here's what I generated.", images: images, steps: steps, pages: pages) }
         if !lastToolOutput.isEmpty { return RunResult(text: clean(lastToolOutput), images: images, steps: steps, pages: pages) }
         return RunResult(text: "I couldn't complete that just now — please try again in a moment.", images: images, steps: steps, pages: pages)
+    }
+
+    /// Quietly decide (in the background, after answering) whether this exchange
+    /// contained durable facts about the user worth remembering — and save only
+    /// those. Small talk and one-off requests are never saved.
+    private static func rememberInBackground(history: [[String: Any]], answer: String, memories: [String], ctx: RunContext) {
+        let save = ctx.onSaveKnowledge
+        Task.detached(priority: .background) {
+            let convo = history.suffix(6).compactMap { m -> String? in
+                guard let r = m["role"] as? String, let c = m["content"] as? String, !c.isEmpty else { return nil }
+                return "\(r): \(String(c.prefix(400)))"
+            }.joined(separator: "\n")
+            guard !convo.isEmpty else { return }
+            let known = memories.prefix(20).joined(separator: "\n- ")
+            let sys = """
+            You silently maintain long-term memory about a user. From the conversation, extract AT MOST 2 NEW durable facts genuinely worth remembering forever — identity, preferences, businesses, projects, goals, important people. NEVER save small talk, one-off requests, temporary info, or anything already known. Be extremely selective; most conversations contain NOTHING worth saving.
+            Already known:
+            - \(known)
+            Reply ONLY with lines in the form `Title | fact`, or exactly `NONE`.
+            """
+            guard let m = await chat([["role": "system", "content": sys],
+                                      ["role": "user", "content": convo + "\nassistant: \(String(answer.prefix(400)))"]],
+                                     tools: nil),
+                  let raw = m["content"] as? String, !raw.uppercased().contains("NONE") else { return }
+            var saved = 0
+            for line in raw.split(separator: "\n") {
+                guard saved < 2 else { break }
+                let parts = line.split(separator: "|", maxSplits: 1).map { $0.trimmingCharacters(in: .whitespaces) }
+                guard parts.count == 2, !parts[0].isEmpty, parts[1].count > 5 else { continue }
+                _ = await save(parts[0], parts[1])
+                saved += 1
+            }
+        }
+    }
+
+    /// Real photos from the web (Wikimedia Commons, keyless; Openverse fallback).
+    /// Returns (title, imageURL) pairs — shown directly in the chat.
+    private static func findImages(_ query: String) async -> [(String, String)] {
+        guard !query.isEmpty else { return [] }
+        let enc = query.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? query
+        var out: [(String, String)] = []
+        if let u = URL(string: "https://commons.wikimedia.org/w/api.php?action=query&format=json&generator=search&gsrnamespace=6&gsrsearch=\(enc)&gsrlimit=8&prop=imageinfo&iiprop=url%7Cmime&iiurlwidth=900"),
+           let (d, _) = try? await URLSession.shared.data(from: u),
+           let o = try? JSONSerialization.jsonObject(with: d) as? [String: Any],
+           let pages = (o["query"] as? [String: Any])?["pages"] as? [String: Any] {
+            for (_, v) in pages {
+                guard out.count < 3, let p = v as? [String: Any],
+                      let info = (p["imageinfo"] as? [[String: Any]])?.first,
+                      let mime = info["mime"] as? String, mime.hasPrefix("image/"), mime != "image/svg+xml",
+                      let url = (info["thumburl"] as? String) ?? (info["url"] as? String) else { continue }
+                let title = (p["title"] as? String ?? "Photo").replacingOccurrences(of: "File:", with: "")
+                out.append((title, url))
+            }
+        }
+        if out.isEmpty, let u = URL(string: "https://api.openverse.org/v1/images/?q=\(enc)&page_size=4"),
+           let (d, _) = try? await URLSession.shared.data(from: u),
+           let o = try? JSONSerialization.jsonObject(with: d) as? [String: Any],
+           let results = o["results"] as? [[String: Any]] {
+            for r in results where out.count < 3 {
+                if let url = r["url"] as? String { out.append(((r["title"] as? String) ?? "Photo", url)) }
+            }
+        }
+        return out
     }
 
     /// Build a live page preview (screenshot + host) for a browsed URL.
@@ -342,6 +420,11 @@ enum AgentRunner {
         case "generate_image":
             if let url = await generateImage(str(args["prompt"])) { images.append(url); return "Image generated and shown to the user." }
             return "Image generation failed."
+        case "find_images":
+            let found = await findImages(str(args["query"]))
+            guard !found.isEmpty else { return "No photos found for that query — try different words." }
+            images.append(contentsOf: found.map { $0.1 })
+            return "Found \(found.count) real photo(s), now shown to the user: " + found.map { $0.0 }.joined(separator: "; ")
         case "world_cup": return await worldCup()
         case "weather": return await weather(str(args["location"]))
         case "calculate": return calculate(str(args["expression"]))
@@ -489,7 +572,7 @@ enum AgentRunner {
         }
         // 2) Free fallback: Pollinations.ai (FLUX, no key) — always available.
         let enc = prompt.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? prompt
-        let purl = "https://image.pollinations.ai/prompt/\(enc)?width=1024&height=1024&nologo=true&seed=\(Int.random(in: 0..<1_000_000))"
+        let purl = "https://image.pollinations.ai/prompt/\(enc)?width=1024&height=1024&nologo=true&enhance=true&model=flux&seed=\(Int.random(in: 0..<1_000_000))"
         if let u = URL(string: purl) {
             var req = URLRequest(url: u); req.timeoutInterval = 120
             if let (d, r) = try? await URLSession.shared.data(for: req), let h = r as? HTTPURLResponse,

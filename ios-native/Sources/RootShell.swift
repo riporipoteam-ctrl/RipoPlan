@@ -17,7 +17,6 @@ struct RootShell: View {
     @State private var showRenameChat = false
     @State private var renameChatDraft = ""
     @StateObject private var updater = UpdateChecker()
-    @AppStorage("askai.model") private var model = "kimi"
 
     /// Any chat (other than the open one) with an agent reply you haven't seen.
     private var hasUnread: Bool {
@@ -40,21 +39,18 @@ struct RootShell: View {
                         openSheet: { sheet = $0 })
                 .frame(width: sidebarWidth)
                 .offset(x: (slide / (sidebarWidth + 12) - 1) * 44)   // subtle parallax
-                .opacity(Double(0.35 + 0.65 * slide / (sidebarWidth + 12)))
+                // Fully hidden while closed so it can't bleed through safe areas.
+                .opacity(slide <= 0 ? 0 : Double(0.35 + 0.65 * slide / (sidebarWidth + 12)))
 
             // Main column — slides right and rounds its corners when the drawer opens.
             ZStack(alignment: .top) {
                 ConversationView(threadId: $current, topInset: 54)
-                // Real frosted bar — content blurs underneath instead of showing
-                // through and colliding with the header controls.
+                // Clean solid bar (ChatGPT-style) — no grey band, no hairline.
                 VStack(spacing: 0) {
                     topBar
                     UpdateBanner(updater: updater)
                 }
-                .background(.ultraThinMaterial)
-                .overlay(alignment: .bottom) {
-                    Rectangle().fill(Theme.stroke).frame(height: 1)
-                }
+                .background(Theme.ink)
             }
             .background(Theme.ink)
             .clipShape(RoundedRectangle(cornerRadius: slide > 4 ? 36 : 0, style: .continuous))
@@ -120,21 +116,9 @@ struct RootShell: View {
                     }
             }
             Spacer(minLength: 0)
-            Menu {
-                Picker("Model", selection: $model) {
-                    Label("Kimi K2.6 · smart", systemImage: "sparkles").tag("kimi")
-                    Label("Llama 3.3 · fast", systemImage: "bolt.fill").tag("groq")
-                }
-            } label: {
-                HStack(spacing: 6) {
-                    BrandSpark(size: 13)
-                    Text(model == "groq" ? "Llama 3.3" : "Kimi K2.6").font(.subheadline.weight(.semibold)).foregroundStyle(Theme.text)
-                    Image(systemName: "chevron.down").font(.caption2.weight(.bold)).foregroundStyle(Theme.muted)
-                }
-                .padding(.horizontal, 14).padding(.vertical, 9)
-                .glassCapsule()
-            }
-            .onChange(of: model) { _ in Haptic.selection() }
+            Text("AskAI")
+                .font(.system(size: 18, weight: .bold))
+                .foregroundStyle(Theme.text)
             Spacer(minLength: 0)
             if current != nil {
                 // ChatGPT chat header: [new chat | ⋯] in one glass pill.
