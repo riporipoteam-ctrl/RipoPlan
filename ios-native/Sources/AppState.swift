@@ -50,7 +50,10 @@ final class AppState: ObservableObject {
             "calculate": "Calculated", "build_app": "Built an app", "create_agent": "Created an agent",
             "edit_agent": "Updated a teammate", "delegate": "Delegated a task", "create_task": "Created a task",
             "create_rank": "Created a rank", "assign_rank": "Assigned a rank", "create_channel": "Created a channel",
-            "save_knowledge": "Saved knowledge", "news": "Checked the news", "hacker_news": "Read Hacker News",
+            "save_knowledge": "Saved knowledge", "search_knowledge": "Checked memory",
+            "maps_search": "Searched the map", "recipes": "Found a recipe", "tv_show": "Checked a show",
+            "view_image": "Looked at the image", "read_file": "Read the file",
+            "news": "Checked the news", "hacker_news": "Read Hacker News",
             "reddit": "Checked Reddit", "github_search": "Searched GitHub", "jokes": "Told a joke",
             "quote": "Found a quote", "advice": "Gave advice", "random_fact": "Shared a fact",
             "summarize_url": "Summarized a page", "country_info": "Looked up a country", "holidays": "Checked holidays",
@@ -312,7 +315,13 @@ final class AppState: ObservableObject {
             _ = try await Supa.shared.insert("messages", userMsg, returning: false) as [Message]
 
             // Decide which agent(s) respond, then run each natively (concurrently).
-            let responders = resolveResponders(content: content, forcedAgentId: forcedAgentId, threadPrimaryId: agentId)
+            // The last teammate who replied in this thread is the current partner —
+            // they keep the conversation unless someone else is directly addressed.
+            let lastSpeaker = msgCache[threadIdReal]?.last(where: {
+                $0.sender_type == "agent" && $0.agent_id != nil && ($0.content ?? "").isEmpty == false
+            })?.agent_id
+            let responders = resolveResponders(content: content, forcedAgentId: forcedAgentId,
+                                               threadPrimaryId: agentId, lastSpeakerId: lastSpeaker)
             for r in responders {
                 let ph: [Message] = try await Supa.shared.insert("messages", [
                     "workspace_id": ws, "thread_id": threadIdReal,
@@ -336,9 +345,13 @@ final class AppState: ObservableObject {
         }
     }
 
-    /// Which agents should reply: a forced agent, any @mentioned/"all" agents,
-    /// else the thread's primary agent, else the supervisor.
-    private func resolveResponders(content: String, forcedAgentId: String?, threadPrimaryId: String?) -> [Agent] {
+    /// Which agents should reply. Priority: forced agent → "everyone" → @handles
+    /// → DIRECTLY addressed names (start of message or after hey/ask/tell/etc.)
+    /// → whoever was already talking in this thread → thread primary → chief.
+    /// Casual mid-sentence name-drops no longer hijack the conversation, and the
+    /// chief never butts into another agent's thread uninvited.
+    private func resolveResponders(content: String, forcedAgentId: String?,
+                                   threadPrimaryId: String?, lastSpeakerId: String? = nil) -> [Agent] {
         if let f = forcedAgentId, let a = agent(f) { return [a] }
         let lc = content.lowercased()
         if lc.contains("all agents") || lc.contains("every agent") || lc.contains("everyone") {
@@ -353,13 +366,18 @@ final class AppState: ObservableObject {
             }
             if !matched.isEmpty { return matched }
         }
-        // Direct name mention (no @): if the user names specific non-supervisor
-        // teammates, route to them so they answer themselves (not the chief for them).
-        let named = agents.filter { a in
-            a.is_supervisor != true && a.status != "archived" &&
-            lc.range(of: "\\b\(NSRegularExpression.escapedPattern(for: a.name.lowercased()))\\b", options: .regularExpression) != nil
+        // A name only routes when the teammate is ADDRESSED: message starts with
+        // their name, or it follows hey/hi/yo/ok/ask/tell/get/thanks.
+        let addressed = agents.filter { a in
+            guard a.is_supervisor != true, a.status != "archived", !a.name.isEmpty else { return false }
+            let n = NSRegularExpression.escapedPattern(for: a.name.lowercased())
+            return lc.range(of: "^\\W*\(n)\\b", options: .regularExpression) != nil
+                || lc.range(of: "\\b(hey|hi|yo|ok|okay|ask|tell|get|thanks)[ ,]+\(n)\\b", options: .regularExpression) != nil
         }
-        if !named.isEmpty { return Array(named.prefix(4)) }
+        if !addressed.isEmpty { return Array(addressed.prefix(3)) }
+        // Keep talking to whoever was already talking (never let the chief
+        // interrupt a conversation with a teammate).
+        if let last = lastSpeakerId, let a = agent(last), a.status != "archived" { return [a] }
         if let p = threadPrimaryId, let a = agent(p) { return [a] }
         if let s = supervisor { return [s] }
         return []

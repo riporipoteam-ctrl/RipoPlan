@@ -51,6 +51,7 @@ enum AgentRunner {
         case "recipes": return "Finding the recipe…"
         case "tv_show": return "Checking the show…"
         case "maps_search": return "Searching the map…"
+        case "search_knowledge": return "Checking my memory…"
         case "world_cup": return "Checking the World Cup…"
         case "weather": return "Checking the weather…"
         case "currency": return "Converting currency…"
@@ -94,6 +95,7 @@ enum AgentRunner {
             fn("view_image", "Look at an image the user uploaded (or any image URL) and describe what it shows. Use whenever a message contains [Uploaded image: URL].", ["url": S, "question": S], ["url"]),
             fn("read_file", "Download and read a text file the user uploaded (or any file URL). Use whenever a message contains [Uploaded file ...].", ["url": S], ["url"]),
             fn("maps_search", "Find places/addresses/businesses on the map (name, address, coordinates + map links).", ["query": S], ["query"]),
+            fn("search_knowledge", "Search the workspace knowledge base / long-term memory (empty query = latest entries).", ["query": S], []),
             fn("recipes", "Full recipe for a dish (ingredients + instructions).", ["dish": S], ["dish"]),
             fn("tv_show", "Info about a TV show (status, rating, summary).", ["show": S], ["show"]),
             fn("world_cup", "Live FIFA World Cup results, fixtures, standings.", [:], []),
@@ -198,7 +200,12 @@ enum AgentRunner {
         RULE 8 — NEVER GIVE UP, NEVER STALL. If a tool returns nothing useful, try a DIFFERENT query or \
         a different tool (web_search ⇄ wiki ⇄ browse ⇄ find_images ⇄ maps_search), up to 2 alternatives — \
         then move on and give the best answer you can with what you found. For places, businesses and \
-        directions use maps_search and include its Google Maps link in your answer.\(customText)\(memText)
+        directions use maps_search and include its Google Maps link in your answer.
+        RULE 9 — STAY YOURSELF. You are ONLY \(agent.name). NEVER speak for a teammate, NEVER write or \
+        simulate their reply, NEVER answer questions the user aimed at someone else — if the user is \
+        addressing another teammate, delegate to them and add nothing else. And use your memory: before \
+        asking the user for details they may have shared before, call search_knowledge; save genuinely \
+        important new facts with save_knowledge.\(customText)\(memText)
         """
         var msgs: [[String: Any]] = [["role": "system", "content": system]]
         msgs.append(contentsOf: history)
@@ -372,6 +379,18 @@ enum AgentRunner {
         return re.matches(in: text, range: NSRange(location: 0, length: ns.length)).compactMap { m in
             m.numberOfRanges > 1 ? ns.substring(with: m.range(at: 1)) : nil
         }
+    }
+
+    private struct KnowledgeHit: Codable { var title: String?; var content: String? }
+    /// Search the workspace knowledge base (long-term memory).
+    private static func searchKnowledge(_ ws: String, _ q: String) async -> String {
+        let enc = q.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? q
+        let path = q.isEmpty
+            ? "knowledge?workspace_id=eq.\(ws)&select=title,content&order=created_at.desc&limit=10"
+            : "knowledge?workspace_id=eq.\(ws)&or=(title.ilike.*\(enc)*,content.ilike.*\(enc)*)&select=title,content&limit=10"
+        let rows: [KnowledgeHit] = (try? await Supa.shared.select(path)) ?? []
+        guard !rows.isEmpty else { return "No knowledge entries found for \"\(q)\". Save important facts with save_knowledge." }
+        return "Knowledge base:\n" + rows.map { "• \($0.title ?? "Note"): \(String(($0.content ?? "").prefix(300)))" }.joined(separator: "\n")
     }
 
     /// Places — OpenStreetMap Nominatim (keyless). Names, addresses, coordinates
@@ -575,6 +594,7 @@ enum AgentRunner {
         case "view_image": return await viewImage(str(args["url"]), str(args["question"]))
         case "read_file": return await readFile(str(args["url"]))
         case "maps_search": return await mapsSearch(str(args["query"]))
+        case "search_knowledge": return await searchKnowledge(ctx.workspaceId, str(args["query"]))
         case "recipes": return await recipes(str(args["dish"]))
         case "tv_show": return await tvShow(str(args["show"]))
         case "world_cup": return await worldCup()
