@@ -32,31 +32,54 @@ struct RootView: View {
     }
 }
 
-/// Branded dark launch splash — no flat black/"Loading…" screen.
+/// Launch splash — glass tile with a living spark, expanding ripples, and a
+/// shimmering status line (no flat "Loading…" screen).
 struct SplashView: View {
     @State private var appear = false
+    @State private var sway = false
+    @State private var ripple = false
+
     var body: some View {
         ZStack {
             AuroraBackground()
-            VStack(spacing: 20) {
+
+            // Expanding ripple rings behind the tile.
+            ZStack {
+                Circle().stroke(Theme.stroke, lineWidth: 1.5)
+                    .frame(width: 150, height: 150)
+                    .scaleEffect(ripple ? 2.6 : 1).opacity(ripple ? 0 : 0.8)
+                Circle().stroke(Theme.stroke, lineWidth: 1.5)
+                    .frame(width: 150, height: 150)
+                    .scaleEffect(ripple ? 1.9 : 0.85).opacity(ripple ? 0 : 0.5)
+            }
+            .animation(.easeOut(duration: 2.2).repeatForever(autoreverses: false), value: ripple)
+
+            VStack(spacing: 22) {
                 RoundedRectangle(cornerRadius: 30, style: .continuous)
                     .fill(.ultraThinMaterial)
-                    .frame(width: 116, height: 116)
-                    .overlay(BrandSpark(size: 58))
+                    .frame(width: 118, height: 118)
+                    .overlay(
+                        BrandSpark(size: 58)
+                            .rotationEffect(.degrees(sway ? 7 : -7))
+                            .scaleEffect(sway ? 1.05 : 0.95)
+                    )
                     .overlay(
                         RoundedRectangle(cornerRadius: 30, style: .continuous)
                             .stroke(Theme.stroke, lineWidth: 1)
                     )
-                    .shadow(color: Color.black.opacity(0.18), radius: 30, y: 16)
-                    .scaleEffect(appear ? 1 : 0.85)
-                    .opacity(appear ? 1 : 0)
+                    .shadow(color: Color.black.opacity(0.16), radius: 28, y: 14)
+                    .scaleEffect(appear ? 1 : 0.8)
                 Text("AskAI")
-                    .font(.system(size: 28, weight: .heavy, design: .rounded))
+                    .font(.system(size: 30, weight: .heavy, design: .rounded))
                     .foregroundStyle(Theme.text)
-                    .opacity(appear ? 1 : 0)
-                ProgressView().tint(Theme.muted).opacity(appear ? 1 : 0)
+                ShimmerText(text: "Waking your agents…")
             }
+            .opacity(appear ? 1 : 0)
         }
-        .onAppear { withAnimation(.spring(response: 0.5, dampingFraction: 0.7)) { appear = true } }
+        .onAppear {
+            withAnimation(.spring(response: 0.55, dampingFraction: 0.7)) { appear = true }
+            withAnimation(.easeInOut(duration: 1.6).repeatForever(autoreverses: true)) { sway = true }
+            ripple = true
+        }
     }
 }

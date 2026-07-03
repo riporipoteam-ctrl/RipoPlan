@@ -202,14 +202,23 @@ final class VoiceCall: NSObject, ObservableObject {
         guard let app else { return }
         turns.append(("You", text, true))
         var content = text
-        // Live camera: let the agent SEE — but never let a slow upload/vision
-        // call hang the whole call (hard 10s budget, then skip).
-        if camera.running, let jpeg = camera.snapshotJPEG() {
-            let seen: String? = await withTimeout(10) {
-                guard let att = await app.upload(data: jpeg, ext: "jpg", contentType: "image/jpeg", name: "camera.jpg") else { return nil }
-                return await AgentRunner.viewImage(att.url, "In 1-2 sentences: what is visible in this live camera view?")
+        // Live camera: send the frame STRAIGHT to the vision model as base64 —
+        // no storage upload in the middle (that step silently failed before).
+        if camera.running {
+            var jpeg = camera.snapshotJPEG()
+            if jpeg == nil {   // session may still be warming up — one retry
+                try? await Task.sleep(nanoseconds: 1_200_000_000)
+                jpeg = camera.snapshotJPEG()
             }
-            if let seen, !seen.isEmpty { content += "\n[Live camera right now: \(seen)]" }
+            var seen: String?
+            if let jpeg {
+                let dataURI = "data:image/jpeg;base64,\(jpeg.base64EncodedString())"
+                seen = await withTimeout(12) {
+                    await AgentRunner.viewImage(dataURI, "In 1-2 sentences: what is visible in this live camera view?")
+                }
+            }
+            // ALWAYS tell the agent about the camera so it acknowledges it.
+            content += "\n[Live camera is ON. \(seen ?? "The frame couldn't be analyzed this turn — ask the user to hold the camera steady and try again.")]"
         }
         history.append(["role": "user", "content": content])
 
@@ -231,16 +240,29 @@ final class VoiceCall: NSObject, ObservableObject {
         if running && !muted { beginListening() }
     }
 
-    /// Who should answer: agents named in the utterance (auto-invited, up to 3),
-    /// "everyone/team" → all invited agents, otherwise the chief.
+    /// Who should answer. Speech transcripts mangle names ("Hannah" → "Hana"),
+    /// so matching is fuzzy: full name, or any spoken word sharing the first 3
+    /// letters with an agent's name. One invited teammate = you're talking to
+    /// THEM (not the chief). "Everyone/team" = all invited agents answer.
     private func pickAgents(for text: String, app: AppState) -> [Agent?] {
         let lc = text.lowercased()
-        var named = app.agents.filter { !$0.name.isEmpty && lc.contains($0.name.lowercased()) }
+        let words = lc.split(whereSeparator: { !$0.isLetter }).map(String.init).filter { $0.count >= 3 }
+        func mentioned(_ a: Agent) -> Bool {
+            let n = a.name.lowercased().trimmingCharacters(in: .whitespaces)
+            guard n.count >= 3 else { return lc.contains(" \(n) ") }
+            if lc.contains(n) { return true }
+            let key = String(n.prefix(3))
+            return words.contains { $0.prefix(3) == key }
+        }
+        var named = app.agents.filter { !$0.name.isEmpty && $0.is_supervisor != true && mentioned($0) }
         if named.isEmpty, !invited.isEmpty,
-           lc.contains("everyone") || lc.contains("all of you") || lc.contains("you all") || lc.contains("the team") {
+           lc.contains("everyone") || lc.contains("all of you") || lc.contains("you all")
+            || lc.contains("the team") || lc.contains("both of you") || lc.contains("you two") {
             named = invited
         }
-        guard !named.isEmpty else {
+        if named.isEmpty {
+            // Exactly one teammate invited → they're the one in the conversation.
+            if invited.count == 1 { return [invited[0]] }
             return [app.agents.first(where: { $0.is_supervisor == true })]
         }
         for a in named where !invited.contains(where: { $0.id == a.id }) { invited.append(a) }
@@ -543,10 +565,10 @@ struct VoiceCallView: View {
 
     private var orbColor: Color {
         switch call.phase {
-        case .listening: return Theme.blue
-        case .thinking: return Theme.muted
-        case .speaking: return Theme.accent
-        case .connecting: return Theme.muted.opacity(0.7)
+        case .listening: return Theme.blue                    // vivid blue — your turn
+        case .thinking: return Color(hex: 0x8E8E93)           // silver — working
+        case .speaking: return Color(hex: 0x5E5CE6)           // indigo — agent talking
+        case .connecting: return Color(hex: 0xA5A5AA)
         }
     }
     private var orbScale: CGFloat { call.phase == .speaking ? 1.06 : 1 }
