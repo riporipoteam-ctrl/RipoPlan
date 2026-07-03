@@ -106,7 +106,16 @@ final class AppState: ObservableObject {
         let today = f.string(from: Date())
         if UserDefaults.standard.string(forKey: "askai.briefDate") == today { return }
         UserDefaults.standard.set(today, forKey: "askai.briefDate")
-        _ = await send("Daily briefing: in a short, skimmable summary, tell me what I worked on recently and what each agent has completed or is still working on, plus anything that needs my attention.")
+        _ = await send("""
+        Daily briefing time. Use your tools RIGHT NOW before writing anything: \
+        web_search today's top world news, web_search today's top tech/AI news, \
+        and world_cup for the latest results and today's fixtures. Then write a \
+        skimmable Markdown briefing with REAL facts from those searches: \
+        ## 🌍 Today's headlines (4-5 bullets, each with a concrete fact), \
+        ## ⚽ World Cup (results + today's games), \
+        ## 🗂 My workspace (what I and the agents worked on recently, anything needing attention). \
+        Never write placeholders or say you couldn't check — search first.
+        """)
     }
 
     func signIn(email: String, password: String) async throws {
@@ -522,7 +531,8 @@ final class AppState: ObservableObject {
     }
 
     private func rosterString() -> String {
-        agents.map { "\($0.name) (\($0.role ?? "agent"))" }.joined(separator: ", ")
+        // Include @handles so agents can tag teammates in channels properly.
+        agents.map { "\($0.name) (@\($0.handle ?? "-"), \($0.role ?? "agent"))" }.joined(separator: ", ")
     }
 
     /// Fire-and-forget: run the agent natively (with full tools) and fill in its
@@ -557,6 +567,10 @@ final class AppState: ObservableObject {
             let atts = AppState.buildAttachments(images: result.images, pages: result.pages)
             if !atts.isEmpty { patch["attachments"] = atts }
             try? await Supa.shared.update("messages?id=eq.\(placeholderId)", patch)
+            // Bump the thread so the unread blue dot fires for this NEW reply
+            // (before, only the user's own send updated last_activity_at, so
+            // fresh agent replies never showed as unread).
+            try? await Supa.shared.update("threads?id=eq.\(threadId)", ["last_activity_at": isoNow()])
             await self.logRun(agentId: agent.id, threadId: threadId, output: result.text, steps: result.steps)
             try? await Supa.shared.update("agents?id=eq.\(agent.id)", ["last_run_at": isoNow()])
             await self.saveMemory(from: history)
@@ -748,7 +762,63 @@ final class AppState: ObservableObject {
             "workspace_id": ws, "channel_id": ch.id, "sender_type": "agent", "agent_id": agentId,
             "content": text, "status": "complete"
         ], returning: false) as [Message]
+        // Tagged teammates actually respond: any agent named or @handled in the
+        // post gets kicked off in the channel (with a live "working" bubble).
+        let lc = text.lowercased()
+        let tagged = agents.filter { a in
+            a.id != agentId && a.status != "archived" &&
+            ((!(a.handle ?? "").isEmpty && lc.contains("@\((a.handle ?? "").lowercased())"))
+             || lc.contains(a.name.lowercased()))
+        }.prefix(2)
+        for t in tagged {
+            runChannelAgent(t, channelId: ch.id,
+                kickoff: "You were tagged in #\(ch.name) with the task described above. DO THE WORK NOW yourself — research it, and if it's a build request create the full website/app with build_app — then reply in this channel with your results and the app name. Never say you'll do it later.")
+        }
+        if !tagged.isEmpty {
+            return "✅ Posted to #\(ch.name). \(tagged.map { $0.name }.joined(separator: ", ")) got pinged and will reply in the channel."
+        }
         return "✅ Posted to #\(ch.name)."
+    }
+
+    /// Run any agent inside a channel: thinking placeholder → full tools →
+    /// reply posted as them (this is what makes tagged teammates respond).
+    private func runChannelAgent(_ agent: Agent, channelId: String, kickoff: String) {
+        guard let ws = workspace?.id, let uid = Supa.shared.userId else { return }
+        Task {
+            let ph: [Message] = (try? await Supa.shared.insert("messages", [
+                "workspace_id": ws, "channel_id": channelId, "sender_type": "agent", "agent_id": agent.id,
+                "content": "", "status": "thinking",
+                "activities": [["label": "On it…", "status": "running"]]
+            ])) ?? []
+            guard let pid = ph.first?.id else { return }
+            var history = await buildChannelHistory(channelId: channelId, selfAgentId: agent.id)
+            history.append(["role": "user", "content": kickoff])
+            let ctx = RunContext(
+                workspaceId: ws, userId: uid, threadId: channelId,
+                onActivity: { label, _ in await self.setMessageActivity(pid, label) },
+                onPagePreview: { page in await self.appendLivePreview(pid, page) },
+                onCreateAgent: { n, r, d in await self.toolCreateAgent(n, r, d) },
+                onDelegate: { _, _ in "You're already the one doing this — finish the task yourself." },
+                onBuildApp: { n, h in await self.toolBuildApp(n, h) },
+                onCreateRank: { n, b, c in await self.toolCreateRank(n, b, c) },
+                onAssignRank: { a, r in await self.toolAssignRank(a, r) },
+                onCreateTask: { n, p, w in await self.toolCreateTask(n, p, w) },
+                onEditAgent: { t, c in await self.toolEditAgent(t, c) },
+                onCreateChannel: { n, d in await self.toolCreateChannel(n, d) },
+                onSaveKnowledge: { t, c in await self.toolSaveKnowledge(t, c) },
+                onEditApp: { n, h in await self.toolEditApp(n, h) },
+                onListApps: { await self.toolListApps() },
+                onPostChannel: { chName, tx in await self.toolPostChannel(agentId: agent.id, chName, tx) }
+            )
+            let res = await AgentRunner.run(agent: agent, history: history, roster: rosterString(),
+                                            memories: await fetchContext(), ctx: ctx)
+            var patch: [String: Any] = ["content": res.text, "status": "complete",
+                                        "activities": AppState.stepActivities(res.steps)]
+            let atts = AppState.buildAttachments(images: res.images, pages: res.pages)
+            if !atts.isEmpty { patch["attachments"] = atts }
+            try? await Supa.shared.update("messages?id=eq.\(pid)", patch)
+            try? await Supa.shared.update("agents?id=eq.\(agent.id)", ["last_run_at": isoNow()])
+        }
     }
 
     // MARK: - Agent tool actions (DB writes)

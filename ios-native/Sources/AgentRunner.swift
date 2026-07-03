@@ -50,6 +50,7 @@ enum AgentRunner {
         case "read_file": return "Reading the file…"
         case "recipes": return "Finding the recipe…"
         case "tv_show": return "Checking the show…"
+        case "maps_search": return "Searching the map…"
         case "world_cup": return "Checking the World Cup…"
         case "weather": return "Checking the weather…"
         case "currency": return "Converting currency…"
@@ -92,6 +93,7 @@ enum AgentRunner {
             fn("find_images", "Search the web for REAL photos (brands, cars, products, logos, people, places, teams) and show them directly in the chat.", ["query": S], ["query"]),
             fn("view_image", "Look at an image the user uploaded (or any image URL) and describe what it shows. Use whenever a message contains [Uploaded image: URL].", ["url": S, "question": S], ["url"]),
             fn("read_file", "Download and read a text file the user uploaded (or any file URL). Use whenever a message contains [Uploaded file ...].", ["url": S], ["url"]),
+            fn("maps_search", "Find places/addresses/businesses on the map (name, address, coordinates + map links).", ["query": S], ["query"]),
             fn("recipes", "Full recipe for a dish (ingredients + instructions).", ["dish": S], ["dish"]),
             fn("tv_show", "Info about a TV show (status, rating, summary).", ["show": S], ["show"]),
             fn("world_cup", "Live FIFA World Cup results, fixtures, standings.", [:], []),
@@ -178,9 +180,10 @@ enum AgentRunner {
         art, sections (hero, about, services with cards, gallery, testimonials, contact with real info + map \
         link), and a sticky nav. Publish with build_app. To iterate on an existing app use list_apps then \
         edit_app.
-        RULE 4 — TEAMWORK. For big builds: create_channel for the project, post_channel a kickoff brief, \
-        and delegate the build to the right teammate (they reply themselves — never write their reply). \
-        If the user asks a different teammate to do something, delegate to them.
+        RULE 4 — TEAMWORK. For big builds: create_channel for the project, then post_channel a kickoff \
+        brief that TAGS the right teammate with their @handle (from the roster) — tagged teammates are \
+        pinged automatically and reply in the channel themselves; never write their reply for them. \
+        In chats, delegate to whichever teammate the user asks for.
         RULE 5 — RICH OUTPUT. Answer in Markdown with ## headings, bullets, **bold** facts. \
         Never claim you did something you didn't. Speak only as \(agent.name).
         RULE 6 — IMAGES. When the user asks about anything REAL — a brand, car, product, logo, team, \
@@ -191,7 +194,11 @@ enum AgentRunner {
         name produces blank images.
         RULE 7 — UPLOADS. If a message contains [Uploaded image: URL], IMMEDIATELY call view_image on \
         that URL before answering. If it contains [Uploaded file 'name': URL], call read_file. Never say \
-        you can't see attachments — you can, with these tools.\(customText)\(memText)
+        you can't see attachments — you can, with these tools.
+        RULE 8 — NEVER GIVE UP, NEVER STALL. If a tool returns nothing useful, try a DIFFERENT query or \
+        a different tool (web_search ⇄ wiki ⇄ browse ⇄ find_images ⇄ maps_search), up to 2 alternatives — \
+        then move on and give the best answer you can with what you found. For places, businesses and \
+        directions use maps_search and include its Google Maps link in your answer.\(customText)\(memText)
         """
         var msgs: [[String: Any]] = [["role": "system", "content": system]]
         msgs.append(contentsOf: history)
@@ -365,6 +372,27 @@ enum AgentRunner {
         return re.matches(in: text, range: NSRange(location: 0, length: ns.length)).compactMap { m in
             m.numberOfRanges > 1 ? ns.substring(with: m.range(at: 1)) : nil
         }
+    }
+
+    /// Places — OpenStreetMap Nominatim (keyless). Names, addresses, coordinates
+    /// and ready-to-share map links.
+    private static func mapsSearch(_ query: String) async -> String {
+        guard !query.isEmpty else { return "Need a place to search for." }
+        let enc = query.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? query
+        guard let u = URL(string: "https://nominatim.openstreetmap.org/search?q=\(enc)&format=json&limit=5") else { return "Bad query." }
+        var req = URLRequest(url: u)
+        req.setValue("AskAI-iOS/1.0 (personal app)", forHTTPHeaderField: "User-Agent")
+        guard let (d, _) = try? await URLSession.shared.data(for: req),
+              let arr = try? JSONSerialization.jsonObject(with: d) as? [[String: Any]], !arr.isEmpty else {
+            return "No places found for \(query) — try adding a city or country."
+        }
+        let rows = arr.prefix(4).map { p -> String in
+            let name = p["display_name"] as? String ?? "Place"
+            let lat = p["lat"] as? String ?? ""
+            let lon = p["lon"] as? String ?? ""
+            return "\(name) — Google Maps: https://maps.google.com/?q=\(lat),\(lon)"
+        }
+        return rows.joined(separator: "\n")
     }
 
     /// Recipes — TheMealDB (keyless).
@@ -546,6 +574,7 @@ enum AgentRunner {
             return "Found \(found.count) real photo(s), now shown to the user: " + found.map { $0.0 }.joined(separator: "; ")
         case "view_image": return await viewImage(str(args["url"]), str(args["question"]))
         case "read_file": return await readFile(str(args["url"]))
+        case "maps_search": return await mapsSearch(str(args["query"]))
         case "recipes": return await recipes(str(args["dish"]))
         case "tv_show": return await tvShow(str(args["show"]))
         case "world_cup": return await worldCup()

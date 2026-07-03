@@ -104,7 +104,12 @@ struct ImageViewer: View {
                                     offset = CGSize(width: lastOffset.width + v.translation.width,
                                                     height: lastOffset.height + v.translation.height)
                                 }
-                                .onEnded { _ in lastOffset = offset })
+                                .onEnded { v in
+                                    // Not zoomed + flicked down = close (easy to minimize).
+                                    if scale <= 1.02 && v.translation.height > 90 { dismiss(); return }
+                                    if scale <= 1.02 { offset = .zero; lastOffset = .zero }
+                                    else { lastOffset = offset }
+                                })
                     )
                     .onTapGesture(count: 2) {
                         withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
@@ -249,37 +254,52 @@ struct BrowserSessionCard: View {
     }
 }
 
-/// Page screenshot with automatic fallback: if the primary screenshot service
-/// fails, retry through a second one (so previews stop coming up blank).
+/// Page screenshot that actually loads: fetches with real retries across two
+/// services (screenshot services often need a few seconds to render a page,
+/// which one-shot AsyncImage can't handle).
 struct PageShot: View {
     let primary: String
     let pageURL: String
+    @State private var img: UIImage?
+    @State private var failed = false
+
     private var fallback: String {
         let enc = pageURL.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? pageURL
         return "https://s0.wp.com/mshots/v1/\(enc)?w=900"
     }
+
     var body: some View {
-        AsyncImage(url: URL(string: primary)) { phase in
-            switch phase {
-            case .success(let img):
-                img.resizable().scaledToFill()
-            case .failure:
-                AsyncImage(url: URL(string: fallback)) { p2 in
-                    if case .success(let img2) = p2 {
-                        img2.resizable().scaledToFill()
-                    } else {
-                        loading
-                    }
+        Group {
+            if let img {
+                Image(uiImage: img).resizable().scaledToFill()
+            } else if failed {
+                VStack(spacing: 6) {
+                    Image(systemName: "globe").font(.title3).foregroundStyle(Theme.muted)
+                    Text("Preview unavailable — tap Open").font(.caption).foregroundStyle(Theme.muted)
                 }
-            default:
-                loading
+            } else {
+                VStack(spacing: 6) {
+                    ProgressView().tint(Theme.muted)
+                    Text("Loading page…").font(.caption).foregroundStyle(Theme.muted)
+                }
             }
         }
-    }
-    private var loading: some View {
-        VStack(spacing: 6) {
-            ProgressView().tint(Theme.muted)
-            Text("Loading page…").font(.caption).foregroundStyle(Theme.muted)
+        .task(id: primary) {
+            for candidate in [primary, fallback] {
+                for _ in 0..<3 {
+                    guard !Task.isCancelled else { return }
+                    if let u = URL(string: candidate),
+                       let (d, r) = try? await URLSession.shared.data(from: u),
+                       ((r as? HTTPURLResponse)?.statusCode ?? 500) < 300,
+                       d.count > 4000,             // filters "still generating" stubs
+                       let ui = UIImage(data: d) {
+                        img = ui
+                        return
+                    }
+                    try? await Task.sleep(nanoseconds: 2_500_000_000)
+                }
+            }
+            failed = true
         }
     }
 }
