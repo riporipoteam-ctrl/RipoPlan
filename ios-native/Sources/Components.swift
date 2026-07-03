@@ -264,8 +264,8 @@ struct PageShot: View {
     @State private var failed = false
 
     private var fallback: String {
-        let enc = pageURL.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? pageURL
-        return "https://s0.wp.com/mshots/v1/\(enc)?w=900"
+        // Primary is mshots now; thum.io is the backup.
+        "https://image.thum.io/get/width/900/\(pageURL)"
     }
 
     var body: some View {
@@ -340,11 +340,40 @@ struct TypingDots: View {
 struct MD: View {
     let text: String
     var body: some View {
-        if let attr = try? AttributedString(markdown: text, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)) {
-            Text(attr)
-        } else {
-            Text(text)
+        Text(MD.attributed(text))
+    }
+
+    /// Markdown → AttributedString with bare URLs auto-linked and links tinted
+    /// (so `https://…` in a reply is tappable, not just `[text](url)`).
+    static func attributed(_ text: String) -> AttributedString {
+        let linked = autolink(text)
+        var attr = (try? AttributedString(markdown: linked,
+            options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace,
+                           failurePolicy: .returnPartiallyParsedIfPossible)))
+            ?? AttributedString(text)
+        for run in attr.runs where run.link != nil {
+            attr[run.range].foregroundColor = Theme.accent
+            attr[run.range].underlineStyle = .single
         }
+        return attr
+    }
+
+    /// Wrap bare http(s) URLs in Markdown link syntax unless already linked.
+    private static func autolink(_ s: String) -> String {
+        guard let re = try? NSRegularExpression(pattern: "(?<![\\(\\]/])(https?://[^\\s\\)\\]]+)") else { return s }
+        let ns = s as NSString
+        var result = s
+        let matches = re.matches(in: s, range: NSRange(location: 0, length: ns.length)).reversed()
+        for m in matches {
+            let url = ns.substring(with: m.range(at: 1))
+            // Skip if this URL is already inside a markdown link target.
+            let start = m.range.location
+            if start > 0, ns.substring(with: NSRange(location: start - 1, length: 1)) == "(" { continue }
+            if let r = Range(m.range, in: result) {
+                result.replaceSubrange(r, with: "[\(url)](\(url))")
+            }
+        }
+        return result
     }
 }
 
@@ -355,7 +384,7 @@ struct RichText: View {
 
     private enum Block: Identifiable {
         case heading(Int, String), bullet(String), ordered(String, String)
-        case code(String), image(String), paragraph(String)
+        case code(String), image(String), paragraph(String), video(VideoEmbed)
         var id: String { UUID().uuidString }
     }
 
@@ -405,6 +434,8 @@ struct RichText: View {
                     .overlay(RoundedRectangle(cornerRadius: 16).stroke(Theme.stroke, lineWidth: 1))
                 case .paragraph(let p):
                     MD(text: p).font(.body).foregroundStyle(Theme.text).textSelection(.enabled)
+                case .video(let v):
+                    VideoCard(video: v)
                 }
             }
         }
@@ -417,7 +448,20 @@ struct RichText: View {
         var para: [String] = []
         var code: [String] = []
         var inCode = false
-        func flushPara() { if !para.isEmpty { out.append(.paragraph(para.joined(separator: "\n"))); para = [] } }
+        var seenVideos = Set<String>()
+        func flushPara() {
+            guard !para.isEmpty else { return }
+            let joined = para.joined(separator: "\n")
+            out.append(.paragraph(joined))
+            // Any video link in this paragraph becomes a tappable player card.
+            for url in urls(in: joined) {
+                if let v = VideoEmbed.from(url), !seenVideos.contains(v.embedURL) {
+                    seenVideos.insert(v.embedURL)
+                    out.append(.video(v))
+                }
+            }
+            para = []
+        }
         for raw in lines {
             let line = raw
             let trimmed = line.trimmingCharacters(in: .whitespaces)
@@ -445,6 +489,15 @@ struct RichText: View {
         let g1 = m.numberOfRanges > 1 && m.range(at: 1).location != NSNotFound ? ns.substring(with: m.range(at: 1)) : ""
         let g2 = m.numberOfRanges > 2 && m.range(at: 2).location != NSNotFound ? ns.substring(with: m.range(at: 2)) : ""
         return (g1, g2.isEmpty && m.numberOfRanges <= 2 ? g1 : g2)
+    }
+
+    /// All http(s) URLs in a string (markdown link targets included).
+    private func urls(in s: String) -> [String] {
+        guard let re = try? NSRegularExpression(pattern: "https?://[^\\s\\)\\]]+") else { return [] }
+        let ns = s as NSString
+        return re.matches(in: s, range: NSRange(location: 0, length: ns.length)).map {
+            ns.substring(with: $0.range).trimmingCharacters(in: CharacterSet(charactersIn: ".,);"))
+        }
     }
 }
 

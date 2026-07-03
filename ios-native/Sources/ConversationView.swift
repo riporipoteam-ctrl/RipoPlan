@@ -51,6 +51,8 @@ struct ConversationView: View {
     @State private var heroIn = false
     @State private var showScrollDown = false
     @State private var showVoice = false
+    @State private var browserURL: String?
+    @State private var videoURL: String?
     @Environment(\.scenePhase) private var scene
 
     var body: some View {
@@ -73,8 +75,21 @@ struct ConversationView: View {
             }
         }
         .background(Theme.ink.ignoresSafeArea())
+        // Tapping a link in any reply opens it INSIDE the app (video links get the
+        // in-app player; everything else the in-app browser).
+        .environment(\.openURL, OpenURLAction { url in
+            if VideoEmbed.from(url.absoluteString) != nil { videoURL = url.absoluteString }
+            else { browserURL = url.absoluteString }
+            return .handled
+        })
         .fullScreenCover(isPresented: $showVoice) {
             VoiceCallView().environmentObject(app)
+        }
+        .sheet(isPresented: Binding(get: { browserURL != nil }, set: { if !$0 { browserURL = nil } })) {
+            if let u = browserURL { InAppBrowser(url: u) }
+        }
+        .fullScreenCover(isPresented: Binding(get: { videoURL != nil }, set: { if !$0 { videoURL = nil } })) {
+            if let u = videoURL, let v = VideoEmbed.from(u) { VideoPlayerSheet(video: v) }
         }
         .photosPicker(isPresented: $showPhoto, selection: $photoItem, matching: .images)
         .onChange(of: photoItem) { item in Task { await loadPhoto(item) } }

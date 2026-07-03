@@ -173,21 +173,25 @@ enum AgentRunner {
         RULE 2 — GO DEEP. Chain tools: search, then browse the best 2-3 result pages, then answer with \
         concrete facts (numbers, dates, names, sources). You may take many tool rounds — extended \
         thinking is encouraged for hard tasks.
-        RULE 3 — WEBSITES MUST BE PROFESSIONAL. When asked to build a website/app: FIRST web_search the \
-        business/topic and browse for real details (address, phone, hours, services, reviews). THEN build \
-        one long self-contained HTML file with: modern CSS (custom properties, gradient hero, glassmorphism \
-        cards, smooth scroll-behavior), animations (CSS keyframes, hover transitions, reveal-on-scroll via \
-        IntersectionObserver), fully responsive layout, real content from your research (never lorem ipsum), \
-        images via https://image.pollinations.ai/prompt/{description}?width=800&height=500 for hero/section \
-        art, sections (hero, about, services with cards, gallery, testimonials, contact with real info + map \
-        link), and a sticky nav. Publish with build_app. To iterate on an existing app use list_apps then \
-        edit_app.
+        RULE 3 — BUILD REQUESTS ALWAYS END WITH build_app. When asked for a website/app: research FAST — \
+        at most 3 tool calls (ONE web_search, browse the best result, optionally ONE find_images) — then \
+        you MUST call build_app in this same conversation. Ending a build request without calling \
+        build_app is failure; if research finds little, build anyway with what you have. The HTML: one \
+        long self-contained file with modern CSS (custom properties, gradient hero, glassmorphism cards, \
+        smooth scroll-behavior), animations (CSS keyframes, hover transitions, reveal-on-scroll via \
+        IntersectionObserver), fully responsive, real content from research (never lorem ipsum), images \
+        via https://image.pollinations.ai/prompt/{description}?width=800&height=500, sections (hero, \
+        about, services, gallery, testimonials, contact + map link), sticky nav. AFTER build_app \
+        succeeds: create_channel for the project and post_channel a kickoff tagging the builder \
+        teammate's @handle so they own future iterations (list_apps + edit_app).
         RULE 4 — TEAMWORK. For big builds: create_channel for the project, then post_channel a kickoff \
         brief that TAGS the right teammate with their @handle (from the roster) — tagged teammates are \
         pinged automatically and reply in the channel themselves; never write their reply for them. \
         In chats, delegate to whichever teammate the user asks for.
         RULE 5 — RICH OUTPUT. Answer in Markdown with ## headings, bullets, **bold** facts. \
-        Never claim you did something you didn't. Speak only as \(agent.name).
+        Never claim you did something you didn't. Speak only as \(agent.name). When sharing a video \
+        (YouTube, Twitch, TikTok…), include the FULL link — the app turns it into a tappable in-app \
+        player. Always write complete URLs for anything the user should open.
         RULE 6 — IMAGES. When the user asks about anything REAL — a brand, car, product, logo, team, \
         person, place — call find_images to show actual photos in the chat, and do it proactively when \
         a photo would help an answer. Use generate_image only for creative/original art; if the art must \
@@ -289,7 +293,20 @@ enum AgentRunner {
         // Last resort: never show a blank/failure — summarize what the tools found.
         if !images.isEmpty { return RunResult(text: "Here's what I generated.", images: images, steps: steps, pages: pages) }
         if !lastToolOutput.isEmpty { return RunResult(text: clean(lastToolOutput), images: images, steps: steps, pages: pages) }
-        return RunResult(text: "I couldn't complete that just now — please try again in a moment.", images: images, steps: steps, pages: pages)
+        // The big tool schema / long history can make a provider reject the call
+        // (that's the "I couldn't complete that" loop). Retry ONE last time with
+        // a tiny, tool-free payload — a plain persona + the user's last words —
+        // which virtually always succeeds even for a bare "Hi".
+        let lastUserText = history.last(where: { ($0["role"] as? String) == "user" })?["content"] as? String ?? "Hello"
+        let mini: [[String: Any]] = [
+            ["role": "system", "content": "You are \(agent.name), a warm, helpful AI assistant. Reply directly and briefly in plain Markdown."],
+            ["role": "user", "content": String(lastUserText.prefix(2000))]
+        ]
+        if let m = await chat(mini, tools: nil) {
+            let cleaned = clean((m["content"] as? String) ?? "")
+            if !cleaned.isEmpty { return RunResult(text: cleaned, images: images, steps: steps, pages: pages) }
+        }
+        return RunResult(text: "I hit a snag reaching my brain just now — please send that again.", images: images, steps: steps, pages: pages)
     }
 
     /// Quietly decide (in the background, after answering) whether this exchange
@@ -486,7 +503,10 @@ enum AgentRunner {
     private static func pagePreview(_ url: String) -> [String: String]? {
         let full = url.hasPrefix("http") ? url : "https://\(url)"
         guard let u = URL(string: full), let host = u.host else { return nil }
-        let shot = "https://image.thum.io/get/width/900/\(full)"
+        // mshots (WordPress) is the reliable primary — thum.io's free tier often
+        // serves a branded placeholder that never becomes a real screenshot.
+        let enc = full.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? full
+        let shot = "https://s0.wp.com/mshots/v1/\(enc)?w=900"
         return ["url": full, "host": host, "shot": shot]
     }
 
