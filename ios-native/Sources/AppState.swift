@@ -233,8 +233,14 @@ final class AppState: ObservableObject {
 
     // MARK: - Messages
 
+    /// In-memory cache so re-opening a chat (or returning to the app) shows
+    /// messages instantly while the fresh copy loads.
+    var msgCache: [String: [Message]] = [:]
+
     func messages(thread: String) async -> [Message] {
-        (try? await Supa.shared.select("messages?thread_id=eq.\(thread)&select=*&order=created_at.asc&limit=200")) ?? []
+        let fresh: [Message] = (try? await Supa.shared.select("messages?thread_id=eq.\(thread)&select=*&order=created_at.asc&limit=200")) ?? []
+        if !fresh.isEmpty { msgCache[thread] = fresh }
+        return fresh.isEmpty ? (msgCache[thread] ?? []) : fresh
     }
 
     /// Send a message. Creates the thread if needed, posts the user message, adds a

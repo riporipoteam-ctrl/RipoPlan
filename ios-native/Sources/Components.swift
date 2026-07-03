@@ -185,15 +185,8 @@ struct BrowserSessionCard: View {
                 VStack(alignment: .leading, spacing: 8) {
                     ZStack {
                         RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Theme.ink3)
-                        if let s = p.preview, let u = URL(string: s) {
-                            AsyncImage(url: u) { i in
-                                i.resizable().scaledToFill()
-                            } placeholder: {
-                                VStack(spacing: 6) {
-                                    ProgressView().tint(Theme.muted)
-                                    Text("Loading page…").font(.caption).foregroundStyle(Theme.muted)
-                                }
-                            }
+                        if let s = p.preview, !s.isEmpty {
+                            PageShot(primary: s, pageURL: p.url)
                         } else {
                             Image(systemName: "globe").font(.title2).foregroundStyle(Theme.muted)
                         }
@@ -252,6 +245,41 @@ struct BrowserSessionCard: View {
         .onAppear { selected = max(0, pages.count - 1) }
         .fullScreenCover(isPresented: $showFull) {
             if let p = page, let s = p.preview { ImageViewer(url: s) }
+        }
+    }
+}
+
+/// Page screenshot with automatic fallback: if the primary screenshot service
+/// fails, retry through a second one (so previews stop coming up blank).
+struct PageShot: View {
+    let primary: String
+    let pageURL: String
+    private var fallback: String {
+        let enc = pageURL.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? pageURL
+        return "https://s0.wp.com/mshots/v1/\(enc)?w=900"
+    }
+    var body: some View {
+        AsyncImage(url: URL(string: primary)) { phase in
+            switch phase {
+            case .success(let img):
+                img.resizable().scaledToFill()
+            case .failure:
+                AsyncImage(url: URL(string: fallback)) { p2 in
+                    if case .success(let img2) = p2 {
+                        img2.resizable().scaledToFill()
+                    } else {
+                        loading
+                    }
+                }
+            default:
+                loading
+            }
+        }
+    }
+    private var loading: some View {
+        VStack(spacing: 6) {
+            ProgressView().tint(Theme.muted)
+            Text("Loading page…").font(.caption).foregroundStyle(Theme.muted)
         }
     }
 }

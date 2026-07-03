@@ -51,6 +51,7 @@ struct ConversationView: View {
     @State private var heroIn = false
     @State private var showScrollDown = false
     @State private var showVoice = false
+    @Environment(\.scenePhase) private var scene
 
     var body: some View {
         ZStack(alignment: .bottom) {
@@ -81,6 +82,12 @@ struct ConversationView: View {
             Task { await loadFile(result) }
         }
         .task(id: threadId) { await poll() }
+        .onChange(of: scene) { p in
+            // Coming back from background → refresh immediately, don't wait for
+            // the next poll tick.
+            guard p == .active, let tid = threadId else { return }
+            Task { let m = await app.messages(thread: tid); if m != messages { messages = m } }
+        }
     }
 
     // MARK: New chat (empty state) — ChatGPT layout: calm blank space with
@@ -202,6 +209,10 @@ struct ConversationView: View {
     private func poll() async {
         guard let tid = threadId else { messages = []; loaded = false; return }
         loaded = false
+        // Instant paint from cache; the network copy replaces it right after.
+        if let cached = app.msgCache[tid], !cached.isEmpty {
+            messages = cached; loaded = true
+        }
         var cycle = 0
         while !Task.isCancelled {
             let m = await app.messages(thread: tid)
@@ -289,6 +300,17 @@ struct MessageBubble: View {
     var isUser: Bool { message.sender_type == "user" }
     var thinking: Bool { message.status == "thinking" }
 
+    private var reactKey: String { "askai.react.\(message.id)" }
+    private func loadReaction() {
+        let r = UserDefaults.standard.string(forKey: reactKey)
+        liked = r == "up"; disliked = r == "down"
+    }
+    private func saveReaction() {
+        if liked { UserDefaults.standard.set("up", forKey: reactKey) }
+        else if disliked { UserDefaults.standard.set("down", forKey: reactKey) }
+        else { UserDefaults.standard.removeObject(forKey: reactKey) }
+    }
+
     /// Type out only fresh replies, once, and never giant ones.
     private var shouldType: Bool {
         guard !isUser, message.status == "complete",
@@ -373,7 +395,10 @@ struct MessageBubble: View {
         }
         .opacity(appeared ? 1 : 0)
         .offset(y: appeared ? 0 : 10)
-        .onAppear { withAnimation(.spring(response: 0.4, dampingFraction: 0.85)) { appeared = true } }
+        .onAppear {
+            loadReaction()
+            withAnimation(.spring(response: 0.4, dampingFraction: 0.85)) { appeared = true }
+        }
         .contextMenu {
             if let body = message.content, !body.isEmpty {
                 Button { UIPasteboard.general.string = body; Haptic.success() } label: {
@@ -401,6 +426,7 @@ struct MessageBubble: View {
             Button {
                 Haptic.light()
                 withAnimation(.spring(response: 0.3, dampingFraction: 0.6)) { liked.toggle(); if liked { disliked = false } }
+                saveReaction()
             } label: {
                 Image(systemName: liked ? "hand.thumbsup.fill" : "hand.thumbsup")
                     .scaleEffect(liked ? 1.15 : 1)
@@ -408,6 +434,7 @@ struct MessageBubble: View {
             Button {
                 Haptic.light()
                 withAnimation(.spring(response: 0.3, dampingFraction: 0.6)) { disliked.toggle(); if disliked { liked = false } }
+                saveReaction()
             } label: {
                 Image(systemName: disliked ? "hand.thumbsdown.fill" : "hand.thumbsdown")
                     .scaleEffect(disliked ? 1.15 : 1)
@@ -486,20 +513,19 @@ struct SkeletonBubble: View {
 }
 
 /// ChatGPT-style typewriter — a freshly finished reply types itself out, then
-/// swaps to full rich rendering. Old messages render instantly.
+/// swaps to full rich rendering. Driven by a structured task (not a timer), so
+/// parent re-renders can't stutter or restart it.
 struct TypewriterText: View {
     let text: String
     var animate: Bool
     var onGrow: () -> Void = {}
     var onDone: () -> Void = {}
     @State private var shown = 0
-    @State private var started = false
     @State private var finished = false
-    private let timer = Timer.publish(every: 0.03, on: .main, in: .common).autoconnect()
 
     var body: some View {
         Group {
-            if finished || (!animate && !started) {
+            if finished || !animate {
                 RichText(text: text)
             } else {
                 MD(text: String(text.prefix(shown)))
@@ -508,13 +534,13 @@ struct TypewriterText: View {
                     .textSelection(.enabled)
             }
         }
-        .onAppear {
-            if animate { started = true } else { finished = true }
-        }
-        .onReceive(timer) { _ in
-            guard started, !finished else { return }
-            shown = min(text.count, shown + 7)
-            onGrow()
+        .task(id: text) {
+            guard animate, !finished else { return }
+            while shown < text.count, !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 28_000_000)
+                shown = min(text.count, shown + 6)
+                onGrow()
+            }
             if shown >= text.count {
                 finished = true
                 onDone()

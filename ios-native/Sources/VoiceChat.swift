@@ -202,34 +202,63 @@ final class VoiceCall: NSObject, ObservableObject {
         guard let app else { return }
         turns.append(("You", text, true))
         var content = text
-        // Live camera: let the agent SEE what the camera sees right now.
+        // Live camera: let the agent SEE — but never let a slow upload/vision
+        // call hang the whole call (hard 10s budget, then skip).
         if camera.running, let jpeg = camera.snapshotJPEG() {
-            if let att = await app.upload(data: jpeg, ext: "jpg", contentType: "image/jpeg", name: "camera.jpg") {
-                let seen = await AgentRunner.viewImage(att.url, "In 1-2 sentences: what is visible in this live camera view?")
-                content += "\n[Live camera right now: \(seen)]"
+            let seen: String? = await withTimeout(10) {
+                guard let att = await app.upload(data: jpeg, ext: "jpg", contentType: "image/jpeg", name: "camera.jpg") else { return nil }
+                return await AgentRunner.viewImage(att.url, "In 1-2 sentences: what is visible in this live camera view?")
             }
+            if let seen, !seen.isEmpty { content += "\n[Live camera right now: \(seen)]" }
         }
         history.append(["role": "user", "content": content])
-        let agent = pickAgent(for: text, app: app)
-        speaker = agent?.name ?? app.agents.first(where: { $0.is_supervisor == true })?.name ?? "AskAI"
-        let answer = await app.voiceAnswer(history: history, agent: agent)
-        guard running else { return }
-        history.append(["role": "assistant", "content": answer])
+
+        // One or SEVERAL agents can answer (say their names, or "everyone").
+        let responders = pickAgents(for: text, app: app)
+        for (i, agent) in responders.enumerated() {
+            guard running else { return }
+            if i > 0 { phase = .thinking }
+            speaker = agent?.name ?? "AskAI"
+            let answer = await app.voiceAnswer(history: history, agent: agent)
+            guard running else { return }
+            let final = answer.isEmpty ? "Sorry, say that again?" : answer
+            history.append(["role": "assistant", "content": responders.count > 1 ? "\(speaker): \(final)" : final])
+            lastReply = final
+            turns.append((speaker, final, false))
+            await speak(final, voice: voiceId(for: agent))
+        }
         if history.count > 16 { history.removeFirst(history.count - 16) }
-        lastReply = answer
-        turns.append((speaker, answer, false))
-        await speak(answer, voice: voiceId(for: agent))
         if running && !muted { beginListening() }
     }
 
-    /// Route to an invited/named agent when the user addresses one by name.
-    private func pickAgent(for text: String, app: AppState) -> Agent? {
+    /// Who should answer: agents named in the utterance (auto-invited, up to 3),
+    /// "everyone/team" → all invited agents, otherwise the chief.
+    private func pickAgents(for text: String, app: AppState) -> [Agent?] {
         let lc = text.lowercased()
-        let pool = invited.isEmpty ? app.agents : invited + app.agents
-        if let named = pool.first(where: { !$0.name.isEmpty && lc.contains($0.name.lowercased()) }) {
-            return named
+        var named = app.agents.filter { !$0.name.isEmpty && lc.contains($0.name.lowercased()) }
+        if named.isEmpty, !invited.isEmpty,
+           lc.contains("everyone") || lc.contains("all of you") || lc.contains("you all") || lc.contains("the team") {
+            named = invited
         }
-        return app.agents.first(where: { $0.is_supervisor == true })
+        guard !named.isEmpty else {
+            return [app.agents.first(where: { $0.is_supervisor == true })]
+        }
+        for a in named where !invited.contains(where: { $0.id == a.id }) { invited.append(a) }
+        return Array(named.prefix(3)).map { Optional($0) }
+    }
+
+    /// Run an async job with a hard timeout; nil if it doesn't finish in time.
+    private func withTimeout<T: Sendable>(_ seconds: Double, _ op: @escaping @Sendable () async -> T?) async -> T? {
+        await withTaskGroup(of: T?.self) { group in
+            group.addTask { await op() }
+            group.addTask {
+                try? await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
+                return nil
+            }
+            let first = await group.next() ?? nil
+            group.cancelAll()
+            return first
+        }
     }
 
     // MARK: Speaking
@@ -355,7 +384,19 @@ final class CameraFeed: NSObject, ObservableObject {
         DispatchQueue.main.async { self.running = false }
     }
 
-    func snapshotJPEG() -> Data? { store.get()?.jpegData(compressionQuality: 0.55) }
+    func snapshotJPEG() -> Data? {
+        guard let img = store.get() else { return nil }
+        // Small + fast — the vision model doesn't need full resolution.
+        let maxSide: CGFloat = 900
+        let scale = min(1, maxSide / max(img.size.width, img.size.height))
+        if scale >= 1 { return img.jpegData(compressionQuality: 0.5) }
+        let size = CGSize(width: img.size.width * scale, height: img.size.height * scale)
+        let fmt = UIGraphicsImageRendererFormat.default(); fmt.scale = 1
+        let small = UIGraphicsImageRenderer(size: size, format: fmt).image { _ in
+            img.draw(in: CGRect(origin: .zero, size: size))
+        }
+        return small.jpegData(compressionQuality: 0.5)
+    }
 }
 
 extension CameraFeed: AVCaptureVideoDataOutputSampleBufferDelegate {
@@ -401,27 +442,11 @@ struct VoiceCallView: View {
             VStack(spacing: 24) {
                 Spacer()
 
-                // The orb — breathes while idle, swells with your voice.
-                ZStack {
-                    Circle().fill(orbColor.opacity(0.16))
-                        .frame(width: 260, height: 260)
-                        .scaleEffect(orbScale * (pulse ? 1.04 : 0.96))
-                    Circle().fill(orbColor.opacity(0.28))
-                        .frame(width: 190, height: 190)
-                        .scaleEffect(orbScale)
-                    Circle().fill(orbColor)
-                        .frame(width: 130, height: 130)
-                        .scaleEffect(0.9 + call.level * 0.35)
-                        .shadow(color: orbColor.opacity(0.45), radius: 30)
-                    if call.phase == .thinking {
-                        ProgressView().tint(.white).scaleEffect(1.3)
-                    }
-                }
-                .animation(.easeOut(duration: 0.12), value: call.level)
-                .animation(.spring(response: 0.5, dampingFraction: 0.7), value: call.phase)
-                .onAppear {
-                    withAnimation(.easeInOut(duration: 1.8).repeatForever(autoreverses: true)) { pulse = true }
-                }
+                // The orb — a living liquid-glass sphere: swirling color core
+                // under a REAL glass shell, breathing, swelling with your voice.
+                VoiceOrb(color: orbColor, level: call.level, thinking: call.phase == .thinking)
+                    .animation(.easeOut(duration: 0.12), value: call.level)
+                    .animation(.spring(response: 0.5, dampingFraction: 0.7), value: call.phase)
 
                 VStack(spacing: 8) {
                     Text(statusTitle)
@@ -583,6 +608,54 @@ struct CameraDock: View {
             }
             .padding(.top, 18).padding(.trailing, 16)
             .transition(.scale.combined(with: .opacity))
+        }
+    }
+}
+
+/// Living liquid-glass orb: a swirling color core, soft aura, and a REAL
+/// Liquid Glass shell (iOS 26 glassEffect) floating on top.
+struct VoiceOrb: View {
+    var color: Color
+    var level: CGFloat
+    var thinking: Bool
+    @State private var spin = false
+    @State private var breathe = false
+
+    var body: some View {
+        ZStack {
+            // Aura
+            Circle().fill(color.opacity(0.20))
+                .frame(width: 280, height: 280)
+                .blur(radius: 34)
+                .scaleEffect(breathe ? 1.10 : 0.92)
+            // Swirling liquid core
+            Circle()
+                .fill(AngularGradient(colors: [color, color.opacity(0.35), Color.white.opacity(0.75), color],
+                                      center: .center))
+                .frame(width: 175, height: 175)
+                .blur(radius: 16)
+                .rotationEffect(.degrees(spin ? 360 : 0))
+                .scaleEffect(0.9 + level * 0.4)
+            // Counter-rotating inner swirl for depth
+            Circle()
+                .fill(AngularGradient(colors: [Color.white.opacity(0.0), Color.white.opacity(0.5), Color.white.opacity(0.0)],
+                                      center: .center))
+                .frame(width: 120, height: 120)
+                .blur(radius: 10)
+                .rotationEffect(.degrees(spin ? -360 : 0))
+                .scaleEffect(0.9 + level * 0.3)
+            // REAL Liquid Glass shell over the liquid
+            Color.clear
+                .frame(width: 195, height: 195)
+                .glassCircle()
+                .scaleEffect((breathe ? 1.02 : 0.98) + level * 0.12)
+            if thinking {
+                ProgressView().tint(.white).scaleEffect(1.3)
+            }
+        }
+        .onAppear {
+            withAnimation(.linear(duration: 7).repeatForever(autoreverses: false)) { spin = true }
+            withAnimation(.easeInOut(duration: 2.1).repeatForever(autoreverses: true)) { breathe = true }
         }
     }
 }
