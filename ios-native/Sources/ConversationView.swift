@@ -69,7 +69,7 @@ struct ConversationView: View {
                     .background(Theme.ink.opacity(0.001))
             }
         }
-        .background(AuroraBackground())
+        .background(Theme.ink.ignoresSafeArea())
         .photosPicker(isPresented: $showPhoto, selection: $photoItem, matching: .images)
         .onChange(of: photoItem) { item in Task { await loadPhoto(item) } }
         .fileImporter(isPresented: $showFiles, allowedContentTypes: [.item], allowsMultipleSelection: false) { result in
@@ -78,51 +78,38 @@ struct ConversationView: View {
         .task(id: threadId) { await poll() }
     }
 
-    // MARK: New chat (empty state)
+    // MARK: New chat (empty state) — ChatGPT layout: calm blank space with
+    // plain suggestion rows sitting just above the composer.
     private var newChat: some View {
-        ScrollView {
-            VStack(spacing: 18) {
-                Spacer(minLength: 70 + topInset)
-                BrandSpark(size: 42)
-                    .scaleEffect(heroIn ? 1 : 0.7).opacity(heroIn ? 1 : 0)
-                Text(greeting)
-                    .font(.system(size: 30, weight: .bold))
-                    .foregroundStyle(Theme.text)
-                    .multilineTextAlignment(.center)
-                    .opacity(heroIn ? 1 : 0).offset(y: heroIn ? 0 : 8)
-                Text("What should your team get done?")
-                    .font(.subheadline).foregroundStyle(Theme.muted)
-                    .opacity(heroIn ? 1 : 0)
-                VStack(spacing: 8) {
-                    ForEach(Array(SUGGESTIONS.enumerated()), id: \.element.id) { i, s in
-                        Button { Haptic.light(); text = s.seed } label: {
-                            HStack(spacing: 12) {
-                                Image(systemName: s.icon)
-                                    .font(.system(size: 15, weight: .semibold))
-                                    .foregroundStyle(Theme.text)
-                                    .frame(width: 32, height: 32)
-                                    .background(Theme.ink3, in: Circle())
-                                Text(s.label).font(.subheadline.weight(.medium)).foregroundStyle(Theme.text)
-                                    .lineLimit(1)
-                                Spacer(minLength: 0)
-                                Image(systemName: "arrow.up.right").font(.caption.weight(.semibold))
-                                    .foregroundStyle(Theme.muted.opacity(0.7))
-                            }
-                            .padding(.horizontal, 14).padding(.vertical, 11)
-                            .frame(maxWidth: .infinity)
-                            .liquidGlass(18, shadow: false)
+        VStack(alignment: .leading, spacing: 0) {
+            Spacer()
+            VStack(alignment: .leading, spacing: 4) {
+                ForEach(Array(SUGGESTIONS.prefix(4).enumerated()), id: \.element.id) { i, s in
+                    Button { Haptic.light(); text = s.seed } label: {
+                        HStack(spacing: 16) {
+                            Image(systemName: s.icon)
+                                .font(.system(size: 18, weight: .regular))
+                                .foregroundStyle(Theme.muted)
+                                .frame(width: 26)
+                            Text(s.label)
+                                .font(.system(size: 20, weight: .medium))
+                                .foregroundStyle(Theme.text)
+                                .lineLimit(1)
+                            Spacer(minLength: 0)
                         }
-                        .pressable()
-                        .opacity(heroIn ? 1 : 0)
-                        .offset(y: heroIn ? 0 : 14)
-                        .animation(.spring(response: 0.45, dampingFraction: 0.85).delay(0.04 * Double(i) + 0.1), value: heroIn)
+                        .padding(.horizontal, 22).padding(.vertical, 13)
+                        .contentShape(Rectangle())
                     }
+                    .buttonStyle(.plain)
+                    .pressable()
+                    .opacity(heroIn ? 1 : 0)
+                    .offset(y: heroIn ? 0 : 16)
+                    .animation(.spring(response: 0.5, dampingFraction: 0.85).delay(0.06 * Double(i)), value: heroIn)
                 }
-                .padding(.horizontal, 16)
-                Spacer(minLength: 110)
             }
-            .frame(maxWidth: .infinity)
+            .padding(.bottom, 108)
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
         .onAppear { withAnimation(.spring(response: 0.5, dampingFraction: 0.8)) { heroIn = true } }
     }
 
@@ -137,6 +124,8 @@ struct ConversationView: View {
                             if let label = dayDivider(at: idx) { DayDivider(label: label) }
                             MessageBubble(message: m, onResend: { body in
                                 Task { _ = await app.send(body, threadId: threadId) }
+                            }, onGrow: {
+                                proxy.scrollTo("end", anchor: .bottom)
                             }).id(m.id)
                         }
                         Color.clear.frame(height: 1).id("end")
@@ -197,9 +186,13 @@ struct ConversationView: View {
     private func poll() async {
         guard let tid = threadId else { messages = []; loaded = false; return }
         loaded = false
+        var cycle = 0
         while !Task.isCancelled {
             let m = await app.messages(thread: tid)
             messages = m; loaded = true
+            app.markRead(tid)                       // viewing = read (clears blue dot)
+            if cycle % 6 == 0 { await app.loadThreads() }  // keep unread dots fresh
+            cycle += 1
             try? await Task.sleep(nanoseconds: 2_500_000_000)
         }
     }
@@ -252,12 +245,25 @@ struct MessageBubble: View {
     @EnvironmentObject var app: AppState
     let message: Message
     var onResend: ((String) -> Void)? = nil
+    var onGrow: () -> Void = {}
     @State private var showTrail = false
     @State private var appeared = false
     @State private var viewerURL: String?
+    @State private var liked = false
+    @State private var disliked = false
 
     var isUser: Bool { message.sender_type == "user" }
     var thinking: Bool { message.status == "thinking" }
+
+    /// Type out only fresh replies, once, and never giant ones.
+    private var shouldType: Bool {
+        guard !isUser, message.status == "complete",
+              let body = message.content, !body.isEmpty, body.count < 6000,
+              !app.animatedIds.contains(message.id),
+              let d = RelTime.parse(message.created_at),
+              Date().timeIntervalSince(d) < 180 else { return false }
+        return true
+    }
     private var doneActivities: [Activity] {
         guard !isUser, message.status == "complete" else { return [] }
         return (message.activities ?? []).filter { ($0.status ?? "") == "done" && ($0.label != nil) }
@@ -305,21 +311,23 @@ struct MessageBubble: View {
                     activityOrDots
                 } else if !(message.content ?? "").isEmpty {
                     if isUser {
+                        // ChatGPT look — soft grey capsule, regular text.
                         MD(text: message.content ?? "")
-                            .font(.body).foregroundStyle(Theme.onAccent)
+                            .font(.body).foregroundStyle(Theme.text)
                             .textSelection(.enabled)
-                            .padding(.horizontal, 15).padding(.vertical, 11)
-                            .background(
-                                UnevenRoundedRectangle(topLeadingRadius: 20, bottomLeadingRadius: 20,
-                                                       bottomTrailingRadius: 6, topTrailingRadius: 20, style: .continuous)
-                                    .fill(Theme.accent)
-                            )
-                            .shadow(color: .black.opacity(0.15), radius: 8, y: 4)
+                            .padding(.horizontal, 16).padding(.vertical, 11)
+                            .background(Theme.ink2, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
                     } else {
-                        RichText(text: message.content ?? "")
+                        TypewriterText(text: message.content ?? "",
+                                       animate: shouldType,
+                                       onGrow: onGrow,
+                                       onDone: { app.animatedIds.insert(message.id) })
                     }
                 }
                 if !doneActivities.isEmpty { activityTrail }
+                if !isUser, message.status == "complete", !(message.content ?? "").isEmpty {
+                    actionRow
+                }
             }
             if !isUser { Spacer(minLength: 40) }
         }
@@ -342,6 +350,36 @@ struct MessageBubble: View {
         .fullScreenCover(isPresented: Binding(get: { viewerURL != nil }, set: { if !$0 { viewerURL = nil } })) {
             if let u = viewerURL { ImageViewer(url: u) }
         }
+    }
+
+    // ChatGPT-style action row under every finished assistant reply.
+    private var actionRow: some View {
+        HStack(spacing: 22) {
+            Button { UIPasteboard.general.string = message.content ?? ""; Haptic.success() } label: {
+                Image(systemName: "doc.on.doc")
+            }
+            Button {
+                Haptic.light()
+                withAnimation(.spring(response: 0.3, dampingFraction: 0.6)) { liked.toggle(); if liked { disliked = false } }
+            } label: {
+                Image(systemName: liked ? "hand.thumbsup.fill" : "hand.thumbsup")
+                    .scaleEffect(liked ? 1.15 : 1)
+            }
+            Button {
+                Haptic.light()
+                withAnimation(.spring(response: 0.3, dampingFraction: 0.6)) { disliked.toggle(); if disliked { liked = false } }
+            } label: {
+                Image(systemName: disliked ? "hand.thumbsdown.fill" : "hand.thumbsdown")
+                    .scaleEffect(disliked ? 1.15 : 1)
+            }
+            ShareLink(item: message.content ?? "") {
+                Image(systemName: "square.and.arrow.up")
+            }
+        }
+        .font(.system(size: 15))
+        .foregroundStyle(Theme.muted)
+        .buttonStyle(.plain)
+        .padding(.top, 4)
     }
 
     // Nebula-style "N actions · view" trail under a completed agent message.
@@ -382,6 +420,44 @@ struct MessageBubble: View {
             }
         } else {
             TypingDots()
+        }
+    }
+}
+
+/// ChatGPT-style typewriter — a freshly finished reply types itself out, then
+/// swaps to full rich rendering. Old messages render instantly.
+struct TypewriterText: View {
+    let text: String
+    var animate: Bool
+    var onGrow: () -> Void = {}
+    var onDone: () -> Void = {}
+    @State private var shown = 0
+    @State private var started = false
+    @State private var finished = false
+    private let timer = Timer.publish(every: 0.03, on: .main, in: .common).autoconnect()
+
+    var body: some View {
+        Group {
+            if finished || (!animate && !started) {
+                RichText(text: text)
+            } else {
+                MD(text: String(text.prefix(shown)))
+                    .font(.body)
+                    .foregroundStyle(Theme.text)
+                    .textSelection(.enabled)
+            }
+        }
+        .onAppear {
+            if animate { started = true } else { finished = true }
+        }
+        .onReceive(timer) { _ in
+            guard started, !finished else { return }
+            shown = min(text.count, shown + 7)
+            onGrow()
+            if shown >= text.count {
+                finished = true
+                onDone()
+            }
         }
     }
 }

@@ -445,70 +445,47 @@ struct InputBar: View {
                     .padding(.horizontal, 4)
                 }
             }
-            // Two-tier composer (modern ChatGPT layout): the text field gets the
-            // full top row; actions live on their own row underneath.
-            VStack(alignment: .leading, spacing: 10) {
+            // ChatGPT composer — one clean capsule: plain "+", the field, and a
+            // circular send button that lights up when there's something to send.
+            HStack(alignment: .bottom, spacing: 10) {
+                Button { Haptic.light(); showMenu = true } label: {
+                    Image(systemName: "plus")
+                        .font(.system(size: 20, weight: .medium))
+                        .foregroundStyle(Theme.text)
+                        .frame(width: 34, height: 34)
+                        .contentShape(Circle())
+                }
+                .buttonStyle(.plain)
+                .confirmationDialog("Add attachment", isPresented: $showMenu, titleVisibility: .visible) {
+                    Button("Photo Library") { onPickPhoto() }
+                    Button("Files") { onPickFile() }
+                    Button("Cancel", role: .cancel) {}
+                }
+
                 TextField(placeholder, text: $text, axis: .vertical)
                     .focused($focused)
-                    .lineLimit(1...8)
+                    .lineLimit(1...6)
                     .font(.body)
                     .foregroundStyle(Theme.text)
                     .tint(Theme.text)
-                    .padding(.horizontal, 6)
-                    .padding(.top, 4)
+                    .padding(.vertical, 7)
 
-                HStack(spacing: 12) {
-                    Button { Haptic.light(); showMenu = true } label: {
-                        Image(systemName: "plus")
-                            .font(.system(size: 17, weight: .semibold))
-                            .foregroundStyle(Theme.text)
-                            .frame(width: 34, height: 34)
-                            .glassCircle()
+                Button { Haptic.medium(); onSend() } label: {
+                    ZStack {
+                        Circle().fill(canSend ? AnyShapeStyle(Theme.accent) : AnyShapeStyle(Theme.muted.opacity(0.3)))
+                        if sending { ProgressView().tint(Theme.onAccent) }
+                        else { Image(systemName: "arrow.up").font(.system(size: 16, weight: .bold)) }
                     }
-                    .confirmationDialog("Add attachment", isPresented: $showMenu, titleVisibility: .visible) {
-                        Button("Photo Library") { onPickPhoto() }
-                        Button("Files") { onPickFile() }
-                        Button("Cancel", role: .cancel) {}
-                    }
-
-                    Button { Haptic.light(); text = text.isEmpty ? "Search the web for " : text } label: {
-                        HStack(spacing: 5) {
-                            Image(systemName: "globe").font(.system(size: 13, weight: .semibold))
-                            Text("Search").font(.caption.weight(.semibold))
-                        }
-                        .foregroundStyle(Theme.text)
-                        .padding(.horizontal, 11).padding(.vertical, 8)
-                        .glassCapsule()
-                    }
-                    Button { Haptic.light(); text = text.isEmpty ? "Create an image of " : text } label: {
-                        HStack(spacing: 5) {
-                            Image(systemName: "photo").font(.system(size: 13, weight: .semibold))
-                            Text("Image").font(.caption.weight(.semibold))
-                        }
-                        .foregroundStyle(Theme.text)
-                        .padding(.horizontal, 11).padding(.vertical, 8)
-                        .glassCapsule()
-                    }
-
-                    Spacer(minLength: 0)
-
-                    Button { Haptic.medium(); onSend() } label: {
-                        ZStack {
-                            Circle().fill(canSend ? AnyShapeStyle(Theme.accent) : AnyShapeStyle(Theme.muted.opacity(0.35)))
-                            if sending { ProgressView().tint(Theme.onAccent) }
-                            else { Image(systemName: "arrow.up").font(.system(size: 17, weight: .bold)) }
-                        }
-                        .frame(width: 36, height: 36)
-                        .foregroundStyle(Theme.onAccent)
-                        .scaleEffect(canSend ? 1 : 0.9)
-                        .animation(.spring(response: 0.3, dampingFraction: 0.7), value: canSend)
-                    }
-                    .disabled(!canSend)
+                    .frame(width: 34, height: 34)
+                    .foregroundStyle(Theme.onAccent)
+                    .scaleEffect(canSend ? 1 : 0.88)
+                    .animation(.spring(response: 0.3, dampingFraction: 0.7), value: canSend)
                 }
+                .disabled(!canSend)
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 10)
-            .liquidGlass(26)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 6)
+            .liquidGlass(28)
         }
     }
 

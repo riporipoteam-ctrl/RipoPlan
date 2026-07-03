@@ -167,6 +167,25 @@ final class AppState: ObservableObject {
         }
     }
 
+    // MARK: Unread chats (blue dot) — last-read time per thread, kept on device.
+    @Published var lastRead: [String: Double] =
+        (UserDefaults.standard.dictionary(forKey: "askai.lastread") as? [String: Double]) ?? [:]
+    /// Assistant messages the typewriter has already animated (never re-type).
+    var animatedIds = Set<String>()
+
+    func markRead(_ threadId: String) {
+        let now = Date().timeIntervalSince1970
+        if (lastRead[threadId] ?? 0) < now - 1 {
+            lastRead[threadId] = now
+            UserDefaults.standard.set(lastRead, forKey: "askai.lastread")
+        }
+    }
+
+    func isUnread(_ t: ThreadRow) -> Bool {
+        guard let d = RelTime.parse(t.last_activity_at) else { return false }
+        return d.timeIntervalSince1970 > (lastRead[t.id] ?? 0) + 2
+    }
+
     func loadNotifications() async {
         guard let uid = Supa.shared.userId else { return }
         if let n: [Notif] = try? await Supa.shared.select("notifications?user_id=eq.\(uid)&select=*&order=created_at.desc&limit=50") {

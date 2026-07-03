@@ -19,9 +19,23 @@ struct RootShell: View {
 
     private let sidebarWidth: CGFloat = 300
 
+    /// How far the main screen has slid right (drives the ChatGPT push effect).
+    private var slide: CGFloat {
+        if showSidebar { return max(0, min(sidebarWidth + 12, sidebarWidth + 12 + dragX)) }
+        return max(0, min(sidebarWidth + 12, dragX))
+    }
+
     var body: some View {
         ZStack(alignment: .leading) {
-            // Main column — content scrolls under the frosted top bar.
+            // Sidebar lives BEHIND the main screen (ChatGPT push style).
+            SidebarView(current: $current, open: $showSidebar,
+                        openSettings: { showSettings = true },
+                        openSheet: { sheet = $0 })
+                .frame(width: sidebarWidth)
+                .offset(x: (slide / (sidebarWidth + 12) - 1) * 44)   // subtle parallax
+                .opacity(Double(0.35 + 0.65 * slide / (sidebarWidth + 12)))
+
+            // Main column — slides right and rounds its corners when the drawer opens.
             ZStack(alignment: .top) {
                 ConversationView(threadId: $current, topInset: 54)
                 // Real frosted bar — content blurs underneath instead of showing
@@ -35,25 +49,21 @@ struct RootShell: View {
                     Rectangle().fill(Theme.stroke).frame(height: 1)
                 }
             }
-            .background(AuroraBackground())
-            .disabled(showSidebar)
-
-            // Dim overlay
-            if showSidebar {
-                Color.black.opacity(0.35)
-                    .ignoresSafeArea()
-                    .transition(.opacity)
-                    .onTapGesture { setSidebar(false) }
+            .background(Theme.ink)
+            .clipShape(RoundedRectangle(cornerRadius: slide > 4 ? 36 : 0, style: .continuous))
+            .overlay {
+                // Scrim while the drawer is open — tap anywhere to close.
+                if showSidebar {
+                    Color.black.opacity(0.05)
+                        .clipShape(RoundedRectangle(cornerRadius: 36, style: .continuous))
+                        .onTapGesture { setSidebar(false) }
+                        .transition(.opacity)
+                }
             }
-
-            // Sidebar
-            SidebarView(current: $current, open: $showSidebar,
-                        openSettings: { showSettings = true },
-                        openSheet: { sheet = $0 })
-                .frame(width: sidebarWidth)
-                .offset(x: showSidebar ? 0 : -sidebarWidth - 10)
-                .offset(x: showSidebar ? min(0, dragX) : max(-sidebarWidth - 10, dragX))
+            .shadow(color: .black.opacity(slide > 4 ? 0.22 : 0), radius: 24, x: -6)
+            .offset(x: slide)
         }
+        .background(Theme.ink.ignoresSafeArea())
         .animation(.spring(response: 0.35, dampingFraction: 0.85), value: showSidebar)
         .gesture(edgeDrag)
         .sheet(isPresented: $showSettings) { SettingsView().environmentObject(app) }

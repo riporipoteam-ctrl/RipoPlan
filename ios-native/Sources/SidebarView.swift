@@ -1,6 +1,8 @@
 import SwiftUI
 
-/// ChatGPT-style left drawer: search, pages, recent chat history, account row.
+/// ChatGPT-style drawer: big wordmark + search, plain nav rows, a "More"
+/// expander, plain Recents rows with a blue unread dot, and a floating blue
+/// "Chat" button with the account avatar at the bottom.
 struct SidebarView: View {
     @EnvironmentObject var app: AppState
     @Binding var current: String?
@@ -9,9 +11,12 @@ struct SidebarView: View {
     var openSheet: (ShellSheet) -> Void
 
     @State private var search = ""
+    @State private var searching = false
+    @State private var showMore = false
     @State private var showRename = false
     @State private var renameTarget: String?
     @State private var renameDraft = ""
+    @FocusState private var searchFocus: Bool
 
     private var filtered: [ThreadRow] {
         guard !search.isEmpty else { return app.threads }
@@ -19,89 +24,136 @@ struct SidebarView: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            // Header
-            HStack(spacing: 8) {
-                BrandSpark(size: 18)
-                Text("AskAI").font(.system(size: 22, weight: .heavy)).foregroundStyle(Theme.text)
-                Spacer()
-                Button { Haptic.light(); newChat() } label: {
-                    Image(systemName: "square.and.pencil").font(.system(size: 18, weight: .medium)).foregroundStyle(Theme.text)
-                }
-            }
-            .padding(.horizontal, 18).padding(.top, 8).padding(.bottom, 12)
-
-            // Search
-            HStack(spacing: 8) {
-                Image(systemName: "magnifyingglass").foregroundStyle(Theme.muted)
-                TextField("Search", text: $search).foregroundStyle(Theme.text).tint(Theme.text)
-            }
-            .padding(.horizontal, 12).padding(.vertical, 9)
-            .background(Theme.ink2, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-            .padding(.horizontal, 14)
-
-            // Pages — a compact 2-column tile grid instead of a long row list.
-            ScrollView {
-                VStack(spacing: 2) {
-                    LazyVGrid(columns: [GridItem(.flexible(), spacing: 8), GridItem(.flexible(), spacing: 8)], spacing: 8) {
-                        navTile("person.2.fill", "Agents") { openSheet(.agents) }
-                        navTile("number", "Channels") { openSheet(.channels) }
-                        navTile("square.grid.2x2.fill", "Apps") { openSheet(.apps) }
-                        navTile("clock.arrow.circlepath", "Jobs") { openSheet(.jobs) }
-                        navTile("book.fill", "Knowledge") { openSheet(.knowledge) }
-                        navTile("puzzlepiece.extension.fill", "Integrations") { openSheet(.integrations) }
-                        navTile("bell.fill", "Activity") { openSheet(.activity) }
-                        navTile("trophy.fill", "Ranks") { openSheet(.ranks) }
+        ZStack(alignment: .bottom) {
+            VStack(alignment: .leading, spacing: 0) {
+                // Header — big wordmark + circular search toggle (ChatGPT layout).
+                HStack {
+                    Text("AskAI").font(.system(size: 28, weight: .bold)).foregroundStyle(Theme.text)
+                    Spacer()
+                    Button {
+                        Haptic.light()
+                        withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) { searching.toggle() }
+                        searchFocus = searching
+                        if !searching { search = "" }
+                    } label: {
+                        Image(systemName: "magnifyingglass")
+                            .font(.system(size: 17, weight: .medium)).foregroundStyle(Theme.text)
+                            .frame(width: 40, height: 40).glassCircle()
                     }
-                    .padding(.horizontal, 6).padding(.top, 4)
+                    .buttonStyle(.plain)
+                }
+                .padding(.horizontal, 20).padding(.top, 10).padding(.bottom, 6)
 
-                    Text("Recents").font(.caption.weight(.semibold)).foregroundStyle(Theme.muted)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.horizontal, 14).padding(.top, 14).padding(.bottom, 4)
+                if searching {
+                    HStack(spacing: 8) {
+                        Image(systemName: "magnifyingglass").foregroundStyle(Theme.muted)
+                        TextField("Search chats", text: $search)
+                            .focused($searchFocus)
+                            .foregroundStyle(Theme.text).tint(Theme.text)
+                    }
+                    .padding(.horizontal, 12).padding(.vertical, 9)
+                    .background(Theme.ink2, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .padding(.horizontal, 16).padding(.bottom, 4)
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+                }
 
-                    ForEach(filtered) { t in
-                        Button { Haptic.light(); current = t.id; close() } label: {
-                            HStack {
-                                Text(t.title ?? "New chat").foregroundStyle(Theme.text).lineLimit(1)
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 0) {
+                        navRow("person.2", "Agents") { openSheet(.agents) }
+                        navRow("number", "Channels") { openSheet(.channels) }
+                        navRow("square.grid.2x2", "Apps") { openSheet(.apps) }
+                        Button {
+                            Haptic.light()
+                            withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) { showMore.toggle() }
+                        } label: {
+                            HStack(spacing: 14) {
+                                Image(systemName: "ellipsis").font(.system(size: 17, weight: .medium))
+                                    .foregroundStyle(Theme.text).frame(width: 26)
+                                Text("More").font(.system(size: 19, weight: .semibold)).foregroundStyle(Theme.text)
                                 Spacer()
+                                Image(systemName: "chevron.down").font(.caption.weight(.semibold))
+                                    .foregroundStyle(Theme.muted)
+                                    .rotationEffect(.degrees(showMore ? 180 : 0))
                             }
-                            .padding(.horizontal, 14).padding(.vertical, 10)
-                            .background(current == t.id ? Theme.ink2 : Color.clear, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                            .padding(.horizontal, 20).padding(.vertical, 11)
+                            .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
-                        .contextMenu {
-                            Button { renameTarget = t.id; renameDraft = t.title ?? ""; showRename = true } label: {
-                                Label("Rename", systemImage: "pencil")
+                        if showMore {
+                            Group {
+                                navRow("clock.arrow.circlepath", "Jobs") { openSheet(.jobs) }
+                                navRow("book", "Knowledge") { openSheet(.knowledge) }
+                                navRow("puzzlepiece.extension", "Integrations") { openSheet(.integrations) }
+                                navRow("bell", "Activity") { openSheet(.activity) }
+                                navRow("trophy", "Ranks") { openSheet(.ranks) }
                             }
-                            Button(role: .destructive) { Task { await app.deleteThread(t.id); if current == t.id { current = nil } } } label: {
-                                Label("Delete", systemImage: "trash")
+                            .transition(.opacity.combined(with: .move(edge: .top)))
+                        }
+
+                        Text("Recents").font(.system(size: 20, weight: .bold)).foregroundStyle(Theme.text)
+                            .padding(.horizontal, 20).padding(.top, 22).padding(.bottom, 6)
+
+                        ForEach(filtered) { t in
+                            Button { Haptic.light(); current = t.id; app.markRead(t.id); close() } label: {
+                                HStack(spacing: 8) {
+                                    Text(t.title ?? "New chat")
+                                        .font(.system(size: 18))
+                                        .foregroundStyle(Theme.text).lineLimit(1)
+                                    Spacer()
+                                    if app.isUnread(t) && current != t.id {
+                                        Circle().fill(Theme.blue).frame(width: 9, height: 9)
+                                            .transition(.scale.combined(with: .opacity))
+                                    }
+                                }
+                                .padding(.horizontal, 20).padding(.vertical, 11)
+                                .background(current == t.id ? Theme.ink2 : Color.clear,
+                                            in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                                .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                            .contextMenu {
+                                Button { renameTarget = t.id; renameDraft = t.title ?? ""; showRename = true } label: {
+                                    Label("Rename", systemImage: "pencil")
+                                }
+                                Button(role: .destructive) { Task { await app.deleteThread(t.id); if current == t.id { current = nil } } } label: {
+                                    Label("Delete", systemImage: "trash")
+                                }
                             }
                         }
+                        Spacer(minLength: 90)
                     }
+                    .padding(.top, 8)
                 }
-                .padding(.horizontal, 8).padding(.top, 10)
             }
 
-            Divider().overlay(Theme.stroke)
-
-            // Account row
-            Button { Haptic.light(); openSettings() } label: {
-                HStack(spacing: 10) {
-                    Avatar(name: app.profile?.display_name ?? "You", color: app.profile?.avatar_color, size: 34)
-                    VStack(alignment: .leading, spacing: 1) {
-                        Text(app.profile?.display_name ?? "You").foregroundStyle(Theme.text).fontWeight(.semibold).lineLimit(1)
-                        Text(app.profile?.email ?? "Account").font(.caption).foregroundStyle(Theme.muted).lineLimit(1)
+            // Floating bottom controls — blue Chat pill + account avatar.
+            HStack {
+                Button { Haptic.medium(); newChat() } label: {
+                    HStack(spacing: 8) {
+                        Image(systemName: "square.and.pencil").font(.system(size: 16, weight: .semibold))
+                        Text("Chat").font(.system(size: 18, weight: .bold))
                     }
-                    Spacer()
-                    Image(systemName: "gearshape").foregroundStyle(Theme.muted)
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 22).padding(.vertical, 13)
+                    .background(Theme.blue, in: Capsule())
+                    .shadow(color: Theme.blue.opacity(0.4), radius: 12, y: 5)
                 }
-                .padding(.horizontal, 16).padding(.vertical, 12)
+                .buttonStyle(.plain)
+                .pressable()
+                Spacer()
+                Button { Haptic.light(); openSettings() } label: {
+                    Avatar(name: app.profile?.display_name ?? "You", color: app.profile?.avatar_color, size: 44)
+                        .overlay(Circle().stroke(Theme.stroke, lineWidth: 1))
+                        .shadow(color: .black.opacity(0.12), radius: 8, y: 3)
+                }
+                .buttonStyle(.plain)
             }
-            .buttonStyle(.plain)
+            .padding(.horizontal, 18).padding(.bottom, 12)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .background(Theme.ink.ignoresSafeArea())
-        .overlay(alignment: .trailing) { Rectangle().fill(Theme.stroke).frame(width: 1).ignoresSafeArea() }
+        .task { await app.loadThreads() }
+        .onChange(of: open) { o in if o { Task { await app.loadThreads() } } }
         .alert("Rename chat", isPresented: $showRename) {
             TextField("Chat name", text: $renameDraft)
             Button("Cancel", role: .cancel) {}
@@ -113,17 +165,16 @@ struct SidebarView: View {
         }
     }
 
-    private func navTile(_ icon: String, _ label: String, _ action: @escaping () -> Void) -> some View {
+    private func navRow(_ icon: String, _ label: String, _ action: @escaping () -> Void) -> some View {
         Button { Haptic.light(); action(); close() } label: {
-            VStack(alignment: .leading, spacing: 8) {
-                Image(systemName: icon).font(.system(size: 15, weight: .semibold)).foregroundStyle(Theme.text)
-                Text(label).font(.footnote.weight(.semibold)).foregroundStyle(Theme.text).lineLimit(1)
+            HStack(spacing: 14) {
+                Image(systemName: icon).font(.system(size: 17, weight: .medium))
+                    .foregroundStyle(Theme.text).frame(width: 26)
+                Text(label).font(.system(size: 19, weight: .semibold)).foregroundStyle(Theme.text)
+                Spacer()
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(12)
-            .background(Theme.ink2, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(Theme.stroke, lineWidth: 1))
-            .contentShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .padding(.horizontal, 20).padding(.vertical, 11)
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
     }

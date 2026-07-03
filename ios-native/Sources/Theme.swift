@@ -17,6 +17,8 @@ enum Theme {
     static let good = Color(hex: 0x16A34A)
     static let warn = Color(hex: 0xD97706)
     static let bad = Color(hex: 0xE11D48)
+    // ChatGPT-style blue — used ONLY for the Chat button and unread dots.
+    static let blue = Color(hex: 0x0A84FF)
 
     // Monochrome "brand" — pure black/white (ChatGPT-clean). The gradient hooks
     // stay so hero elements share one style, but they resolve to ink.
