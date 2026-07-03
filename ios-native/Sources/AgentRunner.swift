@@ -29,6 +29,14 @@ struct RunResult { var text: String; var images: [String] = []; var steps: [Stri
 enum AgentRunner {
     static let groqModel = "llama-3.3-70b-versatile"
     static let kimiModel = "moonshotai/kimi-k2.6"
+    // NVIDIA hosts many models on the SAME key. If Kimi is rate-limited or down,
+    // fall through these (all verified working) so the assistant never dies just
+    // because one model hiccups. This is the real fix for "the model doesn't work".
+    static let nvidiaModels = [
+        "moonshotai/kimi-k2.6",
+        "meta/llama-3.1-70b-instruct",
+        "nvidia/llama-3.3-nemotron-super-49b-v1",
+    ]
     static var groqKey: String { UserDefaults.standard.string(forKey: "askai.groqkey") ?? "" }
     static var nvidiaKey: String { UserDefaults.standard.string(forKey: "askai.nvkey") ?? "" }
     /// Kimi is the default. Fall back to Groq only if explicitly chosen or no NVIDIA key.
@@ -554,41 +562,67 @@ enum AgentRunner {
     /// Try the chosen provider; if it fails or returns nothing usable, automatically
     /// fall back to the other provider so an agent always answers.
     private static func chat(_ messages: [[String: Any]], tools: [[String: Any]]?) async -> [String: Any]? {
-        let primaryKimi = useKimi
-        if let m = await callProvider(kimi: primaryKimi, messages: messages, tools: tools) { return m }
-        // Fallback to the other provider (Kimi⇄Groq) if its key exists.
-        if let m = await callProvider(kimi: !primaryKimi, messages: messages, tools: tools) { return m }
-        return nil
-    }
-    private static func callProvider(kimi: Bool, messages: [[String: Any]], tools: [[String: Any]]?) async -> [String: Any]? {
-        let endpoint = kimi ? "https://integrate.api.nvidia.com/v1/chat/completions" : "https://api.groq.com/openai/v1/chat/completions"
-        let key = kimi ? nvidiaKey : groqKey
-        let modelId = kimi ? kimiModel : groqModel
-        if key.isEmpty { return nil }
-        // Large output budget so full professional websites/code fit in one reply.
-        var body: [String: Any] = ["model": modelId, "messages": messages, "temperature": 0.5, "max_tokens": kimi ? 8192 : 6000]
-        // Kimi K2.6 is a thinking model; after tool results the thinking template
-        // makes it produce garbage. Disable thinking so it stays coherent.
-        if kimi { body["chat_template_kwargs"] = ["thinking": false] }
-        if let tools { body["tools"] = tools; body["tool_choice"] = "auto" }
-        // Retry once on transient failure.
-        for attempt in 0..<2 {
-            if let msg = await once(endpoint, key, body) { return msg }
-            if attempt == 0 { try? await Task.sleep(nanoseconds: 600_000_000) }
+        // 1) Every NVIDIA model on the working key (survives rate limits + outages).
+        let nv = nvidiaKey
+        if !nv.isEmpty, useKimi {
+            for model in nvidiaModels {
+                if let m = await callNvidia(model: model, key: nv, messages: messages, tools: tools) { return m }
+            }
+        }
+        // 2) Groq (different provider) as a further fallback.
+        if !groqKey.isEmpty {
+            if let m = await callGroq(messages: messages, tools: tools) { return m }
+        }
+        // 3) NVIDIA once more in case Groq was the only thing tried above.
+        if !nv.isEmpty, !useKimi {
+            for model in nvidiaModels {
+                if let m = await callNvidia(model: model, key: nv, messages: messages, tools: tools) { return m }
+            }
         }
         return nil
     }
-    private static func once(_ endpoint: String, _ key: String, _ body: [String: Any]) async -> [String: Any]? {
+
+    private static func callNvidia(model: String, key: String, messages: [[String: Any]], tools: [[String: Any]]?) async -> [String: Any]? {
+        var body: [String: Any] = ["model": model, "messages": messages, "temperature": 0.5, "max_tokens": 8192]
+        // Only Kimi needs the thinking-off template; other models reject the arg.
+        if model.contains("kimi") { body["chat_template_kwargs"] = ["thinking": false] }
+        if let tools { body["tools"] = tools; body["tool_choice"] = "auto" }
+        return await withRetry("https://integrate.api.nvidia.com/v1/chat/completions", key, body)
+    }
+    private static func callGroq(messages: [[String: Any]], tools: [[String: Any]]?) async -> [String: Any]? {
+        var body: [String: Any] = ["model": groqModel, "messages": messages, "temperature": 0.5, "max_tokens": 6000]
+        if let tools { body["tools"] = tools; body["tool_choice"] = "auto" }
+        return await withRetry("https://api.groq.com/openai/v1/chat/completions", groqKey, body)
+    }
+
+    /// One endpoint, up to 3 attempts, backing off on rate limits.
+    private static func withRetry(_ endpoint: String, _ key: String, _ body: [String: Any]) async -> [String: Any]? {
+        for attempt in 0..<3 {
+            let (msg, status) = await once(endpoint, key, body)
+            if let msg { return msg }
+            // 429/5xx = transient → wait and retry; 4xx (bad model/auth) = give up.
+            if status == 429 || (status >= 500) {
+                try? await Task.sleep(nanoseconds: UInt64((attempt + 1)) * 800_000_000)
+            } else if status >= 400 && status < 500 && status != 429 {
+                return nil
+            } else if attempt == 0 {
+                try? await Task.sleep(nanoseconds: 500_000_000)
+            }
+        }
+        return nil
+    }
+    private static func once(_ endpoint: String, _ key: String, _ body: [String: Any]) async -> ([String: Any]?, Int) {
         var req = URLRequest(url: URL(string: endpoint)!); req.httpMethod = "POST"
         req.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         req.timeoutInterval = 90
         req.httpBody = try? JSONSerialization.data(withJSONObject: body)
         guard let (data, resp) = try? await URLSession.shared.data(for: req),
-              let http = resp as? HTTPURLResponse, (200..<300).contains(http.statusCode),
+              let http = resp as? HTTPURLResponse else { return (nil, -1) }
+        guard (200..<300).contains(http.statusCode),
               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let choices = json["choices"] as? [[String: Any]] else { return nil }
-        return choices.first?["message"] as? [String: Any]
+              let choices = json["choices"] as? [[String: Any]] else { return (nil, http.statusCode) }
+        return (choices.first?["message"] as? [String: Any], http.statusCode)
     }
     private static func parseArgs(_ raw: Any?) -> [String: Any] {
         if let s = raw as? String, let d = s.data(using: .utf8), let o = try? JSONSerialization.jsonObject(with: d) as? [String: Any] { return o }

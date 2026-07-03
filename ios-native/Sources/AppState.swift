@@ -152,21 +152,37 @@ final class AppState: ObservableObject {
             await loadAgents()
             await loadThreads()
             await loadNotifications()
-            // Load LLM keys from server-side config (Supabase) so the app works
-            // out of the box without any secret in the repo. A key the user typed
-            // in Settings takes precedence.
-            if let cfg: [ConfigRow] = try? await Supa.shared.select("app_config?select=key,value") {
-                let map = Dictionary(cfg.compactMap { c in c.value.map { (c.key, $0) } }, uniquingKeysWith: { a, _ in a })
-                if let g = map["groq_api_key"], !g.isEmpty { UserDefaults.standard.set(g, forKey: "askai.groqkey") }
-                if let n = map["nvidia_api_key"], !n.isEmpty { UserDefaults.standard.set(n, forKey: "askai.nvkey") }
-                if let e = map["elevenlabs_api_key"], !e.isEmpty { UserDefaults.standard.set(e, forKey: "askai.elkey") }
-            }
+            await loadKeys()
             // Persist ids so background tasks + Siri intents work outside the UI.
             UserDefaults.standard.set(workspace?.id, forKey: "askai.ws")
             UserDefaults.standard.set(supervisor?.id, forKey: "askai.supervisor")
         } catch {
             bootError = error.localizedDescription
         }
+    }
+
+    /// Load the LLM/voice keys from Supabase. The keys live server-side (never in
+    /// the public repo) and are cached in UserDefaults once fetched. Retries — and
+    /// refreshes the auth session first — because a stale token makes the
+    /// app_config read return nothing, which is what silently kills the model.
+    func loadKeys() async {
+        for attempt in 0..<3 {
+            if attempt > 0 { await Supa.shared.refreshIfPossible() }
+            if let cfg: [ConfigRow] = try? await Supa.shared.select("app_config?select=key,value"), !cfg.isEmpty {
+                let map = Dictionary(cfg.compactMap { c in c.value.map { (c.key, $0) } }, uniquingKeysWith: { a, _ in a })
+                if let g = map["groq_api_key"], !g.isEmpty { UserDefaults.standard.set(g, forKey: "askai.groqkey") }
+                if let n = map["nvidia_api_key"], !n.isEmpty { UserDefaults.standard.set(n, forKey: "askai.nvkey") }
+                if let e = map["elevenlabs_api_key"], !e.isEmpty { UserDefaults.standard.set(e, forKey: "askai.elkey") }
+                return
+            }
+            try? await Task.sleep(nanoseconds: 700_000_000)
+        }
+    }
+
+    /// True if we have at least one working model key.
+    var hasModelKey: Bool {
+        !(UserDefaults.standard.string(forKey: "askai.nvkey") ?? "").isEmpty
+        || !(UserDefaults.standard.string(forKey: "askai.groqkey") ?? "").isEmpty
     }
 
     func loadAgents() async {
@@ -275,6 +291,9 @@ final class AppState: ObservableObject {
         guard let ws = workspace?.id, let uid = Supa.shared.userId else { return nil }
         let content = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !content.isEmpty || !attachments.isEmpty else { return nil }
+        // Self-heal: if the model keys aren't loaded (e.g. session expired at
+        // boot), fetch them now so the reply doesn't dead-end.
+        if !hasModelKey { await loadKeys() }
 
         var tid = threadId
         var agentId = forcedAgentId
