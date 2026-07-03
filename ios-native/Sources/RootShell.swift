@@ -176,6 +176,7 @@ struct RootShell: View {
     }
 
     private func setSidebar(_ on: Bool) {
+        if on { hideKeyboard() }   // drawer open = reading mode, keyboard away
         withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) { showSidebar = on; dragX = 0 }
         if on { Haptic.soft() }
     }

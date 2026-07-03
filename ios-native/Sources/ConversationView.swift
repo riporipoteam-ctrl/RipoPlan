@@ -237,11 +237,26 @@ struct ConversationView: View {
         guard let item else { return }
         uploading = true
         if let data = try? await item.loadTransferable(type: Data.self) {
-            if let att = await app.upload(data: data, ext: "jpg", contentType: "image/jpeg", name: "Photo.jpg") {
+            // Downscale + recompress before upload — phone photos are 5-15 MB;
+            // this sends ~200-500 KB instead (much faster upload AND display).
+            let compact = compressForUpload(data)
+            if let att = await app.upload(data: compact, ext: "jpg", contentType: "image/jpeg", name: "Photo.jpg") {
                 attachments.append(att); Haptic.success()
             }
         }
         uploading = false; photoItem = nil
+    }
+
+    private func compressForUpload(_ data: Data, maxSide: CGFloat = 1600) -> Data {
+        guard let img = UIImage(data: data) else { return data }
+        let scale = min(1, maxSide / max(img.size.width, img.size.height))
+        let target = CGSize(width: img.size.width * scale, height: img.size.height * scale)
+        let fmt = UIGraphicsImageRendererFormat.default()
+        fmt.scale = 1
+        let resized = UIGraphicsImageRenderer(size: target, format: fmt).image { _ in
+            img.draw(in: CGRect(origin: .zero, size: target))
+        }
+        return resized.jpegData(compressionQuality: 0.72) ?? data
     }
 
     private func loadFile(_ result: Result<[URL], Error>) async {

@@ -48,6 +48,8 @@ enum AgentRunner {
         case "find_images": return "Finding real photos…"
         case "view_image": return "Looking at the image…"
         case "read_file": return "Reading the file…"
+        case "recipes": return "Finding the recipe…"
+        case "tv_show": return "Checking the show…"
         case "world_cup": return "Checking the World Cup…"
         case "weather": return "Checking the weather…"
         case "currency": return "Converting currency…"
@@ -90,6 +92,8 @@ enum AgentRunner {
             fn("find_images", "Search the web for REAL photos (brands, cars, products, logos, people, places, teams) and show them directly in the chat.", ["query": S], ["query"]),
             fn("view_image", "Look at an image the user uploaded (or any image URL) and describe what it shows. Use whenever a message contains [Uploaded image: URL].", ["url": S, "question": S], ["url"]),
             fn("read_file", "Download and read a text file the user uploaded (or any file URL). Use whenever a message contains [Uploaded file ...].", ["url": S], ["url"]),
+            fn("recipes", "Full recipe for a dish (ingredients + instructions).", ["dish": S], ["dish"]),
+            fn("tv_show", "Info about a TV show (status, rating, summary).", ["show": S], ["show"]),
             fn("world_cup", "Live FIFA World Cup results, fixtures, standings.", [:], []),
             fn("weather", "Current weather + forecast for a place.", ["location": S], ["location"]),
             fn("calculate", "Evaluate a math expression.", ["expression": S], ["expression"]),
@@ -145,7 +149,7 @@ enum AgentRunner {
         ]
     }
 
-    static func run(agent: Agent, history: [[String: Any]], roster: String, memories: [String] = [], ctx: RunContext) async -> RunResult {
+    static func run(agent: Agent, history: [[String: Any]], roster: String, memories: [String] = [], maxRounds: Int = 10, ctx: RunContext) async -> RunResult {
         var images: [String] = []
         var steps: [String] = []
         let memText = memories.isEmpty ? "" : "\n\nWorkspace knowledge & memory you should use:\n- " + memories.prefix(20).joined(separator: "\n- ")
@@ -192,9 +196,23 @@ enum AgentRunner {
         var msgs: [[String: Any]] = [["role": "system", "content": system]]
         msgs.append(contentsOf: history)
 
+        // Deterministic vision: if the latest user message carries uploaded
+        // images, analyze them NOW and hand the description to the model — so
+        // it can never claim it "can't see" the attachment.
+        if let lastUser = history.last(where: { ($0["role"] as? String) == "user" }),
+           let content = lastUser["content"] as? String, content.contains("[Uploaded image:") {
+            let urls = matchGroups("\\[Uploaded image: (\\S+?)\\]", in: content).prefix(2)
+            for u in urls {
+                await ctx.onActivity("Looking at the image…", "view_image")
+                let desc = await viewImage(u, "Describe this image in detail — objects, any visible text, people, brands, context.")
+                msgs.append(["role": "user", "content": "(Automatic attachment analysis — use this) \(desc)"])
+                steps.append("view_image")
+            }
+        }
+
         var lastToolOutput = ""
         var pages: [[String: String]] = []
-        for round in 0..<10 {
+        for round in 0..<maxRounds {
             // Let the user know when the agent chooses to keep digging.
             if round == 4 { await ctx.onActivity("Extended thinking — going deeper…", "think") }
             guard let message = await chat(msgs, tools: tools) else { break }
@@ -294,12 +312,15 @@ enum AgentRunner {
     }
 
     /// SEE an image (user upload or any URL) with an NVIDIA vision model.
-    private static func viewImage(_ url: String, _ question: String) async -> String {
+    static func viewImage(_ url: String, _ question: String) async -> String {
         guard !url.isEmpty else { return "No image URL given." }
         let key = nvidiaKey
         guard !key.isEmpty else { return "Image viewing is unavailable right now — ask the user to describe the image." }
         let ask = question.isEmpty ? "Describe this image in detail — objects, any text, people, colors, style, context." : question
-        for model in ["meta/llama-3.2-90b-vision-instruct", "microsoft/phi-3.5-vision-instruct"] {
+        for model in ["meta/llama-4-maverick-17b-128e-instruct",
+                      "meta/llama-3.2-90b-vision-instruct",
+                      "google/gemma-3-27b-it",
+                      "microsoft/phi-3.5-vision-instruct"] {
             let payload: [String: Any] = [
                 "model": model,
                 "messages": [["role": "user",
@@ -335,6 +356,53 @@ enum AgentRunner {
             if !t.isEmpty { return "File contents (may be truncated):\n" + String(t.prefix(6000)) }
         }
         return "That file is binary (\(d.count / 1024) KB) — I can read text files, and images via view_image."
+    }
+
+    /// First capture group of every regex match.
+    private static func matchGroups(_ pattern: String, in text: String) -> [String] {
+        guard let re = try? NSRegularExpression(pattern: pattern) else { return [] }
+        let ns = text as NSString
+        return re.matches(in: text, range: NSRange(location: 0, length: ns.length)).compactMap { m in
+            m.numberOfRanges > 1 ? ns.substring(with: m.range(at: 1)) : nil
+        }
+    }
+
+    /// Recipes — TheMealDB (keyless).
+    private static func recipes(_ dish: String) async -> String {
+        let enc = dish.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? dish
+        guard let u = URL(string: "https://www.themealdb.com/api/json/v1/1/search.php?s=\(enc)"),
+              let (d, _) = try? await URLSession.shared.data(from: u),
+              let o = try? JSONSerialization.jsonObject(with: d) as? [String: Any],
+              let meals = o["meals"] as? [[String: Any]], let m = meals.first else {
+            return "No recipe found for \(dish)."
+        }
+        var ing: [String] = []
+        for i in 1...20 {
+            let name = (m["strIngredient\(i)"] as? String ?? "").trimmingCharacters(in: .whitespaces)
+            let qty = (m["strMeasure\(i)"] as? String ?? "").trimmingCharacters(in: .whitespaces)
+            if !name.isEmpty { ing.append("\(qty) \(name)".trimmingCharacters(in: .whitespaces)) }
+        }
+        let name = m["strMeal"] as? String ?? dish
+        let area = m["strArea"] as? String ?? ""
+        let instr = String((m["strInstructions"] as? String ?? "").prefix(1200))
+        return "\(name) (\(area)) — Ingredients: \(ing.joined(separator: ", ")). Instructions: \(instr)"
+    }
+
+    /// TV shows — TVMaze (keyless).
+    private static func tvShow(_ q: String) async -> String {
+        let enc = q.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? q
+        guard let u = URL(string: "https://api.tvmaze.com/singlesearch/shows?q=\(enc)"),
+              let (d, _) = try? await URLSession.shared.data(from: u),
+              let o = try? JSONSerialization.jsonObject(with: d) as? [String: Any] else {
+            return "No show found for \(q)."
+        }
+        let name = o["name"] as? String ?? q
+        let status = o["status"] as? String ?? ""
+        let rating = ((o["rating"] as? [String: Any])?["average"] as? Double).map { "\($0)/10" } ?? "—"
+        let genres = (o["genres"] as? [String])?.joined(separator: ", ") ?? ""
+        let summary = stripHTML(o["summary"] as? String ?? "")
+        let premiered = o["premiered"] as? String ?? ""
+        return "\(name) — \(genres). Status: \(status). Premiered: \(premiered). Rating: \(rating). \(String(summary.prefix(600)))"
     }
 
     /// Real photos from the web (Wikimedia Commons, keyless; Openverse fallback).
@@ -478,6 +546,8 @@ enum AgentRunner {
             return "Found \(found.count) real photo(s), now shown to the user: " + found.map { $0.0 }.joined(separator: "; ")
         case "view_image": return await viewImage(str(args["url"]), str(args["question"]))
         case "read_file": return await readFile(str(args["url"]))
+        case "recipes": return await recipes(str(args["dish"]))
+        case "tv_show": return await tvShow(str(args["show"]))
         case "world_cup": return await worldCup()
         case "weather": return await weather(str(args["location"]))
         case "calculate": return calculate(str(args["expression"]))

@@ -31,7 +31,10 @@ func voiceId(for agent: Agent?) -> String {
     if agent.is_supervisor == true {
         return UserDefaults.standard.string(forKey: "askai.voice.main") ?? AI_VOICES[0].id
     }
-    let idx = abs(agent.id.hashValue) % AI_VOICES.count
+    // Stable hash (String.hashValue is randomized per launch — voices would
+    // change every time the app opened).
+    let h = agent.id.unicodeScalars.reduce(5381) { ($0 << 5) &+ $0 &+ Int($1.value) }
+    let idx = abs(h) % AI_VOICES.count
     return AI_VOICES[idx].id
 }
 
@@ -62,7 +65,9 @@ final class VoiceCall: NSObject, ObservableObject {
     private var lastHeard = Date()
     private var running = false
     private var history: [[String: Any]] = []
+    private var turns: [(speaker: String, text: String, isUser: Bool)] = []
     private var playContinuation: CheckedContinuation<Void, Never>?
+    let camera = CameraFeed()
 
     private var elKey: String { UserDefaults.standard.string(forKey: "askai.elkey") ?? "" }
 
@@ -86,11 +91,17 @@ final class VoiceCall: NSObject, ObservableObject {
     func end() {
         running = false
         stopListening()
+        camera.stop()
         player?.stop()
         synth.stopSpeaking(at: .immediate)
         playContinuation?.resume(); playContinuation = nil
         try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
         phase = .connecting
+        // Save the conversation as a normal text chat.
+        let t = turns; turns = []
+        if let appRef = app, !t.isEmpty {
+            Task { await appRef.saveVoiceCall(t) }
+        }
     }
 
     func toggleMute() {
@@ -112,6 +123,9 @@ final class VoiceCall: NSObject, ObservableObject {
 
             let req = SFSpeechAudioBufferRecognitionRequest()
             req.shouldReportPartialResults = true
+            req.taskHint = .dictation
+            if #available(iOS 16.0, *) { req.addsPunctuation = true }
+            req.requiresOnDeviceRecognition = false   // server recognition = much better accuracy
             request = req
             let input = engine.inputNode
             let format = input.outputFormat(forBus: 0)
@@ -186,7 +200,16 @@ final class VoiceCall: NSObject, ObservableObject {
 
     private func respond(to text: String) async {
         guard let app else { return }
-        history.append(["role": "user", "content": text])
+        turns.append(("You", text, true))
+        var content = text
+        // Live camera: let the agent SEE what the camera sees right now.
+        if camera.running, let jpeg = camera.snapshotJPEG() {
+            if let att = await app.upload(data: jpeg, ext: "jpg", contentType: "image/jpeg", name: "camera.jpg") {
+                let seen = await AgentRunner.viewImage(att.url, "In 1-2 sentences: what is visible in this live camera view?")
+                content += "\n[Live camera right now: \(seen)]"
+            }
+        }
+        history.append(["role": "user", "content": content])
         let agent = pickAgent(for: text, app: app)
         speaker = agent?.name ?? app.agents.first(where: { $0.is_supervisor == true })?.name ?? "AskAI"
         let answer = await app.voiceAnswer(history: history, agent: agent)
@@ -194,6 +217,7 @@ final class VoiceCall: NSObject, ObservableObject {
         history.append(["role": "assistant", "content": answer])
         if history.count > 16 { history.removeFirst(history.count - 16) }
         lastReply = answer
+        turns.append((speaker, answer, false))
         await speak(answer, voice: voiceId(for: agent))
         if running && !muted { beginListening() }
     }
@@ -223,7 +247,7 @@ final class VoiceCall: NSObject, ObservableObject {
 
     private func elevenTTS(_ text: String, voice: String) async -> Data? {
         guard !elKey.isEmpty,
-              let url = URL(string: "https://api.elevenlabs.io/v1/text-to-speech/\(voice)?output_format=mp3_44100_128") else { return nil }
+              let url = URL(string: "https://api.elevenlabs.io/v1/text-to-speech/\(voice)?output_format=mp3_44100_128&optimize_streaming_latency=4") else { return nil }
         var req = URLRequest(url: url)
         req.httpMethod = "POST"
         req.setValue(elKey, forHTTPHeaderField: "xi-api-key")
@@ -280,6 +304,85 @@ extension VoiceCall: AVAudioPlayerDelegate, AVSpeechSynthesizerDelegate {
     nonisolated func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didCancel utterance: AVSpeechUtterance) {
         Task { @MainActor in self.playContinuation?.resume(); self.playContinuation = nil }
     }
+}
+
+// MARK: - Live camera feed (the agent can see what you see)
+
+/// Lock-protected latest camera frame (written on the capture queue, read on main).
+final class FrameStore: @unchecked Sendable {
+    private let lock = NSLock()
+    private var img: UIImage?
+    private var last = Date.distantPast
+    func shouldConvert() -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        guard Date().timeIntervalSince(last) > 1 else { return false }   // ~1 fps is plenty
+        last = Date(); return true
+    }
+    func set(_ i: UIImage) { lock.lock(); img = i; lock.unlock() }
+    func get() -> UIImage? { lock.lock(); defer { lock.unlock() }; return img }
+}
+
+final class CameraFeed: NSObject, ObservableObject {
+    let session = AVCaptureSession()
+    @Published var running = false
+    private let output = AVCaptureVideoDataOutput()
+    private var configured = false
+    private let store = FrameStore()
+    private let q = DispatchQueue(label: "askai.cam.session")
+
+    func start() {
+        AVCaptureDevice.requestAccess(for: .video) { ok in
+            guard ok else { return }
+            self.q.async {
+                if !self.configured {
+                    self.configured = true
+                    self.session.sessionPreset = .medium
+                    if let dev = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .back),
+                       let input = try? AVCaptureDeviceInput(device: dev), self.session.canAddInput(input) {
+                        self.session.addInput(input)
+                    }
+                    self.output.setSampleBufferDelegate(self, queue: DispatchQueue(label: "askai.cam.frames"))
+                    if self.session.canAddOutput(self.output) { self.session.addOutput(self.output) }
+                }
+                self.session.startRunning()
+                DispatchQueue.main.async { self.running = true }
+            }
+        }
+    }
+
+    func stop() {
+        q.async { self.session.stopRunning() }
+        DispatchQueue.main.async { self.running = false }
+    }
+
+    func snapshotJPEG() -> Data? { store.get()?.jpegData(compressionQuality: 0.55) }
+}
+
+extension CameraFeed: AVCaptureVideoDataOutputSampleBufferDelegate {
+    func captureOutput(_ o: AVCaptureOutput, didOutput sb: CMSampleBuffer, from c: AVCaptureConnection) {
+        guard store.shouldConvert(), let pb = CMSampleBufferGetImageBuffer(sb) else { return }
+        let ci = CIImage(cvPixelBuffer: pb)
+        let ctx = CIContext(options: [.useSoftwareRenderer: false])
+        guard let cg = ctx.createCGImage(ci, from: ci.extent) else { return }
+        store.set(UIImage(cgImage: cg))
+    }
+}
+
+/// Camera preview layer host.
+struct CameraPreview: UIViewRepresentable {
+    let session: AVCaptureSession
+    final class PreviewView: UIView {
+        override class var layerClass: AnyClass { AVCaptureVideoPreviewLayer.self }
+    }
+    func makeUIView(context: Context) -> PreviewView {
+        let v = PreviewView()
+        if let layer = v.layer as? AVCaptureVideoPreviewLayer {
+            layer.session = session
+            layer.videoGravity = .resizeAspectFill
+        }
+        return v
+    }
+    func updateUIView(_ v: PreviewView, context: Context) {}
 }
 
 // MARK: - Call screen (ChatGPT-style)
@@ -349,13 +452,14 @@ struct VoiceCallView: View {
 
                 Spacer()
 
-                // Controls: invite · mute · end
-                HStack(spacing: 26) {
+                // Controls: invite · camera · mute · end
+                HStack(spacing: 22) {
                     Button { Haptic.light(); showInvite = true } label: {
                         Image(systemName: "person.badge.plus")
                             .font(.system(size: 20, weight: .semibold)).foregroundStyle(Theme.text)
                             .frame(width: 58, height: 58).glassCircle()
                     }
+                    CameraToggleButton(cam: call.camera)
                     Button { Haptic.medium(); call.toggleMute() } label: {
                         Image(systemName: call.muted ? "mic.slash.fill" : "mic.fill")
                             .font(.system(size: 20, weight: .semibold))
@@ -373,6 +477,7 @@ struct VoiceCallView: View {
                 .padding(.bottom, 34)
             }
         }
+        .overlay(alignment: .topTrailing) { CameraDock(cam: call.camera) }
         .onAppear { call.start(app: app) }
         .onDisappear { call.end() }
         .sheet(isPresented: $showInvite) {
@@ -441,5 +546,43 @@ struct VoiceCallView: View {
     private func voiceName(for a: Agent) -> String {
         let id = voiceId(for: a)
         return "Voice: " + (AI_VOICES.first { $0.id == id }?.name ?? "Custom")
+    }
+}
+
+/// Camera on/off button for the call controls.
+struct CameraToggleButton: View {
+    @ObservedObject var cam: CameraFeed
+    var body: some View {
+        Button {
+            Haptic.medium()
+            if cam.running { cam.stop() } else { cam.start() }
+        } label: {
+            Image(systemName: cam.running ? "video.fill" : "video")
+                .font(.system(size: 19, weight: .semibold))
+                .foregroundStyle(cam.running ? Theme.blue : Theme.text)
+                .frame(width: 58, height: 58).glassCircle()
+        }
+    }
+}
+
+/// Floating live camera preview while the agent can see.
+struct CameraDock: View {
+    @ObservedObject var cam: CameraFeed
+    var body: some View {
+        if cam.running {
+            VStack(spacing: 6) {
+                CameraPreview(session: cam.session)
+                    .frame(width: 118, height: 158)
+                    .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                    .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).stroke(Theme.stroke, lineWidth: 1))
+                    .shadow(color: .black.opacity(0.25), radius: 12, y: 6)
+                HStack(spacing: 4) {
+                    Circle().fill(Theme.blue).frame(width: 6, height: 6)
+                    Text("AI can see").font(.caption2.weight(.semibold)).foregroundStyle(Theme.muted)
+                }
+            }
+            .padding(.top, 18).padding(.trailing, 16)
+            .transition(.scale.combined(with: .opacity))
+        }
     }
 }

@@ -58,5 +58,6 @@ targets:
         NSUserNotificationsUsageDescription: "AskAI notifies you when your agents finish tasks and sends your daily briefing."
         NSMicrophoneUsageDescription: "AskAI uses the microphone so you can talk to your agents in voice chat."
         NSSpeechRecognitionUsageDescription: "AskAI transcribes your speech on-device so your agents can hear you in voice chat."
+        NSCameraUsageDescription: "AskAI can show your agents what your camera sees during a voice call."
         NSAppTransportSecurity:
           NSAllowsArbitraryLoads: true

@@ -407,12 +407,40 @@ final class AppState: ObservableObject {
         )
         var msgs = history
         if var last = msgs.last, let c = last["content"] as? String, (last["role"] as? String) == "user" {
-            last["content"] = c + "\n(You are on a live VOICE call. Reply in 1-3 short, natural spoken sentences — plain text only, no markdown, no lists, no URLs. You may still use tools to search or do tasks first.)"
+            last["content"] = c + "\n(You are on a live VOICE call. Reply in 1-3 short, natural spoken sentences — plain text only, no markdown, no lists, no URLs. You may use tools to search or do tasks first, but ALWAYS answer yourself out loud — NEVER delegate, never stay silent.)"
             msgs[msgs.count - 1] = last
         }
+        // Fewer tool rounds in voice mode — spoken answers must come fast.
         let res = await AgentRunner.run(agent: agent, history: msgs, roster: rosterString(),
-                                        memories: await fetchContext(), ctx: ctx)
+                                        memories: await fetchContext(), maxRounds: 4, ctx: ctx)
         return res.text
+    }
+
+    /// Save a finished voice call as a normal text chat (shows up in Recents).
+    func saveVoiceCall(_ turns: [(speaker: String, text: String, isUser: Bool)]) async {
+        guard !turns.isEmpty, let ws = workspace?.id, let uid = Supa.shared.userId else { return }
+        let f = DateFormatter(); f.dateFormat = "MMM d, HH:mm"
+        let row: [String: Any] = [
+            "workspace_id": ws,
+            "title": "🎙️ Voice call · \(f.string(from: Date()))",
+            "summary": "Voice conversation transcript",
+            "created_by": uid,
+            "last_activity_at": isoNow()
+        ]
+        guard let ts: [ThreadRow] = try? await Supa.shared.insert("threads", row),
+              let tid = ts.first?.id else { return }
+        for t in turns where !t.text.isEmpty {
+            var m: [String: Any] = [
+                "workspace_id": ws, "thread_id": tid,
+                "sender_type": t.isUser ? "user" : "agent",
+                "content": t.text, "status": "complete"
+            ]
+            if t.isUser { m["user_id"] = uid }
+            else if let ag = agents.first(where: { $0.name == t.speaker }) { m["agent_id"] = ag.id }
+            _ = try? await Supa.shared.insert("messages", m, returning: false) as [Message]
+        }
+        markRead(tid)
+        await loadThreads()
     }
 
     /// Set a new profile photo (uploaded to storage) on the user's profile.
