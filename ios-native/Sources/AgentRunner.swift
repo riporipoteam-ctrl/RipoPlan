@@ -46,6 +46,8 @@ enum AgentRunner {
         case "code": return "Running code…"
         case "generate_image": return "Generating an image…"
         case "find_images": return "Finding real photos…"
+        case "view_image": return "Looking at the image…"
+        case "read_file": return "Reading the file…"
         case "world_cup": return "Checking the World Cup…"
         case "weather": return "Checking the weather…"
         case "currency": return "Converting currency…"
@@ -86,6 +88,8 @@ enum AgentRunner {
             fn("code", "Run JavaScript to compute/transform. Use return or console.log.", ["source": S], ["source"]),
             fn("generate_image", "Generate an image from a text prompt (shown to the user). For real brands/products, first research their look and describe it in detail in the prompt.", ["prompt": S], ["prompt"]),
             fn("find_images", "Search the web for REAL photos (brands, cars, products, logos, people, places, teams) and show them directly in the chat.", ["query": S], ["query"]),
+            fn("view_image", "Look at an image the user uploaded (or any image URL) and describe what it shows. Use whenever a message contains [Uploaded image: URL].", ["url": S, "question": S], ["url"]),
+            fn("read_file", "Download and read a text file the user uploaded (or any file URL). Use whenever a message contains [Uploaded file ...].", ["url": S], ["url"]),
             fn("world_cup", "Live FIFA World Cup results, fixtures, standings.", [:], []),
             fn("weather", "Current weather + forecast for a place.", ["location": S], ["location"]),
             fn("calculate", "Evaluate a math expression.", ["expression": S], ["expression"]),
@@ -180,7 +184,10 @@ enum AgentRunner {
         a photo would help an answer. Use generate_image only for creative/original art; if the art must \
         depict something real (e.g. a specific car model), FIRST research its design, then write a long \
         prompt describing its actual shape, grille, lights, colors and setting in words — a bare brand \
-        name produces blank images.\(customText)\(memText)
+        name produces blank images.
+        RULE 7 — UPLOADS. If a message contains [Uploaded image: URL], IMMEDIATELY call view_image on \
+        that URL before answering. If it contains [Uploaded file 'name': URL], call read_file. Never say \
+        you can't see attachments — you can, with these tools.\(customText)\(memText)
         """
         var msgs: [[String: Any]] = [["role": "system", "content": system]]
         msgs.append(contentsOf: history)
@@ -284,6 +291,50 @@ enum AgentRunner {
                 saved += 1
             }
         }
+    }
+
+    /// SEE an image (user upload or any URL) with an NVIDIA vision model.
+    private static func viewImage(_ url: String, _ question: String) async -> String {
+        guard !url.isEmpty else { return "No image URL given." }
+        let key = nvidiaKey
+        guard !key.isEmpty else { return "Image viewing is unavailable right now — ask the user to describe the image." }
+        let ask = question.isEmpty ? "Describe this image in detail — objects, any text, people, colors, style, context." : question
+        for model in ["meta/llama-3.2-90b-vision-instruct", "microsoft/phi-3.5-vision-instruct"] {
+            let payload: [String: Any] = [
+                "model": model,
+                "messages": [["role": "user",
+                              "content": [["type": "text", "text": ask],
+                                          ["type": "image_url", "image_url": ["url": url]]]]],
+                "max_tokens": 512
+            ]
+            var req = URLRequest(url: URL(string: "https://integrate.api.nvidia.com/v1/chat/completions")!)
+            req.httpMethod = "POST"
+            req.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
+            req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            req.httpBody = try? JSONSerialization.data(withJSONObject: payload)
+            req.timeoutInterval = 60
+            if let (d, r) = try? await URLSession.shared.data(for: req),
+               let h = r as? HTTPURLResponse, (200..<300).contains(h.statusCode),
+               let o = try? JSONSerialization.jsonObject(with: d) as? [String: Any],
+               let ch = (o["choices"] as? [[String: Any]])?.first,
+               let msg = ch["message"] as? [String: Any],
+               let text = msg["content"] as? String, !text.isEmpty {
+                return "What the image shows: \(text)"
+            }
+        }
+        return "Couldn't analyze the image right now."
+    }
+
+    /// Read a (text) file the user uploaded.
+    private static func readFile(_ url: String) async -> String {
+        guard let u = URL(string: url) else { return "Bad file URL." }
+        guard let (d, _) = try? await URLSession.shared.data(from: u) else { return "Couldn't download the file." }
+        if d.count > 400_000 { return "The file is too large to read (\(d.count / 1024) KB)." }
+        if let text = String(data: d, encoding: .utf8) ?? String(data: d, encoding: .isoLatin1) {
+            let t = text.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !t.isEmpty { return "File contents (may be truncated):\n" + String(t.prefix(6000)) }
+        }
+        return "That file is binary (\(d.count / 1024) KB) — I can read text files, and images via view_image."
     }
 
     /// Real photos from the web (Wikimedia Commons, keyless; Openverse fallback).
@@ -425,6 +476,8 @@ enum AgentRunner {
             guard !found.isEmpty else { return "No photos found for that query — try different words." }
             images.append(contentsOf: found.map { $0.1 })
             return "Found \(found.count) real photo(s), now shown to the user: " + found.map { $0.0 }.joined(separator: "; ")
+        case "view_image": return await viewImage(str(args["url"]), str(args["question"]))
+        case "read_file": return await readFile(str(args["url"]))
         case "world_cup": return await worldCup()
         case "weather": return await weather(str(args["location"]))
         case "calculate": return calculate(str(args["expression"]))

@@ -104,7 +104,6 @@ struct SidebarView: View {
                                 navRow("book", "Knowledge") { openSheet(.knowledge) }
                                 navRow("puzzlepiece.extension", "Integrations") { openSheet(.integrations) }
                                 navRow("bell", "Activity") { openSheet(.activity) }
-                                navRow("trophy", "Ranks") { openSheet(.ranks) }
                             }
                             .transition(.opacity.combined(with: .move(edge: .top)))
                         }
@@ -136,15 +135,17 @@ struct SidebarView: View {
                     }
                     .foregroundStyle(.white)
                     .padding(.horizontal, 22).padding(.vertical, 13)
-                    .background(Theme.blue, in: Capsule())
-                    .shadow(color: Theme.blue.opacity(0.4), radius: 12, y: 5)
+                    .glassCapsuleTinted(Theme.blue)
+                    .shadow(color: Theme.blue.opacity(0.35), radius: 12, y: 5)
                 }
                 .buttonStyle(.plain)
                 .pressable()
                 Spacer()
                 Button { Haptic.light(); openSettings() } label: {
-                    Avatar(name: app.profile?.display_name ?? "You", color: app.profile?.avatar_color, size: 44)
-                        .overlay(Circle().stroke(Theme.stroke, lineWidth: 1))
+                    Avatar(name: app.profile?.display_name ?? "You", color: app.profile?.avatar_color,
+                           size: 44, imageURL: app.profile?.avatar_url)
+                        .padding(3)
+                        .glassCircle()
                         .shadow(color: .black.opacity(0.12), radius: 8, y: 3)
                 }
                 .buttonStyle(.plain)

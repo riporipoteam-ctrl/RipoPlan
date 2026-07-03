@@ -8,6 +8,7 @@ struct Profile: Codable, Identifiable {
     var email: String?
     var display_name: String?
     var avatar_color: String?
+    var avatar_url: String?
 }
 
 struct Workspace: Codable, Identifiable {

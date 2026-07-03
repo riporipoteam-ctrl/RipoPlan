@@ -54,7 +54,7 @@ struct JobsView: View {
     var body: some View {
         NavigationStack {
             ZStack {
-                AuroraBackground()
+                Theme.ink.ignoresSafeArea()
                 if loading { ProgressView() }
                 else if jobs.isEmpty { empty }
                 else {
@@ -125,7 +125,7 @@ struct CreateJobSheet: View {
     var body: some View {
         NavigationStack {
             ZStack {
-                AuroraBackground()
+                Theme.ink.ignoresSafeArea()
                 ScrollView {
                     VStack(spacing: 14) {
                         field("Name", "e.g. Morning news roundup", $name)
@@ -191,7 +191,7 @@ struct KnowledgeView: View {
     var body: some View {
         NavigationStack {
             ZStack {
-                AuroraBackground()
+                Theme.ink.ignoresSafeArea()
                 if loading { ProgressView() }
                 else if items.isEmpty { empty }
                 else {
@@ -272,7 +272,7 @@ struct IntegrationsView: View {
     var body: some View {
         NavigationStack {
             ZStack {
-                AuroraBackground()
+                Theme.ink.ignoresSafeArea()
                 ScrollView {
                     LazyVStack(spacing: 10) {
                         ForEach(catalog, id: \.0) { p in
@@ -341,7 +341,7 @@ struct ChannelsView: View {
     var body: some View {
         NavigationStack {
             ZStack {
-                AuroraBackground()
+                Theme.ink.ignoresSafeArea()
                 if loading { ProgressView() }
                 else if channels.isEmpty {
                     VStack(spacing: 10) {
@@ -407,7 +407,7 @@ struct ChannelChatView: View {
 
     var body: some View {
         ZStack(alignment: .bottom) {
-            AuroraBackground()
+            Theme.ink.ignoresSafeArea()
             ScrollViewReader { proxy in
                 ScrollView {
                     LazyVStack(spacing: 16) {
@@ -451,7 +451,7 @@ struct RanksView: View {
     var body: some View {
         NavigationStack {
             ZStack {
-                AuroraBackground()
+                Theme.ink.ignoresSafeArea()
                 if loading { ProgressView() }
                 else if ranks.isEmpty {
                     VStack(spacing: 10) {

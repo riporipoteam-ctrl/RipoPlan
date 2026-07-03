@@ -155,17 +155,20 @@ struct RootShell: View {
     }
 
     private var edgeDrag: some Gesture {
-        DragGesture(minimumDistance: 12)
+        DragGesture(minimumDistance: 10)
             .onChanged { v in
-                if !showSidebar && v.startLocation.x < 28 && v.translation.width > 0 {
+                if !showSidebar && v.startLocation.x < 80 && v.translation.width > 0 {
                     dragX = min(v.translation.width, sidebarWidth)
                 } else if showSidebar && v.translation.width < 0 {
                     dragX = max(v.translation.width, -sidebarWidth)
                 }
             }
             .onEnded { v in
-                let opening = !showSidebar && v.startLocation.x < 28 && v.translation.width > 70
-                let closing = showSidebar && v.translation.width < -70
+                // Generous zone + low threshold (velocity counts) — easy to open.
+                let opening = !showSidebar && v.startLocation.x < 80 &&
+                              (v.translation.width > 40 || v.predictedEndTranslation.width > 120)
+                let closing = showSidebar &&
+                              (v.translation.width < -40 || v.predictedEndTranslation.width < -120)
                 dragX = 0
                 if opening { setSidebar(true) }
                 else if closing { setSidebar(false) }

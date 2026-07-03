@@ -360,7 +360,16 @@ final class AppState: ObservableObject {
         let nameOf = Dictionary(agents.map { ($0.id, $0.name) }, uniquingKeysWith: { a, _ in a })
         var out: [[String: Any]] = []
         for m in msgs {
-            let body = m.content ?? ""
+            var body = m.content ?? ""
+            // Surface uploads to the agent so it can view/read them with tools.
+            if m.sender_type == "user", let atts = m.attachments, !atts.isEmpty {
+                let notes = atts.compactMap { a -> String? in
+                    if a.type == "image" { return "[Uploaded image: \(a.url)]" }
+                    if a.type == "file" { return "[Uploaded file '\(a.name)': \(a.url)]" }
+                    return nil
+                }.joined(separator: " ")
+                if !notes.isEmpty { body = body.isEmpty ? notes : body + "\n" + notes }
+            }
             if m.status == "thinking" || body.isEmpty { continue }
             let isSelf = m.sender_type == "agent" && m.agent_id == selfAgentId
             if isSelf {
@@ -371,6 +380,20 @@ final class AppState: ObservableObject {
             }
         }
         return out
+    }
+
+    /// Set a new profile photo (uploaded to storage) on the user's profile.
+    func updateProfileAvatar(_ url: String) async {
+        guard let uid = Supa.shared.userId else { return }
+        try? await Supa.shared.update("profiles?id=eq.\(uid)", ["avatar_url": url])
+        if var p = profile { p.avatar_url = url; profile = p }
+    }
+
+    /// Set the workspace's picture.
+    func setWorkspaceAvatar(_ url: String) async {
+        guard let ws = workspace?.id else { return }
+        try? await Supa.shared.update("workspaces?id=eq.\(ws)", ["avatar_url": url])
+        if var w = workspace { w.avatar_url = url; workspace = w }
     }
 
     /// Post a message into a channel and have the chief reply there.

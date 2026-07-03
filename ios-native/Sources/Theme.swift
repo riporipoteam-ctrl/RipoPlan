@@ -134,6 +134,20 @@ extension View {
             .overlay(Circle().stroke(Theme.stroke, lineWidth: 1))
         #endif
     }
+    /// Colored Liquid Glass capsule (e.g. the blue Chat button) — real tinted
+    /// glassEffect on iOS 26, solid color fallback elsewhere.
+    @ViewBuilder
+    func glassCapsuleTinted(_ color: Color) -> some View {
+        #if compiler(>=6.2)
+        if #available(iOS 26.0, *) {
+            self.glassEffect(.regular.tint(color).interactive(), in: Capsule())
+        } else {
+            self.background(color, in: Capsule())
+        }
+        #else
+        self.background(color, in: Capsule())
+        #endif
+    }
     /// Capsule Liquid Glass (pills, chips).
     @ViewBuilder
     func glassCapsule() -> some View {

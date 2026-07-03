@@ -130,7 +130,8 @@ struct ConversationView: View {
                             MessageBubble(message: m, onResend: { body in
                                 Task { _ = await app.send(body, threadId: threadId) }
                             }, onGrow: {
-                                proxy.scrollTo("end", anchor: .bottom)
+                                // Follow the typing only while the user is at the bottom.
+                                if !showScrollDown { proxy.scrollTo("end", anchor: .bottom) }
                             }).id(m.id)
                         }
                         Color.clear.frame(height: 1).id("end")
@@ -152,7 +153,12 @@ struct ConversationView: View {
                 }
             }
             .onChange(of: messages.count) { _ in withAnimation(.easeOut(duration: 0.2)) { proxy.scrollTo("end", anchor: .bottom) } }
-            .onChange(of: lastStamp) { _ in withAnimation(.easeOut(duration: 0.2)) { proxy.scrollTo("end", anchor: .bottom) } }
+            .onChange(of: lastStamp) { _ in
+                // Content updates only pull the view down if you're already there —
+                // never yank you while you're reading older messages.
+                guard !showScrollDown else { return }
+                withAnimation(.easeOut(duration: 0.2)) { proxy.scrollTo("end", anchor: .bottom) }
+            }
             .overlay(alignment: .bottom) {
                 if showScrollDown {
                     Button { withAnimation { proxy.scrollTo("end", anchor: .bottom) } } label: {
@@ -291,12 +297,18 @@ struct MessageBubble: View {
                     ForEach(atts) { a in
                         if a.type == "image" {
                             Button { Haptic.light(); viewerURL = a.url } label: {
-                                AsyncImage(url: URL(string: a.url)) { i in i.resizable().scaledToFit() } placeholder: {
-                                    RoundedRectangle(cornerRadius: 18, style: .continuous).fill(Theme.ink3)
-                                        .frame(height: 220)
-                                        .overlay(ProgressView().tint(Theme.muted))
+                                // Fixed frame — the layout can't jump (and yank the
+                                // scroll position) when the image finishes loading.
+                                AsyncImage(url: URL(string: a.url)) { i in
+                                    i.resizable().scaledToFill()
+                                } placeholder: {
+                                    ZStack {
+                                        Theme.ink3
+                                        ProgressView().tint(Theme.muted)
+                                    }
                                 }
                                 .frame(maxWidth: 300)
+                                .frame(height: 220)
                                 .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
                                 .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).stroke(Theme.stroke, lineWidth: 1))
                             }

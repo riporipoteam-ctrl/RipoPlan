@@ -13,17 +13,17 @@ struct AgentsView: View {
     private func rank(_ id: String?) -> RankRow? { id == nil ? nil : ranks.first { $0.id == id } }
 
     private func statChip(_ value: String, _ label: String, _ icon: String, _ tint: String) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack(spacing: 6) {
-                Image(systemName: icon).font(.caption).foregroundStyle(Color(hexString: tint))
-                Text(label).font(.caption).foregroundStyle(Theme.muted)
-            }
+        // Clean monochrome stat tile (matches the ChatGPT-style theme).
+        VStack(spacing: 6) {
+            Image(systemName: icon).font(.system(size: 15, weight: .semibold)).foregroundStyle(Theme.text)
+                .frame(width: 32, height: 32)
+                .background(Theme.ink3, in: Circle())
             Text(value).font(.title3.bold()).foregroundStyle(Theme.text)
+            Text(label).font(.caption).foregroundStyle(Theme.muted)
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(12)
-        .background(Color(hexString: tint).opacity(0.08), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 14).stroke(Color(hexString: tint).opacity(0.2), lineWidth: 1))
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 14)
+        .liquidGlass(16, shadow: false)
     }
 
     var body: some View {
@@ -92,36 +92,39 @@ struct AgentsView: View {
     }
 }
 
+/// Centered profile card — big avatar, name, role, badges (modern look).
 struct AgentCard: View {
     let agent: Agent
     var rank: RankRow? = nil
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack {
-                AgentAvatar(name: agent.name, color: agent.avatar_color, size: 46, online: agent.status != "paused", spark: agent.is_supervisor == true, imageURL: agent.avatar_url)
-                Spacer()
-                if agent.is_supervisor == true {
-                    Text("Chief").font(.caption2.bold()).foregroundStyle(Theme.warn)
-                        .padding(.horizontal, 8).padding(.vertical, 3)
-                        .background(Theme.warn.opacity(0.15), in: Capsule())
-                }
-            }
+        VStack(spacing: 8) {
+            AgentAvatar(name: agent.name, color: agent.avatar_color, size: 62,
+                        online: agent.status != "paused",
+                        spark: agent.is_supervisor == true, imageURL: agent.avatar_url)
             Text(agent.name).font(.headline).foregroundStyle(Theme.text).lineLimit(1)
             Text(agent.role ?? "AI Agent").font(.caption).foregroundStyle(Theme.muted).lineLimit(1)
-            if let r = rank {
-                Label(r.name, systemImage: "rosette").font(.caption2.weight(.semibold))
-                    .foregroundStyle(Color(hexString: r.color))
-                    .padding(.horizontal, 7).padding(.vertical, 2)
-                    .background(Color(hexString: r.color).opacity(0.14), in: Capsule())
-                    .lineLimit(1)
+            HStack(spacing: 6) {
+                if agent.is_supervisor == true {
+                    Text("Chief").font(.caption2.bold()).foregroundStyle(Theme.text)
+                        .padding(.horizontal, 8).padding(.vertical, 3)
+                        .background(Theme.ink3, in: Capsule())
+                }
+                if let r = rank {
+                    Label(r.name, systemImage: "rosette").font(.caption2.weight(.semibold))
+                        .foregroundStyle(Color(hexString: r.color))
+                        .padding(.horizontal, 7).padding(.vertical, 3)
+                        .background(Color(hexString: r.color).opacity(0.14), in: Capsule())
+                        .lineLimit(1)
+                }
             }
             HStack(spacing: 5) {
                 Circle().fill(agent.status == "paused" ? Theme.warn : Theme.good).frame(width: 7, height: 7)
                 Text(agent.status == "paused" ? "Paused" : "Active").font(.caption2).foregroundStyle(Theme.muted)
             }
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .glass(radius: 20, padding: 14)
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 18).padding(.horizontal, 10)
+        .liquidGlass(20, shadow: false)
     }
 }
 
@@ -145,18 +148,37 @@ struct AgentDetailView: View {
             Theme.backdrop.ignoresSafeArea()
             ScrollView {
                 VStack(spacing: 18) {
-                    AgentAvatar(name: live.name, color: live.avatar_color, size: 92, online: live.status != "paused", spark: live.is_supervisor == true, imageURL: live.avatar_url)
-                    Text(live.name).font(.title.bold()).foregroundStyle(Theme.text)
-                    Text(live.role ?? "AI Agent").font(.subheadline).foregroundStyle(Theme.accent)
-                    if let rn = rankName {
-                        Label(rn, systemImage: "rosette").font(.caption.bold()).foregroundStyle(Theme.warn)
-                            .padding(.horizontal, 10).padding(.vertical, 4)
-                            .background(Theme.warn.opacity(0.15), in: Capsule())
+                    // Profile hero card
+                    VStack(spacing: 10) {
+                        AgentAvatar(name: live.name, color: live.avatar_color, size: 96, online: live.status != "paused", spark: live.is_supervisor == true, imageURL: live.avatar_url)
+                        Text(live.name).font(.title.bold()).foregroundStyle(Theme.text)
+                        Text(live.role ?? "AI Agent").font(.subheadline).foregroundStyle(Theme.muted)
+                        HStack(spacing: 6) {
+                            HStack(spacing: 5) {
+                                Circle().fill(live.status == "paused" ? Theme.warn : Theme.good).frame(width: 7, height: 7)
+                                Text(live.status == "paused" ? "Paused" : "Active").font(.caption.weight(.semibold))
+                            }
+                            .foregroundStyle(Theme.text)
+                            .padding(.horizontal, 10).padding(.vertical, 5)
+                            .background(Theme.ink3, in: Capsule())
+                            if live.is_supervisor == true {
+                                Text("Chief").font(.caption.weight(.bold)).foregroundStyle(Theme.text)
+                                    .padding(.horizontal, 10).padding(.vertical, 5)
+                                    .background(Theme.ink3, in: Capsule())
+                            }
+                            if let rn = rankName {
+                                Label(rn, systemImage: "rosette").font(.caption.weight(.semibold)).foregroundStyle(Theme.text)
+                                    .padding(.horizontal, 10).padding(.vertical, 5)
+                                    .background(Theme.ink3, in: Capsule())
+                            }
+                        }
+                        if let d = live.description, !d.isEmpty {
+                            Text(d).font(.subheadline).foregroundStyle(Theme.muted)
+                                .multilineTextAlignment(.center).padding(.top, 2)
+                        }
                     }
-                    if let d = live.description, !d.isEmpty {
-                        Text(d).font(.body).foregroundStyle(Theme.muted)
-                            .multilineTextAlignment(.center).padding(.horizontal)
-                    }
+                    .frame(maxWidth: .infinity)
+                    .card(radius: 22)
 
                     VStack(alignment: .leading, spacing: 12) {
                         infoRow("Engine", "Hermes · full tool access")
