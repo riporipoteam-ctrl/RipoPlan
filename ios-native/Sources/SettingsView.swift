@@ -16,6 +16,7 @@ struct SettingsView: View {
     @State private var instructionsDraft = ""
     @State private var showWorkspace = false
     @State private var photoItem: PhotosPickerItem?
+    @AppStorage("askai.voice.main") private var mainVoice = "21m00Tcm4TlvDq8ikWAM"
     @StateObject private var updater = UpdateChecker()
     @State private var showUpdate = false
     @State private var checking = false
@@ -113,6 +114,34 @@ struct SettingsView: View {
                                 }
                             }
                             Text("Picture, name and your whole agent team.")
+                                .font(.caption).foregroundStyle(Theme.muted)
+                        }
+                        .card(radius: 16)
+
+                        // Voice
+                        VStack(alignment: .leading, spacing: 12) {
+                            SectionHeader(title: "Voice")
+                            Menu {
+                                ForEach(AI_VOICES) { v in
+                                    Button { mainVoice = v.id; Haptic.selection() } label: {
+                                        if mainVoice == v.id { Label("\(v.name) — \(v.vibe)", systemImage: "checkmark") }
+                                        else { Text("\(v.name) — \(v.vibe)") }
+                                    }
+                                }
+                            } label: {
+                                HStack {
+                                    Label("AskAI's voice", systemImage: "waveform").foregroundStyle(Theme.text)
+                                    Spacer()
+                                    Text(AI_VOICES.first { $0.id == mainVoice }?.name ?? "Rachel")
+                                        .font(.subheadline).foregroundStyle(Theme.muted)
+                                    Image(systemName: "chevron.up.chevron.down").font(.caption2).foregroundStyle(Theme.muted)
+                                }
+                            }
+                            Divider().overlay(Theme.stroke)
+                            ForEach(app.agents.filter { $0.is_supervisor != true }) { a in
+                                AgentVoiceRow(agent: a)
+                            }
+                            Text("Realistic voices for the voice call. Every agent can sound different — tap a name to pick.")
                                 .font(.caption).foregroundStyle(Theme.muted)
                         }
                         .card(radius: 16)
@@ -361,4 +390,38 @@ struct WorkspaceSheet: View {
         .padding(.vertical, 12)
         .background(Theme.ink2, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
     }
+}
+
+/// One agent's voice picker row (Settings → Voice).
+struct AgentVoiceRow: View {
+    let agent: Agent
+    @State private var choice: String = ""
+
+    var body: some View {
+        Menu {
+            ForEach(AI_VOICES) { v in
+                Button {
+                    choice = v.id
+                    UserDefaults.standard.set(v.id, forKey: "askai.voice.\(agent.id)")
+                    Haptic.selection()
+                } label: {
+                    if current == v.id { Label("\(v.name) — \(v.vibe)", systemImage: "checkmark") }
+                    else { Text("\(v.name) — \(v.vibe)") }
+                }
+            }
+        } label: {
+            HStack(spacing: 10) {
+                AgentAvatar(name: agent.name, color: agent.avatar_color, size: 30,
+                            online: false, spark: false, imageURL: agent.avatar_url)
+                Text(agent.name).foregroundStyle(Theme.text)
+                Spacer()
+                Text(AI_VOICES.first { $0.id == current }?.name ?? "Auto")
+                    .font(.subheadline).foregroundStyle(Theme.muted)
+                Image(systemName: "chevron.up.chevron.down").font(.caption2).foregroundStyle(Theme.muted)
+            }
+        }
+        .onAppear { choice = UserDefaults.standard.string(forKey: "askai.voice.\(agent.id)") ?? "" }
+    }
+
+    private var current: String { choice.isEmpty ? voiceId(for: agent) : choice }
 }

@@ -147,6 +147,7 @@ final class AppState: ObservableObject {
                 let map = Dictionary(cfg.compactMap { c in c.value.map { (c.key, $0) } }, uniquingKeysWith: { a, _ in a })
                 if let g = map["groq_api_key"], !g.isEmpty { UserDefaults.standard.set(g, forKey: "askai.groqkey") }
                 if let n = map["nvidia_api_key"], !n.isEmpty { UserDefaults.standard.set(n, forKey: "askai.nvkey") }
+                if let e = map["elevenlabs_api_key"], !e.isEmpty { UserDefaults.standard.set(e, forKey: "askai.elkey") }
             }
             // Persist ids so background tasks + Siri intents work outside the UI.
             UserDefaults.standard.set(workspace?.id, forKey: "askai.ws")
@@ -191,7 +192,9 @@ final class AppState: ObservableObject {
 
     func markRead(_ threadId: String) {
         let now = Date().timeIntervalSince1970
-        if (lastRead[threadId] ?? 0) < now - 1 {
+        // Throttled — a @Published write re-renders observers, so don't do it
+        // on every poll tick (that caused visible churn in the open chat).
+        if (lastRead[threadId] ?? 0) < now - 15 {
             lastRead[threadId] = now
             UserDefaults.standard.set(lastRead, forKey: "askai.lastread")
         }
@@ -380,6 +383,36 @@ final class AppState: ObservableObject {
             }
         }
         return out
+    }
+
+    /// Voice-call brain: run an agent (full tools) on the live call history and
+    /// return a short conversational answer to speak aloud.
+    func voiceAnswer(history: [[String: Any]], agent chosen: Agent?) async -> String {
+        guard let ws = workspace?.id, let uid = Supa.shared.userId,
+              let agent = chosen ?? supervisor else { return "I'm not ready yet — give me a second." }
+        let ctx = RunContext(
+            workspaceId: ws, userId: uid, threadId: "voice-call",
+            onCreateAgent: { n, r, d in await self.toolCreateAgent(n, r, d) },
+            onDelegate: { _, _ in "Tell the teammate directly in this call instead." },
+            onBuildApp: { n, h in await self.toolBuildApp(n, h) },
+            onCreateRank: { n, b, c in await self.toolCreateRank(n, b, c) },
+            onAssignRank: { a, r in await self.toolAssignRank(a, r) },
+            onCreateTask: { n, p, w in await self.toolCreateTask(n, p, w) },
+            onEditAgent: { t, c in await self.toolEditAgent(t, c) },
+            onCreateChannel: { n, d in await self.toolCreateChannel(n, d) },
+            onSaveKnowledge: { t, c in await self.toolSaveKnowledge(t, c) },
+            onEditApp: { n, h in await self.toolEditApp(n, h) },
+            onListApps: { await self.toolListApps() },
+            onPostChannel: { ch, tx in await self.toolPostChannel(agentId: agent.id, ch, tx) }
+        )
+        var msgs = history
+        if var last = msgs.last, let c = last["content"] as? String, (last["role"] as? String) == "user" {
+            last["content"] = c + "\n(You are on a live VOICE call. Reply in 1-3 short, natural spoken sentences — plain text only, no markdown, no lists, no URLs. You may still use tools to search or do tasks first.)"
+            msgs[msgs.count - 1] = last
+        }
+        let res = await AgentRunner.run(agent: agent, history: msgs, roster: rosterString(),
+                                        memories: await fetchContext(), ctx: ctx)
+        return res.text
     }
 
     /// Set a new profile photo (uploaded to storage) on the user's profile.

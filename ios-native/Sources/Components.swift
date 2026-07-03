@@ -270,23 +270,21 @@ struct DayDivider: View {
     }
 }
 
-/// Animated "thinking" dots.
+/// Smooth wave "thinking" dots (modern, no timer jank).
 struct TypingDots: View {
-    @State private var t = 0.0
+    @State private var up = false
     var body: some View {
         HStack(spacing: 5) {
             ForEach(0..<3) { i in
                 Circle().fill(Theme.muted)
                     .frame(width: 7, height: 7)
-                    .opacity(t == Double(i) ? 1 : 0.4)
-                    .scaleEffect(t == Double(i) ? 1 : 0.7)
+                    .offset(y: up ? -4 : 2)
+                    .opacity(up ? 1 : 0.5)
+                    .animation(.easeInOut(duration: 0.45).repeatForever(autoreverses: true).delay(Double(i) * 0.14), value: up)
             }
         }
-        .onAppear {
-            Timer.scheduledTimer(withTimeInterval: 0.4, repeats: true) { _ in
-                withAnimation(.easeInOut(duration: 0.3)) { t = (t + 1).truncatingRemainder(dividingBy: 3) }
-            }
-        }
+        .padding(.vertical, 4)
+        .onAppear { up = true }
     }
 }
 
@@ -425,6 +423,7 @@ struct InputBar: View {
     var onSend: () -> Void
     var onPickPhoto: () -> Void
     var onPickFile: () -> Void
+    var onVoice: (() -> Void)? = nil
 
     @State private var showMenu = false
     @FocusState private var focused: Bool
@@ -470,18 +469,33 @@ struct InputBar: View {
                     .tint(Theme.text)
                     .padding(.vertical, 7)
 
-                Button { Haptic.medium(); onSend() } label: {
-                    ZStack {
-                        Circle().fill(canSend ? AnyShapeStyle(Theme.accent) : AnyShapeStyle(Theme.muted.opacity(0.3)))
-                        if sending { ProgressView().tint(Theme.onAccent) }
-                        else { Image(systemName: "arrow.up").font(.system(size: 16, weight: .bold)) }
+                if let onVoice, !canSend, !sending,
+                   text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, attachments.isEmpty {
+                    // Empty field → voice call button (ChatGPT-style).
+                    Button { Haptic.medium(); onVoice() } label: {
+                        Image(systemName: "waveform")
+                            .font(.system(size: 16, weight: .bold))
+                            .foregroundStyle(.white)
+                            .frame(width: 34, height: 34)
+                            .background(Theme.blue, in: Circle())
+                            .shadow(color: Theme.blue.opacity(0.35), radius: 6, y: 2)
                     }
-                    .frame(width: 34, height: 34)
-                    .foregroundStyle(Theme.onAccent)
-                    .scaleEffect(canSend ? 1 : 0.88)
-                    .animation(.spring(response: 0.3, dampingFraction: 0.7), value: canSend)
+                    .transition(.scale.combined(with: .opacity))
+                } else {
+                    Button { Haptic.medium(); onSend() } label: {
+                        ZStack {
+                            Circle().fill(canSend ? AnyShapeStyle(Theme.accent) : AnyShapeStyle(Theme.muted.opacity(0.3)))
+                            if sending { ProgressView().tint(Theme.onAccent) }
+                            else { Image(systemName: "arrow.up").font(.system(size: 16, weight: .bold)) }
+                        }
+                        .frame(width: 34, height: 34)
+                        .foregroundStyle(Theme.onAccent)
+                        .scaleEffect(canSend ? 1 : 0.88)
+                        .animation(.spring(response: 0.3, dampingFraction: 0.7), value: canSend)
+                    }
+                    .disabled(!canSend)
+                    .transition(.scale.combined(with: .opacity))
                 }
-                .disabled(!canSend)
             }
             .padding(.horizontal, 8)
             .padding(.vertical, 6)

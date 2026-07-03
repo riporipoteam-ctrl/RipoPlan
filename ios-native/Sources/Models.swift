@@ -59,7 +59,7 @@ struct Activity: Codable, Hashable {
     var detail: String?
 }
 
-struct Message: Codable, Identifiable {
+struct Message: Codable, Identifiable, Equatable {
     let id: String
     var thread_id: String?
     var channel_id: String?
@@ -74,13 +74,14 @@ struct Message: Codable, Identifiable {
 }
 
 struct Attachment: Codable, Identifiable, Hashable {
-    var id = UUID()
     var type: String   // "image" | "file" | "link"
     var url: String
     var name: String
     var mime: String?
     var preview: String?   // screenshot URL for "link" (browsed page) attachments
-    enum CodingKeys: String, CodingKey { case type, url, name, mime, preview }
+    // Stable identity (was a random UUID per decode, which made SwiftUI rebuild
+    // every image on every poll → flashing images + broken typewriter).
+    var id: String { type + "|" + url }
 }
 
 struct ConfigRow: Codable { var key: String; var value: String? }

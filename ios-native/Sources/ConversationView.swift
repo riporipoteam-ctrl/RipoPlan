@@ -50,6 +50,7 @@ struct ConversationView: View {
     @State private var showFiles = false
     @State private var heroIn = false
     @State private var showScrollDown = false
+    @State private var showVoice = false
 
     var body: some View {
         ZStack(alignment: .bottom) {
@@ -63,13 +64,17 @@ struct ConversationView: View {
                     .frame(height: 24).allowsHitTesting(false)
                 InputBar(text: $text, attachments: $attachments,
                          sending: sending, uploading: uploading,
-                         onSend: send, onPickPhoto: { showPhoto = true }, onPickFile: { showFiles = true })
+                         onSend: send, onPickPhoto: { showPhoto = true }, onPickFile: { showFiles = true },
+                         onVoice: { showVoice = true })
                     .padding(.horizontal, 12)
                     .padding(.bottom, 8)
                     .background(Theme.ink.opacity(0.001))
             }
         }
         .background(Theme.ink.ignoresSafeArea())
+        .fullScreenCover(isPresented: $showVoice) {
+            VoiceCallView().environmentObject(app)
+        }
         .photosPicker(isPresented: $showPhoto, selection: $photoItem, matching: .images)
         .onChange(of: photoItem) { item in Task { await loadPhoto(item) } }
         .fileImporter(isPresented: $showFiles, allowedContentTypes: [.item], allowsMultipleSelection: false) { result in
@@ -200,7 +205,10 @@ struct ConversationView: View {
         var cycle = 0
         while !Task.isCancelled {
             let m = await app.messages(thread: tid)
-            messages = m; loaded = true
+            // Only touch state when something actually changed — otherwise every
+            // poll re-rendered the whole chat (flashing images, broken typing).
+            if m != messages { messages = m }
+            loaded = true
             app.markRead(tid)                       // viewing = read (clears blue dot)
             if cycle % 6 == 0 { await app.loadThreads() }  // keep unread dots fresh
             cycle += 1
