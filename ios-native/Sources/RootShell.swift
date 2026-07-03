@@ -24,15 +24,16 @@ struct RootShell: View {
             // Main column — content scrolls under the frosted top bar.
             ZStack(alignment: .top) {
                 ConversationView(threadId: $current, topInset: 54)
+                // Real frosted bar — content blurs underneath instead of showing
+                // through and colliding with the header controls.
                 VStack(spacing: 0) {
                     topBar
                     UpdateBanner(updater: updater)
                 }
-                .background(
-                    LinearGradient(colors: [Theme.ink, Theme.ink.opacity(0.85), Theme.ink.opacity(0)],
-                                   startPoint: .top, endPoint: .bottom)
-                        .frame(height: 90).allowsHitTesting(false), alignment: .top
-                )
+                .background(.ultraThinMaterial)
+                .overlay(alignment: .bottom) {
+                    Rectangle().fill(Theme.stroke).frame(height: 1)
+                }
             }
             .background(AuroraBackground())
             .disabled(showSidebar)
@@ -82,8 +83,7 @@ struct RootShell: View {
         HStack(spacing: 10) {
             Button { Haptic.light(); setSidebar(true) } label: {
                 Image(systemName: "line.3.horizontal").font(.system(size: 18, weight: .semibold)).foregroundStyle(Theme.text)
-                    .frame(width: 40, height: 40).background(.ultraThinMaterial, in: Circle())
-                    .overlay(Circle().stroke(Theme.stroke, lineWidth: 1))
+                    .frame(width: 40, height: 40).glassCircle()
             }
             Spacer(minLength: 0)
             Menu {
@@ -98,15 +98,13 @@ struct RootShell: View {
                     Image(systemName: "chevron.down").font(.caption2.weight(.bold)).foregroundStyle(Theme.muted)
                 }
                 .padding(.horizontal, 14).padding(.vertical, 9)
-                .background(.ultraThinMaterial, in: Capsule())
-                .overlay(Capsule().stroke(Theme.stroke, lineWidth: 1))
+                .glassCapsule()
             }
             .onChange(of: model) { _ in Haptic.selection() }
             Spacer(minLength: 0)
             Button { Haptic.light(); current = nil } label: {
                 Image(systemName: "square.and.pencil").font(.system(size: 17, weight: .medium)).foregroundStyle(Theme.text)
-                    .frame(width: 40, height: 40).background(.ultraThinMaterial, in: Circle())
-                    .overlay(Circle().stroke(Theme.stroke, lineWidth: 1))
+                    .frame(width: 40, height: 40).glassCircle()
             }
         }
         .padding(.horizontal, 14).padding(.top, 6).padding(.bottom, 4)

@@ -134,57 +134,125 @@ struct ImageViewer: View {
     }
 }
 
-/// Live browser preview card — shows a screenshot of a page an agent browsed,
-/// with a tap/button to open it live in the browser.
-struct BrowserPreviewCard: View {
-    let url: String
-    let host: String
-    var shot: String?
+/// ONE consolidated browsing card per message (instead of a stack of preview
+/// cards). Collapsed by default — a compact pill saying what the agent is
+/// browsing — and a chevron drops down the live page view with fullscreen +
+/// open-in-Safari. Visited pages become chips you can flip between.
+struct BrowserSessionCard: View {
+    let pages: [Attachment]          // attachments with type == "link"
     var live: Bool = false
+    @State private var expanded = false
+    @State private var selected = 0
+    @State private var showFull = false
     @State private var pulse = false
     @Environment(\.openURL) private var openURL
 
+    private var page: Attachment? {
+        pages.indices.contains(selected) ? pages[selected] : pages.last
+    }
+
     var body: some View {
-        Button {
-            Haptic.light(); if let u = URL(string: url) { openURL(u) }
-        } label: {
-            VStack(alignment: .leading, spacing: 0) {
-                ZStack(alignment: .topLeading) {
-                    Theme.ink3
-                    if let s = shot, let u = URL(string: s) {
-                        AsyncImage(url: u) { i in i.resizable().scaledToFill() } placeholder: {
-                            HStack(spacing: 6) { ProgressView().scaleEffect(0.7); Text("Loading live view…").font(.caption).foregroundStyle(Theme.muted) }
-                        }
-                    }
+        VStack(alignment: .leading, spacing: 0) {
+            // Collapsed header pill — always visible, toggles the drop-down.
+            Button {
+                Haptic.light()
+                withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) { expanded.toggle() }
+            } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: "globe").font(.system(size: 13, weight: .semibold)).foregroundStyle(Theme.text)
+                        .frame(width: 26, height: 26)
+                        .background(Theme.ink3, in: Circle())
+                    Text(live ? "Browsing · \(pages.last?.name ?? "the web")"
+                              : "Browsed \(pages.count) page\(pages.count == 1 ? "" : "s")")
+                        .font(.footnote.weight(.semibold)).foregroundStyle(Theme.text).lineLimit(1)
                     if live {
-                        HStack(spacing: 5) {
-                            Circle().fill(.red).frame(width: 6, height: 6)
-                                .opacity(pulse ? 1 : 0.3)
-                            Text("LIVE").font(.caption2.weight(.heavy)).foregroundStyle(.white)
+                        HStack(spacing: 4) {
+                            Circle().fill(.red).frame(width: 5, height: 5).opacity(pulse ? 1 : 0.3)
+                            Text("LIVE").font(.system(size: 9, weight: .heavy)).foregroundStyle(.red)
                         }
-                        .padding(.horizontal, 8).padding(.vertical, 4)
-                        .background(.black.opacity(0.6), in: Capsule())
-                        .padding(8)
                         .onAppear { withAnimation(.easeInOut(duration: 0.7).repeatForever()) { pulse = true } }
                     }
-                }
-                .frame(width: 240, height: 150).clipped()
-                HStack(spacing: 6) {
-                    Image(systemName: "globe").font(.caption2).foregroundStyle(Theme.accent)
-                    Text(host).font(.caption.weight(.medium)).foregroundStyle(Theme.text).lineLimit(1)
-                    Spacer()
-                    HStack(spacing: 3) {
-                        Image(systemName: "eye.fill").font(.caption2)
-                        Text("View live").font(.caption2.weight(.semibold))
-                    }.foregroundStyle(Theme.accent)
+                    Spacer(minLength: 8)
+                    Image(systemName: "chevron.down").font(.caption2.weight(.bold)).foregroundStyle(Theme.muted)
+                        .rotationEffect(.degrees(expanded ? 180 : 0))
                 }
                 .padding(.horizontal, 10).padding(.vertical, 8)
+                .contentShape(Rectangle())
             }
-            .frame(width: 240)
-            .background(Theme.ink2, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(Theme.stroke, lineWidth: 1))
+            .buttonStyle(.plain)
+
+            if expanded, let p = page {
+                VStack(alignment: .leading, spacing: 8) {
+                    ZStack {
+                        RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Theme.ink3)
+                        if let s = p.preview, let u = URL(string: s) {
+                            AsyncImage(url: u) { i in
+                                i.resizable().scaledToFill()
+                            } placeholder: {
+                                VStack(spacing: 6) {
+                                    ProgressView().tint(Theme.muted)
+                                    Text("Loading page…").font(.caption).foregroundStyle(Theme.muted)
+                                }
+                            }
+                        } else {
+                            Image(systemName: "globe").font(.title2).foregroundStyle(Theme.muted)
+                        }
+                    }
+                    .frame(height: 170)
+                    .frame(maxWidth: .infinity)
+                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .onTapGesture { if p.preview != nil { Haptic.light(); showFull = true } }
+
+                    HStack(spacing: 8) {
+                        Text(p.name).font(.caption.weight(.medium)).foregroundStyle(Theme.muted).lineLimit(1)
+                        Spacer()
+                        Button { Haptic.light(); showFull = true } label: {
+                            Image(systemName: "arrow.up.left.and.arrow.down.right")
+                                .font(.system(size: 12, weight: .semibold)).foregroundStyle(Theme.text)
+                                .frame(width: 28, height: 28)
+                                .background(Theme.ink3, in: Circle())
+                        }
+                        .buttonStyle(.plain)
+                        Button { Haptic.light(); if let u = URL(string: p.url) { openURL(u) } } label: {
+                            HStack(spacing: 4) {
+                                Image(systemName: "safari").font(.system(size: 12, weight: .semibold))
+                                Text("Open").font(.caption.weight(.semibold))
+                            }
+                            .foregroundStyle(Theme.onAccent)
+                            .padding(.horizontal, 10).padding(.vertical, 6)
+                            .background(Theme.accent, in: Capsule())
+                        }
+                        .buttonStyle(.plain)
+                    }
+
+                    if pages.count > 1 {
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            HStack(spacing: 6) {
+                                ForEach(Array(pages.enumerated()), id: \.offset) { i, pg in
+                                    Button { Haptic.selection(); selected = i } label: {
+                                        Text(pg.name).font(.caption2.weight(.semibold)).lineLimit(1)
+                                            .foregroundStyle(i == selected ? Theme.onAccent : Theme.text)
+                                            .padding(.horizontal, 9).padding(.vertical, 5)
+                                            .background(i == selected ? AnyShapeStyle(Theme.accent) : AnyShapeStyle(Theme.ink3), in: Capsule())
+                                    }
+                                    .buttonStyle(.plain)
+                                }
+                            }
+                        }
+                    }
+                }
+                .padding(.horizontal, 10).padding(.bottom, 10)
+                .transition(.opacity.combined(with: .move(edge: .top)))
+            }
         }
-        .buttonStyle(.plain)
+        .frame(maxWidth: 320)
+        .background(Theme.ink2, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).stroke(Theme.stroke, lineWidth: 1))
+        .onChange(of: pages.count) { n in if live { selected = max(0, n - 1) } }
+        .onAppear { selected = max(0, pages.count - 1) }
+        .fullScreenCover(isPresented: $showFull) {
+            if let p = page, let s = p.preview { ImageViewer(url: s) }
+        }
     }
 }
 
@@ -395,8 +463,7 @@ struct InputBar: View {
                             .font(.system(size: 17, weight: .semibold))
                             .foregroundStyle(Theme.text)
                             .frame(width: 34, height: 34)
-                            .background(.ultraThinMaterial, in: Circle())
-                            .overlay(Circle().stroke(Theme.stroke, lineWidth: 1))
+                            .glassCircle()
                     }
                     .confirmationDialog("Add attachment", isPresented: $showMenu, titleVisibility: .visible) {
                         Button("Photo Library") { onPickPhoto() }
@@ -411,8 +478,7 @@ struct InputBar: View {
                         }
                         .foregroundStyle(Theme.text)
                         .padding(.horizontal, 11).padding(.vertical, 8)
-                        .background(.ultraThinMaterial, in: Capsule())
-                        .overlay(Capsule().stroke(Theme.stroke, lineWidth: 1))
+                        .glassCapsule()
                     }
                     Button { Haptic.light(); text = text.isEmpty ? "Create an image of " : text } label: {
                         HStack(spacing: 5) {
@@ -421,8 +487,7 @@ struct InputBar: View {
                         }
                         .foregroundStyle(Theme.text)
                         .padding(.horizontal, 11).padding(.vertical, 8)
-                        .background(.ultraThinMaterial, in: Capsule())
-                        .overlay(Capsule().stroke(Theme.stroke, lineWidth: 1))
+                        .glassCapsule()
                     }
 
                     Spacer(minLength: 0)

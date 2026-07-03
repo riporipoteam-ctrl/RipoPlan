@@ -102,8 +102,50 @@ struct Card: ViewModifier {
 }
 
 extension View {
+    /// OFFICIAL Apple Liquid Glass (iOS 26 `glassEffect`) when the device and
+    /// SDK support it; a rich material fallback everywhere else.
+    @ViewBuilder
     func liquidGlass(_ radius: CGFloat = 22, stroke: Bool = true, shadow: Bool = true) -> some View {
+        #if compiler(>=6.2)
+        if #available(iOS 26.0, *) {
+            self.glassEffect(.regular.interactive(),
+                             in: RoundedRectangle(cornerRadius: radius, style: .continuous))
+        } else {
+            modifier(LiquidGlass(radius: radius, stroke: stroke, shadow: shadow))
+        }
+        #else
         modifier(LiquidGlass(radius: radius, stroke: stroke, shadow: shadow))
+        #endif
+    }
+    /// Circular Liquid Glass (toolbar buttons, send button chrome).
+    @ViewBuilder
+    func glassCircle() -> some View {
+        #if compiler(>=6.2)
+        if #available(iOS 26.0, *) {
+            self.glassEffect(.regular.interactive(), in: Circle())
+        } else {
+            self.background(.ultraThinMaterial, in: Circle())
+                .overlay(Circle().stroke(Theme.stroke, lineWidth: 1))
+        }
+        #else
+        self.background(.ultraThinMaterial, in: Circle())
+            .overlay(Circle().stroke(Theme.stroke, lineWidth: 1))
+        #endif
+    }
+    /// Capsule Liquid Glass (pills, chips).
+    @ViewBuilder
+    func glassCapsule() -> some View {
+        #if compiler(>=6.2)
+        if #available(iOS 26.0, *) {
+            self.glassEffect(.regular.interactive(), in: Capsule())
+        } else {
+            self.background(.ultraThinMaterial, in: Capsule())
+                .overlay(Capsule().stroke(Theme.stroke, lineWidth: 1))
+        }
+        #else
+        self.background(.ultraThinMaterial, in: Capsule())
+            .overlay(Capsule().stroke(Theme.stroke, lineWidth: 1))
+        #endif
     }
     func card(radius: CGFloat = 16, padding: CGFloat = 16) -> some View {
         modifier(Card(radius: radius, padding: padding))

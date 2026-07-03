@@ -151,8 +151,9 @@ enum AgentRunner {
         Today is \(today). Teammates: \(roster).
 
         RULE 1 — ACT IMMEDIATELY. Never ask permission, never say "want me to search?", never stall. \
-        If the question involves anything current (sports, news, prices, businesses, events), your FIRST \
-        move is web_search — before writing anything. Do the work in this turn, not a future one.
+        For ANY factual question — sports, news, prices, businesses, events, people, or anything that \
+        could have changed since your training — your FIRST move is web_search, before writing anything. \
+        When in doubt, search. Do the work in this turn, not a future one.
         RULE 2 — GO DEEP. Chain tools: search, then browse the best 2-3 result pages, then answer with \
         concrete facts (numbers, dates, names, sources). You may take many tool rounds — extended \
         thinking is encouraged for hard tasks.
@@ -203,7 +204,7 @@ enum AgentRunner {
                 // page, so the user watches the browse as it happens (not after).
                 if name == "browse" || name == "summarize_url" {
                     let raw = str(args["url"])
-                    if !raw.isEmpty, let p = pagePreview(raw) {
+                    if !raw.isEmpty, pages.count < 8, let p = pagePreview(raw) {
                         pages.append(p)
                         await ctx.onPagePreview(p)
                     }
@@ -211,7 +212,7 @@ enum AgentRunner {
                 // LIVE search view: show the results page the agent is looking at.
                 if name == "web_search" {
                     let q = str(args["query"])
-                    if !q.isEmpty {
+                    if !q.isEmpty, pages.count < 8 {
                         let enc = q.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? q
                         if let p = pagePreview("https://duckduckgo.com/?q=\(enc)") {
                             var sp = p; sp["host"] = "Searching: \(String(q.prefix(40)))"

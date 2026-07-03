@@ -27,7 +27,7 @@ concurrency:
 
 jobs:
   ipa:
-    runs-on: macos-15
+    runs-on: macos-26
     steps:
       - uses: actions/checkout@v4
       - name: Install XcodeGen
@@ -117,7 +117,7 @@ jobs:
             ios-native/altstore.json
 
   screenshot:
-    runs-on: macos-15
+    runs-on: macos-26
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4

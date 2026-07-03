@@ -164,8 +164,7 @@ struct ConversationView: View {
                     Button { withAnimation { proxy.scrollTo("end", anchor: .bottom) } } label: {
                         Image(systemName: "arrow.down").font(.system(size: 16, weight: .semibold)).foregroundStyle(Theme.text)
                             .frame(width: 38, height: 38)
-                            .background(.ultraThinMaterial, in: Circle())
-                            .overlay(Circle().stroke(Theme.stroke, lineWidth: 1))
+                            .glassCircle()
                             .shadow(color: .black.opacity(0.15), radius: 6, y: 3)
                     }
                     .buttonStyle(.plain)
@@ -291,12 +290,15 @@ struct MessageBubble: View {
                                 .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).stroke(Theme.stroke, lineWidth: 1))
                             }
                             .buttonStyle(.plain)
-                        } else if a.type == "link" {
-                            BrowserPreviewCard(url: a.url, host: a.name, shot: a.preview, live: thinking)
-                        } else {
+                        } else if a.type != "link" {
                             HStack(spacing: 6) { Image(systemName: "doc.fill"); Text(a.name).lineLimit(1) }
                                 .font(.footnote).foregroundStyle(Theme.muted)
                         }
+                    }
+                    // All browsed pages collapse into ONE drop-down browser card.
+                    let links = atts.filter { $0.type == "link" }
+                    if !links.isEmpty {
+                        BrowserSessionCard(pages: links, live: thinking)
                     }
                 }
                 if thinking && (message.content ?? "").isEmpty {
