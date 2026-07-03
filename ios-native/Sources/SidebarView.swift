@@ -23,6 +23,25 @@ struct SidebarView: View {
         return app.threads.filter { ($0.title ?? "").localizedCaseInsensitiveContains(search) }
     }
 
+    /// ChatGPT-style recency sections: Today / Yesterday / Previous 7 days / Older.
+    private var grouped: [(String, [ThreadRow])] {
+        let cal = Calendar.current
+        var today: [ThreadRow] = [], yesterday: [ThreadRow] = [], week: [ThreadRow] = [], older: [ThreadRow] = []
+        for t in filtered {
+            let d = RelTime.parse(t.last_activity_at ?? t.created_at) ?? .distantPast
+            if cal.isDateInToday(d) { today.append(t) }
+            else if cal.isDateInYesterday(d) { yesterday.append(t) }
+            else if d > Date().addingTimeInterval(-7 * 86400) { week.append(t) }
+            else { older.append(t) }
+        }
+        var out: [(String, [ThreadRow])] = []
+        if !today.isEmpty { out.append(("Today", today)) }
+        if !yesterday.isEmpty { out.append(("Yesterday", yesterday)) }
+        if !week.isEmpty { out.append(("Previous 7 days", week)) }
+        if !older.isEmpty { out.append(("Older", older)) }
+        return out
+    }
+
     var body: some View {
         ZStack(alignment: .bottom) {
             VStack(alignment: .leading, spacing: 0) {
@@ -91,39 +110,21 @@ struct SidebarView: View {
                         }
 
                         Text("Recents").font(.system(size: 20, weight: .bold)).foregroundStyle(Theme.text)
-                            .padding(.horizontal, 20).padding(.top, 22).padding(.bottom, 6)
+                            .padding(.horizontal, 20).padding(.top, 22).padding(.bottom, 2)
 
-                        ForEach(filtered) { t in
-                            Button { Haptic.light(); current = t.id; app.markRead(t.id); close() } label: {
-                                HStack(spacing: 8) {
-                                    Text(t.title ?? "New chat")
-                                        .font(.system(size: 18))
-                                        .foregroundStyle(Theme.text).lineLimit(1)
-                                    Spacer()
-                                    if app.isUnread(t) && current != t.id {
-                                        Circle().fill(Theme.blue).frame(width: 9, height: 9)
-                                            .transition(.scale.combined(with: .opacity))
-                                    }
-                                }
-                                .padding(.horizontal, 20).padding(.vertical, 11)
-                                .background(current == t.id ? Theme.ink2 : Color.clear,
-                                            in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-                                .contentShape(Rectangle())
-                            }
-                            .buttonStyle(.plain)
-                            .contextMenu {
-                                Button { renameTarget = t.id; renameDraft = t.title ?? ""; showRename = true } label: {
-                                    Label("Rename", systemImage: "pencil")
-                                }
-                                Button(role: .destructive) { Task { await app.deleteThread(t.id); if current == t.id { current = nil } } } label: {
-                                    Label("Delete", systemImage: "trash")
-                                }
+                        ForEach(grouped, id: \.0) { section, rows in
+                            Text(section)
+                                .font(.footnote.weight(.semibold)).foregroundStyle(Theme.muted)
+                                .padding(.horizontal, 20).padding(.top, 12).padding(.bottom, 2)
+                            ForEach(rows) { t in
+                                threadRow(t)
                             }
                         }
                         Spacer(minLength: 90)
                     }
                     .padding(.top, 8)
                 }
+                .refreshable { await app.loadThreads() }
             }
 
             // Floating bottom controls — blue Chat pill + account avatar.
@@ -161,6 +162,34 @@ struct SidebarView: View {
                 if let id = renameTarget, !renameDraft.trimmingCharacters(in: .whitespaces).isEmpty {
                     Task { await app.renameThread(id, to: renameDraft) }
                 }
+            }
+        }
+    }
+
+    private func threadRow(_ t: ThreadRow) -> some View {
+        Button { Haptic.light(); current = t.id; app.markRead(t.id); close() } label: {
+            HStack(spacing: 8) {
+                Text(t.title ?? "New chat")
+                    .font(.system(size: 18))
+                    .foregroundStyle(Theme.text).lineLimit(1)
+                Spacer()
+                if app.isUnread(t) && current != t.id {
+                    Circle().fill(Theme.blue).frame(width: 9, height: 9)
+                        .transition(.scale.combined(with: .opacity))
+                }
+            }
+            .padding(.horizontal, 20).padding(.vertical, 11)
+            .background(current == t.id ? Theme.ink2 : Color.clear,
+                        in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .contextMenu {
+            Button { renameTarget = t.id; renameDraft = t.title ?? ""; showRename = true } label: {
+                Label("Rename", systemImage: "pencil")
+            }
+            Button(role: .destructive) { Task { await app.deleteThread(t.id); if current == t.id { current = nil } } } label: {
+                Label("Delete", systemImage: "trash")
             }
         }
     }

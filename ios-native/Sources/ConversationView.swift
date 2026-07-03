@@ -119,7 +119,12 @@ struct ConversationView: View {
             GeometryReader { geo in
                 ScrollView {
                     LazyVStack(spacing: 16) {
-                        if !loaded { ProgressView().tint(Theme.muted).padding(.top, 40) }
+                        if !loaded && messages.isEmpty {
+                            SkeletonBubble(alignRight: true)
+                            SkeletonBubble()
+                            SkeletonBubble(alignRight: true)
+                            SkeletonBubble(tall: true)
+                        }
                         ForEach(Array(messages.enumerated()), id: \.element.id) { idx, m in
                             if let label = dayDivider(at: idx) { DayDivider(label: label) }
                             MessageBubble(message: m, onResend: { body in
@@ -420,6 +425,27 @@ struct MessageBubble: View {
             }
         } else {
             TypingDots()
+        }
+    }
+}
+
+/// Pulsing placeholder rows while a chat loads (nicer than a spinner).
+struct SkeletonBubble: View {
+    var alignRight = false
+    var tall = false
+    @State private var pulse = false
+    var body: some View {
+        HStack {
+            if alignRight { Spacer(minLength: 80) }
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .fill(Theme.ink2)
+                .frame(maxWidth: alignRight ? 190 : 270)
+                .frame(height: alignRight ? 42 : (tall ? 120 : 76))
+            if !alignRight { Spacer(minLength: 80) }
+        }
+        .opacity(pulse ? 0.45 : 0.9)
+        .onAppear {
+            withAnimation(.easeInOut(duration: 0.85).repeatForever(autoreverses: true)) { pulse = true }
         }
     }
 }

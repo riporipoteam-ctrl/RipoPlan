@@ -14,8 +14,15 @@ struct RootShell: View {
     @State private var showSettings = false
     @State private var sheet: ShellSheet?
     @State private var dragX: CGFloat = 0
+    @State private var showRenameChat = false
+    @State private var renameChatDraft = ""
     @StateObject private var updater = UpdateChecker()
     @AppStorage("askai.model") private var model = "kimi"
+
+    /// Any chat (other than the open one) with an agent reply you haven't seen.
+    private var hasUnread: Bool {
+        app.threads.contains { app.isUnread($0) && $0.id != current }
+    }
 
     private let sidebarWidth: CGFloat = 300
 
@@ -82,6 +89,15 @@ struct RootShell: View {
             }
             .tint(Theme.accent)
         }
+        .alert("Rename chat", isPresented: $showRenameChat) {
+            TextField("Chat name", text: $renameChatDraft)
+            Button("Cancel", role: .cancel) {}
+            Button("Save") {
+                if let id = current, !renameChatDraft.trimmingCharacters(in: .whitespaces).isEmpty {
+                    Task { await app.renameThread(id, to: renameChatDraft) }
+                }
+            }
+        }
         .onChange(of: current) { _ in } // triggers ConversationView reload via binding
         .onAppear { applyScreenshotHook() }
         .task { await updater.check() }
@@ -94,6 +110,14 @@ struct RootShell: View {
             Button { Haptic.light(); setSidebar(true) } label: {
                 Image(systemName: "line.3.horizontal").font(.system(size: 18, weight: .semibold)).foregroundStyle(Theme.text)
                     .frame(width: 40, height: 40).glassCircle()
+                    .overlay(alignment: .topTrailing) {
+                        if hasUnread {
+                            Circle().fill(Theme.blue).frame(width: 10, height: 10)
+                                .overlay(Circle().stroke(Theme.ink, lineWidth: 2))
+                                .offset(x: 1, y: -1)
+                                .transition(.scale.combined(with: .opacity))
+                        }
+                    }
             }
             Spacer(minLength: 0)
             Menu {
@@ -112,9 +136,35 @@ struct RootShell: View {
             }
             .onChange(of: model) { _ in Haptic.selection() }
             Spacer(minLength: 0)
-            Button { Haptic.light(); current = nil } label: {
-                Image(systemName: "square.and.pencil").font(.system(size: 17, weight: .medium)).foregroundStyle(Theme.text)
-                    .frame(width: 40, height: 40).glassCircle()
+            if current != nil {
+                // ChatGPT chat header: [new chat | ⋯] in one glass pill.
+                HStack(spacing: 0) {
+                    Button { Haptic.light(); current = nil } label: {
+                        Image(systemName: "square.and.pencil").font(.system(size: 16, weight: .medium)).foregroundStyle(Theme.text)
+                            .frame(width: 42, height: 40)
+                    }
+                    Rectangle().fill(Theme.stroke).frame(width: 1, height: 20)
+                    Menu {
+                        Button {
+                            renameChatDraft = app.threads.first { $0.id == current }?.title ?? ""
+                            showRenameChat = true
+                        } label: { Label("Rename chat", systemImage: "pencil") }
+                        Button(role: .destructive) {
+                            let id = current
+                            current = nil
+                            if let id { Task { await app.deleteThread(id) } }
+                        } label: { Label("Delete chat", systemImage: "trash") }
+                    } label: {
+                        Image(systemName: "ellipsis").font(.system(size: 16, weight: .medium)).foregroundStyle(Theme.text)
+                            .frame(width: 42, height: 40)
+                    }
+                }
+                .glassCapsule()
+            } else {
+                Button { Haptic.light(); current = nil } label: {
+                    Image(systemName: "square.and.pencil").font(.system(size: 17, weight: .medium)).foregroundStyle(Theme.text)
+                        .frame(width: 40, height: 40).glassCircle()
+                }
             }
         }
         .padding(.horizontal, 14).padding(.top, 6).padding(.bottom, 4)
