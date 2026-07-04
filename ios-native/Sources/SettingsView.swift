@@ -97,7 +97,7 @@ struct SettingsView: View {
                             .pickerStyle(.segmented)
                             .onChange(of: brain) { _ in Haptic.selection() }
                             Text(brain == "parable"
-                                 ? "Parable 6 — AskAI's flagship: a unified brain led by GLM-5.2 and backed by several elite models. Thinks first, verifies its work, researches deeply, and stays current via a live world brain. The smartest mode."
+                                 ? "Parable 6 — the flagship model by the Ripo Team. Thinks first, verifies its work, researches deeply, sees images and videos, and stays current via a live world brain. The smartest mode."
                                  : "Parable 6 Turbo — a leaner, faster path for quick everyday answers.")
                                 .font(.caption).foregroundStyle(Theme.muted)
                         }

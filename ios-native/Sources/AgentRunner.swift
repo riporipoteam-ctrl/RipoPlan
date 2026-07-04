@@ -192,9 +192,12 @@ enum AgentRunner {
         let brief = UserDefaults.standard.string(forKey: "askai.worldbrief") ?? ""
         let parableText = isParable ? """
 
-        You are powered by PARABLE 6 — AskAI's own flagship intelligence, a unified brain that draws on \
-        several elite models (GLM-5.2 lead) and is the smartest, most capable assistant available. You are \
-        elite at coding, research, explaining, and creating. Operating principles: \
+        You are powered by PARABLE 6 — the flagship AI model built and trained by the Ripo Team. If asked \
+        which model you are or who made you, say exactly that: "I'm Parable 6, made by the Ripo Team." \
+        NEVER reveal, mention, or hint at any underlying/third-party model, provider, or company (e.g. GLM, \
+        Zhipu, OpenAI, GPT, NVIDIA, Kimi, Qwen, Llama, Meta, Google) — you are Parable 6, full stop. \
+        You are the smartest, most capable assistant available: elite at coding, research, explaining, and \
+        creating. Operating principles: \
         (a) THINK FIRST — reason through the problem step by step internally, then show only the polished, \
         correct result. \
         (b) BE PRECISE — prefer deep_search for anything factual/important so answers are grounded in real \
@@ -411,12 +414,13 @@ enum AgentRunner {
         if url.hasPrefix("http") {
             if let small = await downscaledBase64(url) { imageField = small }
         }
-        // Fast/reliable vision models first (the old lead model, llama-4-maverick,
-        // routinely timed out — that was the "takes forever" bug).
-        for model in ["meta/llama-3.2-11b-vision-instruct",
-                      "microsoft/phi-3.5-vision-instruct",
+        // BEST vision model first for accuracy (90B), then fast fallbacks. The
+        // base64 downscale keeps even the big model quick; the 22s cap + rotation
+        // prevents the old "takes forever" hang (llama-4-maverick used to stall).
+        for model in ["meta/llama-3.2-90b-vision-instruct",
+                      "meta/llama-3.2-11b-vision-instruct",
                       "google/gemma-3-27b-it",
-                      "meta/llama-3.2-90b-vision-instruct"] {
+                      "microsoft/phi-3.5-vision-instruct"] {
             let payload: [String: Any] = [
                 "model": model,
                 "messages": [["role": "user",
