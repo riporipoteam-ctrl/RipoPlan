@@ -52,7 +52,7 @@ final class AppState: ObservableObject {
             "create_rank": "Created a rank", "assign_rank": "Assigned a rank", "create_channel": "Created a channel",
             "save_knowledge": "Saved knowledge", "search_knowledge": "Checked memory",
             "maps_search": "Searched the map", "recipes": "Found a recipe", "tv_show": "Checked a show",
-            "view_image": "Looked at the image", "read_file": "Read the file",
+            "view_image": "Looked at the image", "read_text": "Read the text", "read_file": "Read the file",
             "news": "Checked the news", "hacker_news": "Read Hacker News",
             "reddit": "Checked Reddit", "github_search": "Searched GitHub", "jokes": "Told a joke",
             "quote": "Found a quote", "advice": "Gave advice", "random_fact": "Shared a fact",

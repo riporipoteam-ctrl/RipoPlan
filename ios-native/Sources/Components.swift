@@ -656,3 +656,35 @@ struct InputBar: View {
         }
     }
 }
+
+/// Animated model badge under the top-bar title — a gentle shimmer sweeps the
+/// name and the icon breathes, so Parable 6 feels alive.
+struct ModelBadge: View {
+    let name: String
+    let icon: String
+    @State private var breathe = false
+    @State private var phase: CGFloat = -1
+    var body: some View {
+        VStack(spacing: 0) {
+            Text("AskAI").font(.system(size: 17, weight: .bold)).foregroundStyle(Theme.text)
+            HStack(spacing: 3) {
+                Image(systemName: icon).font(.system(size: 8, weight: .bold))
+                    .scaleEffect(breathe ? 1.15 : 0.9)
+                    .opacity(breathe ? 1 : 0.55)
+                Text(name).font(.system(size: 10, weight: .semibold))
+                    .overlay(
+                        LinearGradient(colors: [.clear, Theme.text.opacity(0.9), .clear],
+                                       startPoint: .leading, endPoint: .trailing)
+                            .frame(width: 34)
+                            .offset(x: phase * 80)
+                            .mask(Text(name).font(.system(size: 10, weight: .semibold)))
+                    )
+            }
+            .foregroundStyle(Theme.muted)
+        }
+        .onAppear {
+            withAnimation(.easeInOut(duration: 1.5).repeatForever(autoreverses: true)) { breathe = true }
+            withAnimation(.linear(duration: 2.6).repeatForever(autoreverses: false).delay(0.4)) { phase = 1 }
+        }
+    }
+}

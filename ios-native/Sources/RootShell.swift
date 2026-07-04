@@ -121,18 +121,8 @@ struct RootShell: View {
                     }
             }
             Spacer(minLength: 0)
-            VStack(spacing: 0) {
-                Text("AskAI")
-                    .font(.system(size: 17, weight: .bold))
-                    .foregroundStyle(Theme.text)
-                HStack(spacing: 3) {
-                    Image(systemName: brain == "parable" ? "sparkles" : "bolt.fill")
-                        .font(.system(size: 8, weight: .bold))
-                    Text(brain == "parable" ? "Parable 6" : "Parable 6 Turbo")
-                        .font(.system(size: 10, weight: .semibold))
-                }
-                .foregroundStyle(Theme.muted)
-            }
+            ModelBadge(name: brain == "parable" ? "Parable 6" : "Parable 6 Turbo",
+                       icon: brain == "parable" ? "sparkles" : "bolt.fill")
             Spacer(minLength: 0)
             if current != nil {
                 // ChatGPT chat header: [new chat | ⋯] in one glass pill.

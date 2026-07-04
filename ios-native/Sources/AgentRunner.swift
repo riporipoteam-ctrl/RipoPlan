@@ -74,6 +74,7 @@ enum AgentRunner {
         case "generate_image": return "Generating an image…"
         case "find_images": return "Finding real photos…"
         case "view_image": return "Looking at the image…"
+        case "read_text": return "Reading the text…"
         case "read_file": return "Reading the file…"
         case "recipes": return "Finding the recipe…"
         case "tv_show": return "Checking the show…"
@@ -121,6 +122,7 @@ enum AgentRunner {
             fn("generate_image", "Generate an image from a text prompt (shown to the user). For real brands/products, first research their look and describe it in detail in the prompt.", ["prompt": S], ["prompt"]),
             fn("find_images", "Search the web for REAL photos (brands, cars, products, logos, people, places, teams) and show them directly in the chat.", ["query": S], ["query"]),
             fn("view_image", "Look at an image the user uploaded (or any image URL) and describe what it shows. Use whenever a message contains [Uploaded image: URL].", ["url": S, "question": S], ["url"]),
+            fn("read_text", "OCR: extract ALL text from an image/document/receipt/screenshot exactly (best for reading words, numbers, plates).", ["url": S], ["url"]),
             fn("read_file", "Download and read a text file the user uploaded (or any file URL). Use whenever a message contains [Uploaded file ...].", ["url": S], ["url"]),
             fn("maps_search", "Find places/addresses/businesses on the map (name, address, coordinates + map links).", ["query": S], ["query"]),
             fn("search_knowledge", "Search the workspace knowledge base / long-term memory (empty query = latest entries).", ["query": S], []),
@@ -410,20 +412,21 @@ enum AgentRunner {
         guard !url.isEmpty else { return "No image URL given." }
         let key = nvidiaKey
         guard !key.isEmpty else { return "Image viewing is unavailable right now — ask the user to describe the image." }
-        let ask = question.isEmpty ? "Describe this image in detail — objects, any text (read it exactly), people, brands, colors, context." : question
+        let ask = question.isEmpty ? "Look carefully and describe this image in detail. READ ALL TEXT, numbers, signs and license plates EXACTLY, character by character — do not guess. Note objects, people, brands, colors and context." : question
 
-        // Prepare a compact base64 payload (fast to send + analyze).
+        // Prepare a base64 payload (fast one-hop; higher res so small text like
+        // license plates and receipts is legible).
         var imageField = url
         if url.hasPrefix("http") {
             if let small = await downscaledBase64(url) { imageField = small }
         }
-        // BEST vision model first for accuracy (90B), then fast fallbacks. The
-        // base64 downscale keeps even the big model quick; the 22s cap + rotation
-        // prevents the old "takes forever" hang (llama-4-maverick used to stall).
-        for model in ["meta/llama-3.2-90b-vision-instruct",
-                      "meta/llama-3.2-11b-vision-instruct",
-                      "google/gemma-3-27b-it",
-                      "microsoft/phi-3.5-vision-instruct"] {
+        // Benchmarked lineup (OCR accuracy + speed on the NVIDIA key): the old
+        // lead, llama-3.2-90b-vision, was ~8s; these are 1–2s and read text
+        // better. nemotron VL is purpose-built for real-world OCR + VQA.
+        for model in ["nvidia/nemotron-nano-12b-v2-vl",
+                      "moonshotai/kimi-k2.6",
+                      "nvidia/llama-3.1-nemotron-nano-vl-8b-v1",
+                      "meta/llama-3.2-11b-vision-instruct"] {
             let payload: [String: Any] = [
                 "model": model,
                 "messages": [["role": "user",
@@ -436,7 +439,7 @@ enum AgentRunner {
             req.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
             req.setValue("application/json", forHTTPHeaderField: "Content-Type")
             req.httpBody = try? JSONSerialization.data(withJSONObject: payload)
-            req.timeoutInterval = 22
+            req.timeoutInterval = 20
             if let (d, r) = try? await URLSession.shared.data(for: req),
                let h = r as? HTTPURLResponse, (200..<300).contains(h.statusCode),
                let o = try? JSONSerialization.jsonObject(with: d) as? [String: Any],
@@ -449,22 +452,23 @@ enum AgentRunner {
         return "Couldn't analyze the image right now."
     }
 
-    /// Download an image URL and return a small base64 data URI (≤768px, JPEG).
+    /// Download an image URL and return a base64 data URI (≤1280px, JPEG).
+    /// 1280px keeps small text (license plates, receipts) legible for OCR.
     private static func downscaledBase64(_ url: String) async -> String? {
         guard let u = URL(string: url) else { return nil }
         var req = URLRequest(url: u); req.timeoutInterval = 12
         guard let (d, _) = try? await URLSession.shared.data(for: req), let img = UIImage(data: d) else { return nil }
-        let maxSide: CGFloat = 768
+        let maxSide: CGFloat = 1280
         let scale = min(1, maxSide / max(img.size.width, img.size.height))
         let jpeg: Data?
         if scale >= 1 {
-            jpeg = img.jpegData(compressionQuality: 0.6)
+            jpeg = img.jpegData(compressionQuality: 0.72)
         } else {
             let size = CGSize(width: img.size.width * scale, height: img.size.height * scale)
             let fmt = UIGraphicsImageRendererFormat.default(); fmt.scale = 1
             jpeg = UIGraphicsImageRenderer(size: size, format: fmt).image { _ in
                 img.draw(in: CGRect(origin: .zero, size: size))
-            }.jpegData(compressionQuality: 0.6)
+            }.jpegData(compressionQuality: 0.72)
         }
         guard let data = jpeg else { return nil }
         return "data:image/jpeg;base64,\(data.base64EncodedString())"
@@ -727,6 +731,7 @@ enum AgentRunner {
             images.append(contentsOf: found.map { $0.1 })
             return "Found \(found.count) real photo(s), now shown to the user: " + found.map { $0.0 }.joined(separator: "; ")
         case "view_image": return await viewImage(str(args["url"]), str(args["question"]))
+        case "read_text": return await viewImage(str(args["url"]), "Transcribe ALL text in this image EXACTLY as written — every word, number, symbol, license plate and line. Preserve layout/order. Output only the transcribed text.")
         case "read_file": return await readFile(str(args["url"]))
         case "maps_search": return await mapsSearch(str(args["query"]))
         case "search_knowledge": return await searchKnowledge(ctx.workspaceId, str(args["query"]))
