@@ -226,17 +226,19 @@ enum AgentRunner {
         RULE 2 — GO DEEP ONLY WHEN NEEDED. For genuinely hard/important questions, chain tools: search, \
         browse the best pages, then answer with concrete facts (numbers, dates, names, sources). For easy \
         ones, keep it quick and to the point.
-        RULE 3 — BUILD REQUESTS ALWAYS END WITH build_app. When asked for a website/app: research FAST — \
-        at most 3 tool calls (ONE web_search, browse the best result, optionally ONE find_images) — then \
-        you MUST call build_app in this same conversation. Ending a build request without calling \
-        build_app is failure; if research finds little, build anyway with what you have. The HTML: one \
-        long self-contained file with modern CSS (custom properties, gradient hero, glassmorphism cards, \
-        smooth scroll-behavior), animations (CSS keyframes, hover transitions, reveal-on-scroll via \
-        IntersectionObserver), fully responsive, real content from research (never lorem ipsum), images \
-        via https://image.pollinations.ai/prompt/{description}?width=800&height=500, sections (hero, \
-        about, services, gallery, testimonials, contact + map link), sticky nav. AFTER build_app \
-        succeeds: create_channel for the project and post_channel a kickoff tagging the builder \
-        teammate's @handle so they own future iterations (list_apps + edit_app).
+        RULE 3 — BUILD REQUESTS ALWAYS END WITH build_app, FAST. When asked for a website/app: for a \
+        SPECIFIC real business, do AT MOST ONE web_search; for a general/topic site (e.g. "a website \
+        about nature") do NO research at all — you already know enough. Do NOT use find_images for \
+        websites; put pictures directly in the HTML via \
+        https://image.pollinations.ai/prompt/{description}?width=800&height=500 (these need no search). \
+        If a search is rate-limited or returns a CAPTCHA, DO NOT retry it — build immediately with your \
+        own knowledge. You MUST call build_app within your first 2 tool calls. Ending a build request \
+        without build_app is failure. The HTML: one long self-contained file with modern CSS (custom \
+        properties, gradient hero, glassmorphism cards, smooth scroll-behavior), animations (CSS \
+        keyframes, hover transitions, reveal-on-scroll via IntersectionObserver), fully responsive, \
+        real content (never lorem ipsum), Pollinations images, sections (hero, about, features, gallery, \
+        testimonials, contact), sticky nav. AFTER build_app succeeds: create_channel for the project and \
+        post_channel a kickoff tagging the builder teammate's @handle (list_apps + edit_app to iterate).
         RULE 4 — TEAMWORK. For big builds: create_channel for the project, then post_channel a kickoff \
         brief that TAGS the right teammate with their @handle (from the roster) — tagged teammates are \
         pinged automatically and reply in the channel themselves; never write their reply for them. \
@@ -293,6 +295,8 @@ enum AgentRunner {
 
         var lastToolOutput = ""
         var pages: [[String: String]] = []
+        var callCounts: [String: Int] = [:]   // dedupe repeated/looping tool calls
+        var totalToolCalls = 0
         for round in 0..<maxRounds {
             // Let the user know when the agent chooses to keep digging.
             if round == 4 { await ctx.onActivity("Extended thinking — going deeper…", "think") }
@@ -316,6 +320,17 @@ enum AgentRunner {
                 let f = c["function"] as? [String: Any] ?? [:]
                 let name = f["name"] as? String ?? ""
                 let args = parseArgs(f["arguments"])
+                // Anti-loop: if the SAME tool+args is called repeatedly (e.g. a
+                // search that keeps getting CAPTCHA'd), stop looping and tell the
+                // model to proceed with what it has instead of hanging forever.
+                let sig = name + "|" + (args["query"] as? String ?? args["url"] as? String ?? "")
+                callCounts[sig, default: 0] += 1
+                totalToolCalls += 1
+                if callCounts[sig]! > 2 || totalToolCalls > 14 {
+                    msgs.append(["role": "tool", "tool_call_id": c["id"] as? String ?? "", "name": name,
+                                 "content": "That isn't returning new results. STOP calling tools now and give the user your best complete answer (or build the app) using what you already have."])
+                    continue
+                }
                 await ctx.onActivity(activityLabel(name), name)
                 steps.append(name)
                 // LIVE browser view: push the page card to the chat BEFORE reading the
@@ -572,8 +587,8 @@ enum AgentRunner {
         guard !query.isEmpty else { return [] }
         let enc = query.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? query
         var out: [(String, String)] = []
-        if let u = URL(string: "https://commons.wikimedia.org/w/api.php?action=query&format=json&generator=search&gsrnamespace=6&gsrsearch=\(enc)&gsrlimit=8&prop=imageinfo&iiprop=url%7Cmime&iiurlwidth=900"),
-           let (d, _) = try? await URLSession.shared.data(from: u),
+        // get() has a 20s timeout + UA so this can't hang the whole run.
+        if let d = await get("https://commons.wikimedia.org/w/api.php?action=query&format=json&generator=search&gsrnamespace=6&gsrsearch=\(enc)&gsrlimit=8&prop=imageinfo&iiprop=url%7Cmime&iiurlwidth=900"),
            let o = try? JSONSerialization.jsonObject(with: d) as? [String: Any],
            let pages = (o["query"] as? [String: Any])?["pages"] as? [String: Any] {
             for (_, v) in pages {
@@ -585,8 +600,7 @@ enum AgentRunner {
                 out.append((title, url))
             }
         }
-        if out.isEmpty, let u = URL(string: "https://api.openverse.org/v1/images/?q=\(enc)&page_size=4"),
-           let (d, _) = try? await URLSession.shared.data(from: u),
+        if out.isEmpty, let d = await get("https://api.openverse.org/v1/images/?q=\(enc)&page_size=4"),
            let o = try? JSONSerialization.jsonObject(with: d) as? [String: Any],
            let results = o["results"] as? [[String: Any]] {
             for r in results where out.count < 3 {
@@ -837,11 +851,23 @@ enum AgentRunner {
         }
         // 2) Wikipedia summary (authoritative background).
         if let wikiSum = await wikiQuiet(query) { parts.append("Wikipedia: \(wikiSum)") }
-        // 3) DuckDuckGo web results (the ranked list).
+        // 3) Wikipedia search results (topical, NEVER CAPTCHA-blocked).
+        if let d = await get("https://en.wikipedia.org/w/api.php?action=query&list=search&format=json&srlimit=6&srsearch=\(q)"),
+           let j = try? JSONSerialization.jsonObject(with: d) as? [String: Any],
+           let hits = ((j["query"] as? [String: Any])?["search"] as? [[String: Any]]) {
+            let rows = hits.compactMap { h -> String? in
+                guard let t = h["title"] as? String else { return nil }
+                let sn = stripHTML(h["snippet"] as? String ?? "")
+                return "• \(t): \(sn)"
+            }
+            if !rows.isEmpty { parts.append("Wikipedia results:\n" + rows.joined(separator: "\n")) }
+        }
+        // 4) DuckDuckGo web results — but reject CAPTCHA/anomaly pages.
         for endpoint in ["https://html.duckduckgo.com/html/?q=\(q)", "https://lite.duckduckgo.com/lite/?q=\(q)"] {
             let html = await fetchText(endpoint)
-            if html.isEmpty { continue }
+            if html.isEmpty || isBlocked(html) { continue }
             var text = stripHTML(html)
+            if isBlocked(text) { continue }
             if let re = try? NSRegularExpression(pattern: "uddg=([^&\\s]+)") {
                 let ns = text as NSString
                 for m in re.matches(in: text, range: NSRange(location: 0, length: ns.length)).reversed() {
@@ -853,9 +879,17 @@ enum AgentRunner {
             if text.count > 120 { parts.append("Web results:\n" + String(text.prefix(4500))); break }
         }
         guard !parts.isEmpty else {
-            return "No live results found. Don't invent facts — try a different query or say you couldn't find current info."
+            return "Search is temporarily unavailable (rate-limited/CAPTCHA). Do NOT keep searching — answer or build using your own knowledge right now."
         }
         return "Search results for \"\(query)\":\n" + parts.joined(separator: "\n\n")
+    }
+    /// True if a page is a bot-block / CAPTCHA / anomaly wall (not real results).
+    private static func isBlocked(_ s: String) -> Bool {
+        let lc = s.lowercased()
+        return lc.contains("bots use duckduckgo") || lc.contains("confirm this search")
+            || lc.contains("select all squares") || lc.contains("captcha")
+            || lc.contains("unusual traffic") || lc.contains("are you a robot")
+            || lc.contains("challenge") && lc.contains("human")
     }
     /// Generate a short, natural chat title (3–5 words) from the first message.
     static func titleFor(_ message: String) async -> String? {
