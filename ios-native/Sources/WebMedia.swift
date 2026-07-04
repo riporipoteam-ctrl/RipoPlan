@@ -112,6 +112,40 @@ struct VideoCard: View {
     }
 }
 
+/// Inline card for an UPLOADED video (Supabase mp4): poster frame + play button,
+/// tap to play fullscreen in the app.
+struct ChatVideoCard: View {
+    let url: String
+    var poster: String?
+    @State private var play = false
+    var body: some View {
+        Button { Haptic.medium(); play = true } label: {
+            ZStack {
+                if let p = poster, let u = URL(string: p) {
+                    AsyncImage(url: u) { i in i.resizable().scaledToFill() } placeholder: { Theme.ink3 }
+                } else {
+                    LinearGradient(colors: [Theme.ink2, Theme.ink3], startPoint: .topLeading, endPoint: .bottomTrailing)
+                }
+                Rectangle().fill(.black.opacity(0.18))
+                Circle().fill(.black.opacity(0.55)).frame(width: 56, height: 56)
+                    .overlay(Image(systemName: "play.fill").font(.system(size: 21)).foregroundStyle(.white).offset(x: 2))
+                VStack { HStack {
+                    HStack(spacing: 4) { Image(systemName: "video.fill").font(.caption2.weight(.bold)); Text("Video").font(.caption2.weight(.bold)) }
+                        .foregroundStyle(.white).padding(.horizontal, 8).padding(.vertical, 4)
+                        .background(.black.opacity(0.55), in: Capsule())
+                    Spacer() }; Spacer() }.padding(8)
+            }
+            .frame(maxWidth: 300).frame(height: 200)
+            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).stroke(Theme.stroke, lineWidth: 1))
+        }
+        .buttonStyle(.plain)
+        .fullScreenCover(isPresented: $play) {
+            VideoPlayerSheet(video: VideoEmbed(id: url, embedURL: url, thumb: poster, platform: "Video"))
+        }
+    }
+}
+
 /// Fullscreen in-app video player.
 struct VideoPlayerSheet: View {
     let video: VideoEmbed

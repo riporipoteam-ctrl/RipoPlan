@@ -88,37 +88,55 @@ struct ImageViewer: View {
     @State private var offset: CGSize = .zero
     @State private var lastOffset: CGSize = .zero
 
+    /// Keep the zoomed image within reasonable bounds so it can't fly off screen.
+    private func clamp(_ size: CGSize) {
+        let maxX = (scale - 1) * size.width / 2
+        let maxY = (scale - 1) * size.height / 2
+        let clamped = CGSize(width: min(maxX, max(-maxX, offset.width)),
+                             height: min(maxY, max(-maxY, offset.height)))
+        withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) { offset = clamped }
+        lastOffset = clamped
+    }
+
     var body: some View {
         ZStack(alignment: .top) {
             Color.black.ignoresSafeArea()
-            AsyncImage(url: URL(string: url)) { img in
-                img.resizable().scaledToFit()
-                    .scaleEffect(scale)
-                    .offset(offset)
-                    .gesture(
-                        MagnificationGesture()
-                            .onChanged { v in scale = max(1, min(5, lastScale * v)) }
-                            .onEnded { _ in lastScale = scale }
-                            .simultaneously(with: DragGesture()
-                                .onChanged { v in
-                                    offset = CGSize(width: lastOffset.width + v.translation.width,
-                                                    height: lastOffset.height + v.translation.height)
+            GeometryReader { geo in
+                AsyncImage(url: URL(string: url)) { img in
+                    img.resizable().scaledToFit()
+                        .scaleEffect(scale)
+                        .offset(offset)
+                        .frame(width: geo.size.width, height: geo.size.height)
+                        .gesture(
+                            MagnificationGesture()
+                                .onChanged { v in scale = max(1, min(6, lastScale * v)) }
+                                .onEnded { _ in
+                                    lastScale = scale
+                                    if scale <= 1.01 { withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) { offset = .zero; lastOffset = .zero } }
+                                    else { clamp(geo.size) }
                                 }
-                                .onEnded { v in
-                                    // Not zoomed + flicked down = close (easy to minimize).
-                                    if scale <= 1.02 && v.translation.height > 90 { dismiss(); return }
-                                    if scale <= 1.02 { offset = .zero; lastOffset = .zero }
-                                    else { lastOffset = offset }
-                                })
-                    )
-                    .onTapGesture(count: 2) {
-                        withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
-                            if scale > 1 { scale = 1; lastScale = 1; offset = .zero; lastOffset = .zero }
-                            else { scale = 2.5; lastScale = 2.5 }
+                                .simultaneously(with: DragGesture()
+                                    .onChanged { v in
+                                        offset = CGSize(width: lastOffset.width + v.translation.width,
+                                                        height: lastOffset.height + v.translation.height)
+                                    }
+                                    .onEnded { v in
+                                        // Not zoomed + flicked down = close.
+                                        if scale <= 1.02 && v.translation.height > 90 { dismiss(); return }
+                                        if scale <= 1.02 { withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) { offset = .zero; lastOffset = .zero } }
+                                        else { clamp(geo.size) }
+                                    })
+                        )
+                        .onTapGesture(count: 2) {
+                            withAnimation(.spring(response: 0.32, dampingFraction: 0.8)) {
+                                if scale > 1 { scale = 1; lastScale = 1; offset = .zero; lastOffset = .zero }
+                                else { scale = 2.8; lastScale = 2.8 }
+                            }
                         }
-                    }
-            } placeholder: { ProgressView().tint(.white) }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } placeholder: { ProgressView().tint(.white) }
+                .frame(width: geo.size.width, height: geo.size.height)
+            }
+            .ignoresSafeArea()
 
             HStack {
                 Button { dismiss() } label: {
@@ -549,7 +567,7 @@ struct InputBar: View {
             // circular send button that lights up when there's something to send.
             HStack(alignment: .bottom, spacing: 10) {
                 Menu {
-                    Button { onPickPhoto() } label: { Label("Photo Library", systemImage: "photo") }
+                    Button { onPickPhoto() } label: { Label("Photos & Videos", systemImage: "photo.on.rectangle") }
                     Button { onPickFile() } label: { Label("Files", systemImage: "doc") }
                     Picker("Model", selection: $brain) {
                         Label("Parable 6 · max", systemImage: "sparkles").tag("parable")
@@ -612,16 +630,22 @@ struct InputBar: View {
 
     @ViewBuilder private func attachmentChip(_ a: Attachment) -> some View {
         ZStack(alignment: .topTrailing) {
-            if a.type == "image" {
-                AsyncImage(url: URL(string: a.url)) { img in
+            if a.type == "image" || (a.type == "video" && a.preview != nil) {
+                AsyncImage(url: URL(string: a.type == "video" ? (a.preview ?? a.url) : a.url)) { img in
                     img.resizable().scaledToFill()
                 } placeholder: { Theme.ink3 }
                 .frame(width: 56, height: 56)
                 .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .overlay {
+                    if a.type == "video" {
+                        Image(systemName: "play.circle.fill").font(.system(size: 20)).foregroundStyle(.white)
+                            .shadow(radius: 3)
+                    }
+                }
             } else {
                 RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Theme.ink3)
                     .frame(width: 56, height: 56)
-                    .overlay(Image(systemName: "doc.fill").foregroundStyle(Theme.muted))
+                    .overlay(Image(systemName: a.type == "video" ? "video.fill" : "doc.fill").foregroundStyle(Theme.muted))
             }
             Button { attachments.removeAll { $0.id == a.id } } label: {
                 Image(systemName: "xmark.circle.fill")

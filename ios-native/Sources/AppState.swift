@@ -335,7 +335,11 @@ final class AppState: ObservableObject {
 
         do {
             let promptText = content.isEmpty ? "(the user sent an attachment — describe/use it)" : content
-            let attachJSON: [[String: Any]] = attachments.map { ["type": $0.type, "url": $0.url, "name": $0.name, "mime": $0.mime ?? ""] }
+            let attachJSON: [[String: Any]] = attachments.map { a in
+                var d: [String: Any] = ["type": a.type, "url": a.url, "name": a.name, "mime": a.mime ?? ""]
+                if let p = a.preview { d["preview"] = p }   // video poster frame
+                return d
+            }
             if tid == nil {
                 if agentId == nil { agentId = supervisor?.id }
                 let base = content.isEmpty ? (attachments.first?.name ?? "New chat") : content
@@ -455,6 +459,13 @@ final class AppState: ObservableObject {
             if m.sender_type == "user", let atts = m.attachments, !atts.isEmpty {
                 let notes = atts.compactMap { a -> String? in
                     if a.type == "image" { return "[Uploaded image: \(a.url)]" }
+                    if a.type == "video" {
+                        // Vision models can't watch video; hand them a key frame
+                        // as an image (uses the [Uploaded image:] marker so it's
+                        // auto-analyzed) so they can describe what's in it.
+                        if let p = a.preview, !p.isEmpty { return "[Uploaded image: \(p)] (this is a still frame from a video the user sent)" }
+                        return "[Uploaded a video: \(a.url)]"
+                    }
                     if a.type == "file" { return "[Uploaded file '\(a.name)': \(a.url)]" }
                     return nil
                 }.joined(separator: " ")

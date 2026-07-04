@@ -1,5 +1,6 @@
 import Foundation
 import JavaScriptCore
+import UIKit
 
 struct RunContext {
     let workspaceId: String
@@ -263,11 +264,21 @@ enum AgentRunner {
         // it can never claim it "can't see" the attachment.
         if let lastUser = history.last(where: { ($0["role"] as? String) == "user" }),
            let content = lastUser["content"] as? String, content.contains("[Uploaded image:") {
-            let urls = matchGroups("\\[Uploaded image: (\\S+?)\\]", in: content).prefix(2)
-            for u in urls {
-                await ctx.onActivity("Looking at the image…", "view_image")
-                let desc = await viewImage(u, "Describe this image in detail — objects, any visible text, people, brands, context.")
-                msgs.append(["role": "user", "content": "(Automatic attachment analysis — use this) \(desc)"])
+            let urls = Array(matchGroups("\\[Uploaded image: (\\S+?)\\]", in: content).prefix(4))
+            if !urls.isEmpty {
+                await ctx.onActivity(urls.count > 1 ? "Looking at the images…" : "Looking at the image…", "view_image")
+                // Analyze all uploaded images in PARALLEL (was sequential = slow).
+                let descs = await withTaskGroup(of: (Int, String).self) { group -> [String] in
+                    for (i, u) in urls.enumerated() {
+                        group.addTask { (i, await viewImage(u, "Describe this image in detail — objects, any visible text, people, brands, context.")) }
+                    }
+                    var results = Array(repeating: "", count: urls.count)
+                    for await (i, desc) in group { results[i] = desc }
+                    return results
+                }
+                for (i, desc) in descs.enumerated() {
+                    msgs.append(["role": "user", "content": "(Automatic analysis of image \(i + 1) — use this) \(desc)"])
+                }
                 steps.append("view_image")
             }
         }
@@ -386,21 +397,31 @@ enum AgentRunner {
         }
     }
 
-    /// SEE an image (user upload or any URL) with an NVIDIA vision model.
+    /// SEE an image FAST. Downloads + downscales the image in-app and sends it as
+    /// base64 (one hop — the model doesn't re-fetch from storage), tries small/fast
+    /// vision models first, and times out quickly so it never hangs.
     static func viewImage(_ url: String, _ question: String) async -> String {
         guard !url.isEmpty else { return "No image URL given." }
         let key = nvidiaKey
         guard !key.isEmpty else { return "Image viewing is unavailable right now — ask the user to describe the image." }
-        let ask = question.isEmpty ? "Describe this image in detail — objects, any text, people, colors, style, context." : question
-        for model in ["meta/llama-4-maverick-17b-128e-instruct",
-                      "meta/llama-3.2-90b-vision-instruct",
+        let ask = question.isEmpty ? "Describe this image in detail — objects, any text (read it exactly), people, brands, colors, context." : question
+
+        // Prepare a compact base64 payload (fast to send + analyze).
+        var imageField = url
+        if url.hasPrefix("http") {
+            if let small = await downscaledBase64(url) { imageField = small }
+        }
+        // Fast/reliable vision models first (the old lead model, llama-4-maverick,
+        // routinely timed out — that was the "takes forever" bug).
+        for model in ["meta/llama-3.2-11b-vision-instruct",
+                      "microsoft/phi-3.5-vision-instruct",
                       "google/gemma-3-27b-it",
-                      "microsoft/phi-3.5-vision-instruct"] {
+                      "meta/llama-3.2-90b-vision-instruct"] {
             let payload: [String: Any] = [
                 "model": model,
                 "messages": [["role": "user",
                               "content": [["type": "text", "text": ask],
-                                          ["type": "image_url", "image_url": ["url": url]]]]],
+                                          ["type": "image_url", "image_url": ["url": imageField]]]]],
                 "max_tokens": 512
             ]
             var req = URLRequest(url: URL(string: "https://integrate.api.nvidia.com/v1/chat/completions")!)
@@ -408,7 +429,7 @@ enum AgentRunner {
             req.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
             req.setValue("application/json", forHTTPHeaderField: "Content-Type")
             req.httpBody = try? JSONSerialization.data(withJSONObject: payload)
-            req.timeoutInterval = 60
+            req.timeoutInterval = 22
             if let (d, r) = try? await URLSession.shared.data(for: req),
                let h = r as? HTTPURLResponse, (200..<300).contains(h.statusCode),
                let o = try? JSONSerialization.jsonObject(with: d) as? [String: Any],
@@ -419,6 +440,27 @@ enum AgentRunner {
             }
         }
         return "Couldn't analyze the image right now."
+    }
+
+    /// Download an image URL and return a small base64 data URI (≤768px, JPEG).
+    private static func downscaledBase64(_ url: String) async -> String? {
+        guard let u = URL(string: url) else { return nil }
+        var req = URLRequest(url: u); req.timeoutInterval = 12
+        guard let (d, _) = try? await URLSession.shared.data(for: req), let img = UIImage(data: d) else { return nil }
+        let maxSide: CGFloat = 768
+        let scale = min(1, maxSide / max(img.size.width, img.size.height))
+        let jpeg: Data?
+        if scale >= 1 {
+            jpeg = img.jpegData(compressionQuality: 0.6)
+        } else {
+            let size = CGSize(width: img.size.width * scale, height: img.size.height * scale)
+            let fmt = UIGraphicsImageRendererFormat.default(); fmt.scale = 1
+            jpeg = UIGraphicsImageRenderer(size: size, format: fmt).image { _ in
+                img.draw(in: CGRect(origin: .zero, size: size))
+            }.jpegData(compressionQuality: 0.6)
+        }
+        guard let data = jpeg else { return nil }
+        return "data:image/jpeg;base64,\(data.base64EncodedString())"
     }
 
     /// Read a (text) file the user uploaded.

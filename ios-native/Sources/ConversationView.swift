@@ -2,6 +2,7 @@ import SwiftUI
 import UIKit
 import PhotosUI
 import UniformTypeIdentifiers
+import AVFoundation
 
 struct Suggestion: Identifiable {
     let id = UUID()
@@ -45,7 +46,7 @@ struct ConversationView: View {
     @State private var uploading = false
     @State private var loaded = false
 
-    @State private var photoItem: PhotosPickerItem?
+    @State private var photoItems: [PhotosPickerItem] = []
     @State private var showPhoto = false
     @State private var showFiles = false
     @State private var heroIn = false
@@ -53,10 +54,20 @@ struct ConversationView: View {
     @State private var showVoice = false
     @State private var browserURL: String?
     @State private var videoURL: String?
+    @State private var wcIntro = false
     @Environment(\.scenePhase) private var scene
+
+    private var mentionsWorldCup: Bool {
+        messages.contains { ($0.content ?? "").range(of: "world cup", options: .caseInsensitive) != nil }
+    }
+    private var wcSeenKey: String { "askai.wc.seen.\(threadId ?? "none")" }
 
     var body: some View {
         ZStack(alignment: .bottom) {
+            // World Cup 2026 themed backdrop once the chat mentions it.
+            if mentionsWorldCup || wcIntro {
+                WorldCupBackground(intro: $wcIntro).transition(.opacity)
+            }
             Group {
                 if threadId == nil { newChat } else { thread }
             }
@@ -91,12 +102,24 @@ struct ConversationView: View {
         .fullScreenCover(isPresented: Binding(get: { videoURL != nil }, set: { if !$0 { videoURL = nil } })) {
             if let u = videoURL, let v = VideoEmbed.from(u) { VideoPlayerSheet(video: v) }
         }
-        .photosPicker(isPresented: $showPhoto, selection: $photoItem, matching: .images)
-        .onChange(of: photoItem) { item in Task { await loadPhoto(item) } }
+        .photosPicker(isPresented: $showPhoto, selection: $photoItems, maxSelectionCount: 6,
+                      matching: .any(of: [.images, .videos]))
+        .onChange(of: photoItems) { items in Task { await loadPicked(items) } }
         .fileImporter(isPresented: $showFiles, allowedContentTypes: [.item], allowsMultipleSelection: false) { result in
             Task { await loadFile(result) }
         }
         .task(id: threadId) { await poll() }
+        .onChange(of: mentionsWorldCup) { mentions in
+            // First time the World Cup comes up in this chat → play the intro once.
+            guard mentions, !UserDefaults.standard.bool(forKey: wcSeenKey) else { return }
+            UserDefaults.standard.set(true, forKey: wcSeenKey)
+            withAnimation(.easeOut(duration: 0.4)) { wcIntro = true }
+            Haptic.success()
+            Task {
+                try? await Task.sleep(nanoseconds: 5_500_000_000)
+                withAnimation(.easeInOut(duration: 1.0)) { wcIntro = false }   // settle to ambient
+            }
+        }
         .onChange(of: scene) { p in
             // Coming back from background → refresh immediately, don't wait for
             // the next poll tick.
@@ -259,21 +282,55 @@ struct ConversationView: View {
     }
 
     // MARK: Uploads
-    private func loadPhoto(_ item: PhotosPickerItem?) async {
-        guard let item else { return }
+    /// Handle a batch of picked photos AND videos. Photos are downscaled and
+    /// uploaded in PARALLEL (fast); videos are uploaded and get a poster frame so
+    /// the agent can "see" them.
+    private func loadPicked(_ items: [PhotosPickerItem]) async {
+        guard !items.isEmpty else { return }
         uploading = true
-        if let data = try? await item.loadTransferable(type: Data.self) {
-            // Downscale + recompress before upload — phone photos are 5-15 MB;
-            // this sends ~200-500 KB instead (much faster upload AND display).
-            let compact = compressForUpload(data)
-            if let att = await app.upload(data: compact, ext: "jpg", contentType: "image/jpeg", name: "Photo.jpg") {
-                attachments.append(att); Haptic.success()
+        await withTaskGroup(of: Attachment?.self) { group in
+            for item in items {
+                group.addTask { await loadOne(item) }
+            }
+            for await att in group {
+                if let att { await MainActor.run { attachments.append(att); Haptic.success() } }
             }
         }
-        uploading = false; photoItem = nil
+        uploading = false; photoItems = []
     }
 
-    private func compressForUpload(_ data: Data, maxSide: CGFloat = 1600) -> Data {
+    private func loadOne(_ item: PhotosPickerItem) async -> Attachment? {
+        let isVideo = item.supportedContentTypes.contains { $0.conforms(to: .movie) }
+        guard let data = try? await item.loadTransferable(type: Data.self) else { return nil }
+        if isVideo {
+            guard let vid = await app.upload(data: data, ext: "mp4", contentType: "video/mp4", name: "Video.mp4") else { return nil }
+            // Poster frame so chat shows a thumbnail and the agent can view it.
+            var att = vid
+            att.type = "video"
+            if let frame = await firstFrame(data), let shot = await app.upload(data: frame, ext: "jpg", contentType: "image/jpeg", name: "frame.jpg") {
+                att.preview = shot.url
+            }
+            return att
+        } else {
+            let compact = compressForUpload(data)
+            return await app.upload(data: compact, ext: "jpg", contentType: "image/jpeg", name: "Photo.jpg")
+        }
+    }
+
+    /// Grab a representative frame from a video (for the poster + agent vision).
+    private func firstFrame(_ data: Data) async -> Data? {
+        let tmp = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".mp4")
+        guard (try? data.write(to: tmp)) != nil else { return nil }
+        defer { try? FileManager.default.removeItem(at: tmp) }
+        let asset = AVURLAsset(url: tmp)
+        let gen = AVAssetImageGenerator(asset: asset); gen.appliesPreferredTrackTransform = true
+        gen.maximumSize = CGSize(width: 768, height: 768)
+        let time = CMTime(seconds: 1, preferredTimescale: 600)
+        guard let cg = try? gen.copyCGImage(at: time, actualTime: nil) else { return nil }
+        return UIImage(cgImage: cg).jpegData(compressionQuality: 0.6)
+    }
+
+    private func compressForUpload(_ data: Data, maxSide: CGFloat = 1280) -> Data {
         guard let img = UIImage(data: data) else { return data }
         let scale = min(1, maxSide / max(img.size.width, img.size.height))
         let target = CGSize(width: img.size.width * scale, height: img.size.height * scale)
@@ -282,7 +339,8 @@ struct ConversationView: View {
         let resized = UIGraphicsImageRenderer(size: target, format: fmt).image { _ in
             img.draw(in: CGRect(origin: .zero, size: target))
         }
-        return resized.jpegData(compressionQuality: 0.72) ?? data
+        // Smaller target + q0.6 → much faster upload and display.
+        return resized.jpegData(compressionQuality: 0.6) ?? data
     }
 
     private func loadFile(_ result: Result<[URL], Error>) async {
@@ -373,6 +431,8 @@ struct MessageBubble: View {
                                 .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).stroke(Theme.stroke, lineWidth: 1))
                             }
                             .buttonStyle(.plain)
+                        } else if a.type == "video" {
+                            ChatVideoCard(url: a.url, poster: a.preview)
                         } else if a.type != "link" {
                             HStack(spacing: 6) { Image(systemName: "doc.fill"); Text(a.name).lineLimit(1) }
                                 .font(.footnote).foregroundStyle(Theme.muted)
