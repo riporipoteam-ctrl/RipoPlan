@@ -12,9 +12,9 @@ npm-debug.log*
 next-env.d.ts
 .turbo
 
-# Capacitor native projects (generated in CI)
-ios/
-android/
+# Capacitor native projects (generated in CI). Our real native apps live in
+# ios-native/ and android/ and ARE tracked — only ignore Capacitor's build dirs.
+/ios/
 .capacitor/
 
 # TypeScript incremental build cache
