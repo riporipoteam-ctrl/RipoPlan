@@ -552,8 +552,8 @@ struct InputBar: View {
                     Button { onPickPhoto() } label: { Label("Photo Library", systemImage: "photo") }
                     Button { onPickFile() } label: { Label("Files", systemImage: "doc") }
                     Picker("Model", selection: $brain) {
-                        Label("Parable 6 · flagship", systemImage: "sparkles").tag("parable")
-                        Label("Kimi K2.6 · fast", systemImage: "bolt.fill").tag("kimi")
+                        Label("Parable 6 · max", systemImage: "sparkles").tag("parable")
+                        Label("Parable 6 Turbo · fast", systemImage: "bolt.fill").tag("kimi")
                     }
                 } label: {
                     Image(systemName: "plus")

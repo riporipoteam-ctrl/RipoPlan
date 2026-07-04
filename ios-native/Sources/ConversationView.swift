@@ -537,28 +537,42 @@ struct TypewriterText: View {
     var onDone: () -> Void = {}
     @State private var shown = 0
     @State private var finished = false
+    @State private var caretOn = true
 
     var body: some View {
         Group {
             if finished || !animate {
                 RichText(text: text)
             } else {
-                MD(text: String(text.prefix(shown)))
+                // Reveal word-by-word (smoother than char-by-char) with a soft
+                // fade on the newest chunk and a blinking caret while it types.
+                (Text(MD.attributed(String(text.prefix(shown))))
+                    + Text(caretOn ? " ▍" : "  ").foregroundColor(Theme.accent))
                     .font(.body)
                     .foregroundStyle(Theme.text)
-                    .textSelection(.enabled)
+                    .animation(.easeOut(duration: 0.12), value: shown)
             }
         }
         .task(id: text) {
             guard animate, !finished else { return }
-            while shown < text.count, !Task.isCancelled {
-                try? await Task.sleep(nanoseconds: 28_000_000)
-                shown = min(text.count, shown + 6)
+            let ns = text as NSString
+            while shown < ns.length, !Task.isCancelled {
+                // Advance to the end of the next word for a natural cadence.
+                var next = min(ns.length, shown + 3)
+                while next < ns.length, ns.character(at: next) != 32, ns.character(at: next) != 10 {
+                    next += 1
+                }
+                shown = next
                 onGrow()
+                try? await Task.sleep(nanoseconds: 34_000_000)
             }
-            if shown >= text.count {
-                finished = true
-                onDone()
+            if shown >= ns.length { finished = true; onDone() }
+        }
+        .task {
+            // Blink the caret while typing.
+            while !finished, !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 480_000_000)
+                caretOn.toggle()
             }
         }
     }

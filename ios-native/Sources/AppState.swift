@@ -26,7 +26,7 @@ final class AppState: ObservableObject {
     /// Every agent runs on the Hermes engine with the full tool set (browser,
     /// search, code, images + all skills). Used when creating agents.
     static let hermesTools: [String] = [
-        "web_search", "browse", "code", "generate_image", "find_images", "world_cup", "weather",
+        "web_search", "deep_search", "browse", "code", "generate_image", "find_images", "world_cup", "weather",
         "calculate", "currency", "crypto_price", "stock_price", "dictionary", "wiki",
         "translate", "datetime", "unit_convert", "qr_code", "build_app",
         "create_agent", "edit_agent", "delegate", "create_task", "create_rank", "assign_rank"
@@ -41,7 +41,7 @@ final class AppState: ObservableObject {
     /// Turn a list of executed tool names into activity rows for the message trail.
     static func stepActivities(_ steps: [String]) -> [[String: Any]] {
         let label: [String: String] = [
-            "web_search": "Searched the web", "browse": "Browsed a page", "code": "Ran code",
+            "web_search": "Searched the web", "deep_search": "Researched deeply", "browse": "Browsed a page", "code": "Ran code",
             "generate_image": "Generated an image", "find_images": "Found real photos",
             "world_cup": "Checked the World Cup", "weather": "Checked weather",
             "currency": "Converted currency", "crypto_price": "Checked crypto", "stock_price": "Checked markets",

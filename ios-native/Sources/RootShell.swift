@@ -128,7 +128,7 @@ struct RootShell: View {
                 HStack(spacing: 3) {
                     Image(systemName: brain == "parable" ? "sparkles" : "bolt.fill")
                         .font(.system(size: 8, weight: .bold))
-                    Text(brain == "parable" ? "Parable 6" : "Kimi K2.6")
+                    Text(brain == "parable" ? "Parable 6" : "Parable 6 Turbo")
                         .font(.system(size: 10, weight: .semibold))
                 }
                 .foregroundStyle(Theme.muted)

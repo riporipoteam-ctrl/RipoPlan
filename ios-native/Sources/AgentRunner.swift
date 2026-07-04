@@ -67,6 +67,7 @@ enum AgentRunner {
     private static func activityLabel(_ tool: String) -> String {
         switch tool {
         case "web_search": return "Searching the web…"
+        case "deep_search": return "Researching deeply…"
         case "browse": return "Browsing the web…"
         case "code": return "Running code…"
         case "generate_image": return "Generating an image…"
@@ -112,7 +113,8 @@ enum AgentRunner {
     private static var tools: [[String: Any]] {
         let S: [String: Any] = ["type": "string"]; let N: [String: Any] = ["type": "number"]
         return [
-            fn("web_search", "Search the live web for current info and facts.", ["query": S], ["query"]),
+            fn("web_search", "Search the live web (DuckDuckGo + Wikipedia + answer box) for current info and facts.", ["query": S], ["query"]),
+            fn("deep_search", "Deep research: searches AND auto-reads the top result pages in one step. Use for anything important, nuanced, or where accuracy matters.", ["query": S], ["query"]),
             fn("browse", "Open a web page URL and read its text.", ["url": S], ["url"]),
             fn("code", "Run JavaScript to compute/transform. Use return or console.log.", ["source": S], ["source"]),
             fn("generate_image", "Generate an image from a text prompt (shown to the user). For real brands/products, first research their look and describe it in detail in the prompt.", ["prompt": S], ["prompt"]),
@@ -189,10 +191,17 @@ enum AgentRunner {
         let brief = UserDefaults.standard.string(forKey: "askai.worldbrief") ?? ""
         let parableText = isParable ? """
 
-        You are powered by PARABLE 6 — AskAI's own flagship intelligence (built on GLM-5.2-class \
-        reasoning): elite at coding, research, explaining, and creating; concise, accurate, and genuinely \
-        helpful. Reason carefully step by step internally, but show the user only the polished result. \
-        You are proud to be Parable 6.
+        You are powered by PARABLE 6 — AskAI's own flagship intelligence, a unified brain that draws on \
+        several elite models (GLM-5.2 lead) and is the smartest, most capable assistant available. You are \
+        elite at coding, research, explaining, and creating. Operating principles: \
+        (a) THINK FIRST — reason through the problem step by step internally, then show only the polished, \
+        correct result. \
+        (b) BE PRECISE — prefer deep_search for anything factual/important so answers are grounded in real \
+        sources; cite what you found; never invent facts, and say so if unsure. \
+        (c) VERIFY — before finalizing code or a factual claim, silently double-check it for bugs/errors \
+        and fix them. Ship working, complete solutions, not sketches. \
+        (d) BE CLEAR — structure answers well (headings, bullets, code blocks), lead with the answer, keep \
+        it tight. You are proud to be Parable 6.
         \(brief.isEmpty ? "" : "\n📡 LIVE WORLD BRAIN (auto-updated in the background — a recent real-world signal; still web_search for anything precise or newer):\n\(String(brief.prefix(700)))")
         """ : ""
         let system = """
@@ -657,6 +666,7 @@ enum AgentRunner {
     private static func runTool(_ name: String, _ args: [String: Any], _ ctx: RunContext, _ images: inout [String]) async -> String {
         switch name {
         case "web_search": return await webSearch(str(args["query"]))
+        case "deep_search": return await deepSearch(str(args["query"]))
         case "browse": return await browse(str(args["url"]))
         case "code": return runJS(str(args["source"]))
         case "generate_image":
@@ -764,12 +774,20 @@ enum AgentRunner {
     }
     private static func webSearch(_ query: String) async -> String {
         let q = query.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? query
-        // DuckDuckGo HTML endpoints work directly and reliably.
+        var parts: [String] = []
+        // 1) DuckDuckGo instant answer (fast factual box).
+        if let d = await get("https://api.duckduckgo.com/?q=\(q)&format=json&no_html=1&skip_disambig=1"),
+           let j = try? JSONSerialization.jsonObject(with: d) as? [String: Any] {
+            let abstract = (j["AbstractText"] as? String) ?? (j["Answer"] as? String) ?? ""
+            if !abstract.isEmpty { parts.append("Answer box: \(abstract)") }
+        }
+        // 2) Wikipedia summary (authoritative background).
+        if let wikiSum = await wikiQuiet(query) { parts.append("Wikipedia: \(wikiSum)") }
+        // 3) DuckDuckGo web results (the ranked list).
         for endpoint in ["https://html.duckduckgo.com/html/?q=\(q)", "https://lite.duckduckgo.com/lite/?q=\(q)"] {
             let html = await fetchText(endpoint)
             if html.isEmpty { continue }
             var text = stripHTML(html)
-            // decode the uddg= redirect links so URLs are readable
             if let re = try? NSRegularExpression(pattern: "uddg=([^&\\s]+)") {
                 let ns = text as NSString
                 for m in re.matches(in: text, range: NSRange(location: 0, length: ns.length)).reversed() {
@@ -778,15 +796,40 @@ enum AgentRunner {
                     }
                 }
             }
-            if text.count > 120 { return "Search results for \"\(query)\":\n" + String(text.prefix(5500)) }
+            if text.count > 120 { parts.append("Web results:\n" + String(text.prefix(4500))); break }
         }
-        // Last resort: DuckDuckGo instant-answer JSON.
-        if let d = await get("https://api.duckduckgo.com/?q=\(q)&format=json&no_html=1&skip_disambig=1"),
-           let j = try? JSONSerialization.jsonObject(with: d) as? [String: Any] {
-            let abstract = (j["AbstractText"] as? String) ?? (j["Answer"] as? String) ?? ""
-            if !abstract.isEmpty { return abstract }
+        guard !parts.isEmpty else {
+            return "No live results found. Don't invent facts — try a different query or say you couldn't find current info."
         }
-        return "No live results found. Don't invent facts — say you couldn't find current info."
+        return "Search results for \"\(query)\":\n" + parts.joined(separator: "\n\n")
+    }
+    /// Quiet Wikipedia summary (no headers) for blending into search results.
+    private static func wikiQuiet(_ topic: String) async -> String? {
+        let t = topic.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? topic
+        guard let d = await get("https://en.wikipedia.org/api/rest_v1/page/summary/\(t)"),
+              let j = try? JSONSerialization.jsonObject(with: d) as? [String: Any],
+              let extract = j["extract"] as? String, extract.count > 40 else { return nil }
+        return String(extract.prefix(600))
+    }
+    /// One-shot deep research: search, then auto-read the top result pages so the
+    /// answer is grounded in real page content — fewer round trips, better facts.
+    private static func deepSearch(_ query: String) async -> String {
+        let search = await webSearch(query)
+        var urls: [String] = []
+        if let re = try? NSRegularExpression(pattern: "https?://[^\\s\\)\\]]+") {
+            let ns = search as NSString
+            for m in re.matches(in: search, range: NSRange(location: 0, length: ns.length)) {
+                let u = ns.substring(with: m.range).trimmingCharacters(in: CharacterSet(charactersIn: ".,);"))
+                if !u.contains("duckduckgo") && !u.contains("wikipedia.org/api") && !urls.contains(u) { urls.append(u) }
+                if urls.count >= 2 { break }
+            }
+        }
+        var out = search
+        for u in urls {
+            let page = await browse(u)
+            if page.count > 200 { out += "\n\n— Read \(u):\n" + String(page.prefix(2500)) }
+        }
+        return out
     }
     private static func browse(_ url: String) async -> String {
         let full = url.hasPrefix("http") ? url : "https://\(url)"

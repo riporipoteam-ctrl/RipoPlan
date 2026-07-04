@@ -92,13 +92,13 @@ struct SettingsView: View {
                             SectionHeader(title: "Intelligence")
                             Picker("Model", selection: $brain) {
                                 Text("Parable 6").tag("parable")
-                                Text("Kimi K2.6").tag("kimi")
+                                Text("Turbo").tag("kimi")
                             }
                             .pickerStyle(.segmented)
                             .onChange(of: brain) { _ in Haptic.selection() }
                             Text(brain == "parable"
-                                 ? "Parable 6 — AskAI's flagship, led by GLM-5.2. Elite at coding, research, explaining and creating, with a live world brain that updates in the background so it stays current. Rotates across several top models so it never stalls."
-                                 : "Kimi K2.6 — a leaner, faster brain for quick everyday answers.")
+                                 ? "Parable 6 — AskAI's flagship: a unified brain led by GLM-5.2 and backed by several elite models. Thinks first, verifies its work, researches deeply, and stays current via a live world brain. The smartest mode."
+                                 : "Parable 6 Turbo — a leaner, faster path for quick everyday answers.")
                                 .font(.caption).foregroundStyle(Theme.muted)
                         }
                         .card(radius: 16)
