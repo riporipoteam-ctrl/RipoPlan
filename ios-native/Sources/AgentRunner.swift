@@ -33,14 +33,15 @@ enum AgentRunner {
     // Two "brains", both hosted on the SAME NVIDIA key with automatic model
     // rotation (survives rate limits + single-model outages).
     //
-    // PARABLE 6 — our flagship: led by OpenAI's 120B open model for elite
-    // reasoning/coding/writing, backed by Kimi's agentic tool use and more.
+    // PARABLE 6 — our flagship: led by GLM-5.2 (z-ai, hosted on NVIDIA) for
+    // elite coding/reasoning, backed by gpt-oss-120b, Kimi's agentic tool use,
+    // and more. All verified live on the NVIDIA key + all support tool-calling.
     static let parableModels = [
+        "z-ai/glm-5.2",
         "openai/gpt-oss-120b",
         "moonshotai/kimi-k2.6",
         "qwen/qwen3-next-80b-a3b-instruct",
         "nvidia/llama-3.3-nemotron-super-49b-v1",
-        "meta/llama-3.1-70b-instruct",
     ]
     // KIMI K2.6 — leaner/faster path.
     static let kimiModels = [
@@ -52,12 +53,6 @@ enum AgentRunner {
     static var brain: String { UserDefaults.standard.string(forKey: "askai.brain") ?? "parable" }
     static var isParable: Bool { brain == "parable" }
     static var activeModels: [String] { isParable ? parableModels : kimiModels }
-
-    // GLM-4.6 (Zhipu / z.ai) — Parable 6's true flagship when a GLM key is set.
-    // z.ai is OpenAI-compatible; the key is loaded from app_config at runtime, so
-    // adding it later needs NO app rebuild.
-    static let glmModels = ["glm-4.6", "glm-4.5", "glm-4-flash"]
-    static var glmKey: String { UserDefaults.standard.string(forKey: "askai.glmkey") ?? "" }
 
     static var groqKey: String { UserDefaults.standard.string(forKey: "askai.groqkey") ?? "" }
     static var nvidiaKey: String { UserDefaults.standard.string(forKey: "askai.nvkey") ?? "" }
@@ -194,9 +189,10 @@ enum AgentRunner {
         let brief = UserDefaults.standard.string(forKey: "askai.worldbrief") ?? ""
         let parableText = isParable ? """
 
-        You are powered by PARABLE 6 — AskAI's own flagship intelligence: elite at coding, research, \
-        explaining, and creating; concise, accurate, and genuinely helpful. Reason carefully step by step \
-        internally, but show the user only the polished result. You are proud to be Parable 6.
+        You are powered by PARABLE 6 — AskAI's own flagship intelligence (built on GLM-5.2-class \
+        reasoning): elite at coding, research, explaining, and creating; concise, accurate, and genuinely \
+        helpful. Reason carefully step by step internally, but show the user only the polished result. \
+        You are proud to be Parable 6.
         \(brief.isEmpty ? "" : "\n📡 LIVE WORLD BRAIN (auto-updated in the background — a recent real-world signal; still web_search for anything precise or newer):\n\(String(brief.prefix(700)))")
         """ : ""
         let system = """
@@ -593,13 +589,8 @@ enum AgentRunner {
     /// Try the chosen provider; if it fails or returns nothing usable, automatically
     /// fall back to the other provider so an agent always answers.
     private static func chat(_ messages: [[String: Any]], tools: [[String: Any]]?) async -> [String: Any]? {
-        // 0) Parable 6 flagship: GLM-4.6 (Zhipu / z.ai) when a GLM key is present.
-        if isParable, !glmKey.isEmpty {
-            for model in glmModels {
-                if let m = await callGLM(model: model, messages: messages, tools: tools) { return m }
-            }
-        }
-        // 1) The selected brain's NVIDIA model lineup (survives rate limits + outages).
+        // 1) The selected brain's NVIDIA model lineup (Parable 6 leads with
+        //    GLM-5.2). Rotates on failure — survives rate limits + outages.
         let nv = nvidiaKey
         if !nv.isEmpty {
             for model in activeModels {
@@ -611,11 +602,6 @@ enum AgentRunner {
             if let m = await callGroq(messages: messages, tools: tools) { return m }
         }
         return nil
-    }
-    private static func callGLM(model: String, messages: [[String: Any]], tools: [[String: Any]]?) async -> [String: Any]? {
-        var body: [String: Any] = ["model": model, "messages": messages, "temperature": 0.5, "max_tokens": 8192]
-        if let tools { body["tools"] = tools; body["tool_choice"] = "auto" }
-        return await withRetry("https://api.z.ai/api/paas/v4/chat/completions", glmKey, body)
     }
 
     private static func callNvidia(model: String, key: String, messages: [[String: Any]], tools: [[String: Any]]?) async -> [String: Any]? {

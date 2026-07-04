@@ -97,7 +97,7 @@ struct SettingsView: View {
                             .pickerStyle(.segmented)
                             .onChange(of: brain) { _ in Haptic.selection() }
                             Text(brain == "parable"
-                                 ? "Parable 6 — AskAI's flagship. Elite at coding, research, explaining and creating, with a live world brain that updates in the background so it stays current. Rotates across several top models so it never stalls."
+                                 ? "Parable 6 — AskAI's flagship, led by GLM-5.2. Elite at coding, research, explaining and creating, with a live world brain that updates in the background so it stays current. Rotates across several top models so it never stalls."
                                  : "Kimi K2.6 — a leaner, faster brain for quick everyday answers.")
                                 .font(.caption).foregroundStyle(Theme.muted)
                         }

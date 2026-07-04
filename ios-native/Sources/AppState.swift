@@ -177,7 +177,6 @@ final class AppState: ObservableObject {
                 if let g = map["groq_api_key"], !g.isEmpty { UserDefaults.standard.set(g, forKey: "askai.groqkey") }
                 if let n = map["nvidia_api_key"], !n.isEmpty { UserDefaults.standard.set(n, forKey: "askai.nvkey") }
                 if let e = map["elevenlabs_api_key"], !e.isEmpty { UserDefaults.standard.set(e, forKey: "askai.elkey") }
-                if let z = map["glm_api_key"], !z.isEmpty { UserDefaults.standard.set(z, forKey: "askai.glmkey") }
                 return
             }
             try? await Task.sleep(nanoseconds: 700_000_000)
