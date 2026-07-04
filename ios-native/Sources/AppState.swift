@@ -354,6 +354,10 @@ final class AppState: ObservableObject {
                 if let agentId { row["primary_agent_id"] = agentId }
                 let rows: [ThreadRow] = try await Supa.shared.insert("threads", row)
                 tid = rows.first?.id
+                // Generate a clean AI title from the first message (background).
+                if let newId = tid, !content.isEmpty {
+                    Task { await self.generateTitle(newId, from: content) }
+                }
             } else {
                 try? await Supa.shared.update("threads?id=eq.\(tid!)", ["last_activity_at": isoNow()])
                 if agentId == nil {
@@ -954,6 +958,23 @@ final class AppState: ObservableObject {
     func renameThread(_ id: String, to title: String) async {
         try? await Supa.shared.update("threads?id=eq.\(id)", ["title": title])
         await loadThreads()
+    }
+    /// Re-run the last agent reply in a thread (Regenerate).
+    func regenerate(threadId: String) async {
+        let msgs = await messages(thread: threadId)
+        guard let last = msgs.last(where: { $0.sender_type == "agent" }),
+              let aid = last.agent_id ?? supervisor?.id, let ag = agent(aid) else { return }
+        try? await Supa.shared.update("messages?id=eq.\(last.id)",
+            ["content": "", "status": "thinking", "activities": [["label": "Regenerating…", "status": "running"]]])
+        runResponder(agent: ag, threadId: threadId, placeholderId: last.id)
+    }
+
+    /// AI-generated concise title for a freshly created chat.
+    private func generateTitle(_ id: String, from firstMessage: String) async {
+        guard let title = await AgentRunner.titleFor(firstMessage), !title.isEmpty else { return }
+        try? await Supa.shared.update("threads?id=eq.\(id)", ["title": title])
+        // Update the in-memory list + cache so the sidebar shows it right away.
+        if let i = threads.firstIndex(where: { $0.id == id }) { threads[i].title = title }
     }
     func deleteThread(_ id: String) async {
         try? await Supa.shared.delete("threads?id=eq.\(id)")

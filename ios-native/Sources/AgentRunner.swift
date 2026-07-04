@@ -214,13 +214,16 @@ enum AgentRunner {
         \(agent.description ?? "") \(agent.system_prompt ?? "")
         Today is \(today). Teammates: \(roster).\(parableText)
 
-        RULE 1 — ACT IMMEDIATELY. Never ask permission, never say "want me to search?", never stall. \
-        For ANY factual question — sports, news, prices, businesses, events, people, or anything that \
-        could have changed since your training — your FIRST move is web_search, before writing anything. \
-        When in doubt, search. Do the work in this turn, not a future one.
-        RULE 2 — GO DEEP. Chain tools: search, then browse the best 2-3 result pages, then answer with \
-        concrete facts (numbers, dates, names, sources). You may take many tool rounds — extended \
-        thinking is encouraged for hard tasks.
+        RULE 0 — MATCH EFFORT TO THE TASK. Don't over-think. For greetings, thanks, chit-chat, opinions, \
+        or simple questions you already know, reply DIRECTLY in one short turn with NO tools and no visible \
+        deliberation. Save the deep work for questions that actually need it.
+        RULE 1 — ACT WHEN IT MATTERS. Never ask permission or stall. For factual questions that could have \
+        changed since your training — sports, news, prices, businesses, events, people — your first move \
+        is web_search (or deep_search) before answering. But if you already know it or it's casual, just \
+        answer. Do the work in this turn, not a future one.
+        RULE 2 — GO DEEP ONLY WHEN NEEDED. For genuinely hard/important questions, chain tools: search, \
+        browse the best pages, then answer with concrete facts (numbers, dates, names, sources). For easy \
+        ones, keep it quick and to the point.
         RULE 3 — BUILD REQUESTS ALWAYS END WITH build_app. When asked for a website/app: research FAST — \
         at most 3 tool calls (ONE web_search, browse the best result, optionally ONE find_images) — then \
         you MUST call build_app in this same conversation. Ending a build request without calling \
@@ -849,6 +852,23 @@ enum AgentRunner {
         }
         return "Search results for \"\(query)\":\n" + parts.joined(separator: "\n\n")
     }
+    /// Generate a short, natural chat title (3–5 words) from the first message.
+    static func titleFor(_ message: String) async -> String? {
+        let msg = message.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard msg.count > 1 else { return nil }
+        let sys = "You write ultra-short chat titles. Given the user's first message, reply with ONLY a 2–5 word title (Title Case, no quotes, no punctuation at the end, no emoji). Nothing else."
+        guard let m = await chat([["role": "system", "content": sys],
+                                  ["role": "user", "content": String(msg.prefix(500))]], tools: nil),
+              var t = (m["content"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines), !t.isEmpty
+        else { return nil }
+        // Sanitize: strip quotes/markdown, cap length, drop any leaked reasoning.
+        t = t.replacingOccurrences(of: "\"", with: "").replacingOccurrences(of: "*", with: "")
+        t = t.components(separatedBy: "\n").first ?? t
+        let words = t.split(separator: " ").prefix(6)
+        let title = words.joined(separator: " ")
+        return title.count >= 2 ? String(title.prefix(60)) : nil
+    }
+
     /// Quiet Wikipedia summary (no headers) for blending into search results.
     private static func wikiQuiet(_ topic: String) async -> String? {
         let t = topic.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? topic

@@ -485,6 +485,11 @@ struct MessageBubble: View {
                         Label("Send again", systemImage: "arrow.clockwise")
                     }
                 }
+                if !isUser, message.status == "complete", let tid = message.thread_id {
+                    Button { Haptic.medium(); Task { await app.regenerate(threadId: tid) } } label: {
+                        Label("Regenerate", systemImage: "arrow.triangle.2.circlepath")
+                    }
+                }
             }
         }
         .fullScreenCover(isPresented: Binding(get: { viewerURL != nil }, set: { if !$0 { viewerURL = nil } })) {
@@ -516,6 +521,11 @@ struct MessageBubble: View {
             }
             ShareLink(item: message.content ?? "") {
                 Image(systemName: "square.and.arrow.up")
+            }
+            if let tid = message.thread_id {
+                Button { Haptic.medium(); Task { await app.regenerate(threadId: tid) } } label: {
+                    Image(systemName: "arrow.triangle.2.circlepath")
+                }
             }
         }
         .font(.system(size: 15))
