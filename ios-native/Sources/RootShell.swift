@@ -17,6 +17,8 @@ struct RootShell: View {
     @State private var showRenameChat = false
     @State private var renameChatDraft = ""
     @StateObject private var updater = UpdateChecker()
+    @AppStorage("askai.brain") private var brain = "parable"
+    @Environment(\.scenePhase) private var scenePhase
 
     /// Any chat (other than the open one) with an agent reply you haven't seen.
     private var hasUnread: Bool {
@@ -97,6 +99,9 @@ struct RootShell: View {
         .onChange(of: current) { _ in } // triggers ConversationView reload via binding
         .onAppear { applyScreenshotHook() }
         .task { await updater.check() }
+        .onChange(of: scenePhase) { phase in
+            if phase == .active { Task { await app.refreshWorldBrain() } }
+        }
     }
 
     // Gemini-style floating top bar: circular menu, center model selector pill,
@@ -116,9 +121,18 @@ struct RootShell: View {
                     }
             }
             Spacer(minLength: 0)
-            Text("AskAI")
-                .font(.system(size: 18, weight: .bold))
-                .foregroundStyle(Theme.text)
+            VStack(spacing: 0) {
+                Text("AskAI")
+                    .font(.system(size: 17, weight: .bold))
+                    .foregroundStyle(Theme.text)
+                HStack(spacing: 3) {
+                    Image(systemName: brain == "parable" ? "sparkles" : "bolt.fill")
+                        .font(.system(size: 8, weight: .bold))
+                    Text(brain == "parable" ? "Parable 6" : "Kimi K2.6")
+                        .font(.system(size: 10, weight: .semibold))
+                }
+                .foregroundStyle(Theme.muted)
+            }
             Spacer(minLength: 0)
             if current != nil {
                 // ChatGPT chat header: [new chat | ⋯] in one glass pill.

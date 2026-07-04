@@ -17,6 +17,7 @@ struct SettingsView: View {
     @State private var showWorkspace = false
     @State private var photoItem: PhotosPickerItem?
     @AppStorage("askai.voice.main") private var mainVoice = "21m00Tcm4TlvDq8ikWAM"
+    @AppStorage("askai.brain") private var brain = "parable"
     @StateObject private var updater = UpdateChecker()
     @State private var showUpdate = false
     @State private var checking = false
@@ -82,6 +83,22 @@ struct SettingsView: View {
                             .tint(Theme.accent)
                             .onChange(of: darkMode) { _ in Haptic.selection() }
                             Text("AskAI is light by default. Turn this on for a dark theme.")
+                                .font(.caption).foregroundStyle(Theme.muted)
+                        }
+                        .card(radius: 16)
+
+                        // Intelligence — Parable 6 vs Kimi
+                        VStack(alignment: .leading, spacing: 12) {
+                            SectionHeader(title: "Intelligence")
+                            Picker("Model", selection: $brain) {
+                                Text("Parable 6").tag("parable")
+                                Text("Kimi K2.6").tag("kimi")
+                            }
+                            .pickerStyle(.segmented)
+                            .onChange(of: brain) { _ in Haptic.selection() }
+                            Text(brain == "parable"
+                                 ? "Parable 6 — AskAI's flagship. Elite at coding, research, explaining and creating, with a live world brain that updates in the background so it stays current. Rotates across several top models so it never stalls."
+                                 : "Kimi K2.6 — a leaner, faster brain for quick everyday answers.")
                                 .font(.caption).foregroundStyle(Theme.muted)
                         }
                         .card(radius: 16)

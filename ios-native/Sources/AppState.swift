@@ -77,9 +77,13 @@ final class AppState: ObservableObject {
 
     func boot() async {
         booting = true; bootError = nil
-        // Kimi K2.6 is THE model — no selection anywhere.
+        // Provider stays NVIDIA-first; the *brain* (Parable 6 / Kimi) is user-picked.
         UserDefaults.standard.set("kimi", forKey: "askai.model")
+        if UserDefaults.standard.string(forKey: "askai.brain") == nil {
+            UserDefaults.standard.set("parable", forKey: "askai.brain")   // Parable 6 by default
+        }
         authed = Supa.shared.isAuthed
+        Task { await refreshWorldBrain() }   // warm the live world brain in the background
         if authed {
             await Supa.shared.refreshIfPossible()
             await loadAll()
@@ -173,10 +177,42 @@ final class AppState: ObservableObject {
                 if let g = map["groq_api_key"], !g.isEmpty { UserDefaults.standard.set(g, forKey: "askai.groqkey") }
                 if let n = map["nvidia_api_key"], !n.isEmpty { UserDefaults.standard.set(n, forKey: "askai.nvkey") }
                 if let e = map["elevenlabs_api_key"], !e.isEmpty { UserDefaults.standard.set(e, forKey: "askai.elkey") }
+                if let z = map["glm_api_key"], !z.isEmpty { UserDefaults.standard.set(z, forKey: "askai.glmkey") }
                 return
             }
             try? await Task.sleep(nanoseconds: 700_000_000)
         }
+    }
+
+    /// Parable 6's "real-time brain": pull current world/tech headlines from
+    /// keyless sources and cache them so Parable always has a fresh sense of
+    /// what's happening. Runs in the background on launch + when returning to
+    /// the app if stale (>3h). Best-effort — failures are silent.
+    func refreshWorldBrain() async {
+        let at = UserDefaults.standard.double(forKey: "askai.worldbrief.at")
+        if at > 0, Date().timeIntervalSince1970 - at < 3 * 3600 { return }   // still fresh
+        var bits: [String] = []
+        // Top tech/startup pulse — Hacker News (very reliable JSON).
+        if let u = URL(string: "https://hn.algolia.com/api/v1/search?tags=front_page&hitsPerPage=6"),
+           let (d, _) = try? await URLSession.shared.data(from: u),
+           let o = try? JSONSerialization.jsonObject(with: d) as? [String: Any],
+           let hits = o["hits"] as? [[String: Any]] {
+            let t = hits.compactMap { $0["title"] as? String }.prefix(5)
+            if !t.isEmpty { bits.append("Tech: " + t.joined(separator: " · ")) }
+        }
+        // General world headlines (keyless free mirror of top headlines).
+        if let u = URL(string: "https://saurav.tech/NewsAPI/top-headlines/category/general/us.json"),
+           let (d, _) = try? await URLSession.shared.data(from: u),
+           let o = try? JSONSerialization.jsonObject(with: d) as? [String: Any],
+           let arts = o["articles"] as? [[String: Any]] {
+            let t = arts.compactMap { $0["title"] as? String }.prefix(6)
+            if !t.isEmpty { bits.append("World: " + t.joined(separator: " · ")) }
+        }
+        guard !bits.isEmpty else { return }
+        let f = DateFormatter(); f.dateFormat = "MMM d, HH:mm"
+        let brief = "As of \(f.string(from: Date())):\n" + bits.joined(separator: "\n")
+        UserDefaults.standard.set(brief, forKey: "askai.worldbrief")
+        UserDefaults.standard.set(Date().timeIntervalSince1970, forKey: "askai.worldbrief.at")
     }
 
     /// True if we have at least one working model key.

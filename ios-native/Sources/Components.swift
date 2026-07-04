@@ -526,7 +526,7 @@ struct InputBar: View {
     var onPickFile: () -> Void
     var onVoice: (() -> Void)? = nil
 
-    @State private var showMenu = false
+    @AppStorage("askai.brain") private var brain = "parable"
     @FocusState private var focused: Bool
 
     var body: some View {
@@ -548,19 +548,21 @@ struct InputBar: View {
             // ChatGPT composer — one clean capsule: plain "+", the field, and a
             // circular send button that lights up when there's something to send.
             HStack(alignment: .bottom, spacing: 10) {
-                Button { Haptic.light(); showMenu = true } label: {
+                Menu {
+                    Button { onPickPhoto() } label: { Label("Photo Library", systemImage: "photo") }
+                    Button { onPickFile() } label: { Label("Files", systemImage: "doc") }
+                    Picker("Model", selection: $brain) {
+                        Label("Parable 6 · flagship", systemImage: "sparkles").tag("parable")
+                        Label("Kimi K2.6 · fast", systemImage: "bolt.fill").tag("kimi")
+                    }
+                } label: {
                     Image(systemName: "plus")
                         .font(.system(size: 20, weight: .medium))
                         .foregroundStyle(Theme.text)
                         .frame(width: 34, height: 34)
                         .contentShape(Circle())
                 }
-                .buttonStyle(.plain)
-                .confirmationDialog("Add attachment", isPresented: $showMenu, titleVisibility: .visible) {
-                    Button("Photo Library") { onPickPhoto() }
-                    Button("Files") { onPickFile() }
-                    Button("Cancel", role: .cancel) {}
-                }
+                .onChange(of: brain) { _ in Haptic.selection() }
 
                 TextField(placeholder, text: $text, axis: .vertical)
                     .focused($focused)
