@@ -6,7 +6,6 @@ import android.graphics.Bitmap
 import android.speech.RecognizerIntent
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import java.io.ByteArrayOutputStream
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -26,17 +25,36 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import gg.askai.android.data.AppState
-import gg.askai.android.data.Attachment
 import gg.askai.android.data.Msg
 import kotlinx.coroutines.launch
+import java.io.ByteArrayOutputStream
+
+/** Gemini-style rainbow spark colors for the AskAI star. */
+private val SparkColors = listOf(
+    Color(0xFF4285F4), Color(0xFF9B72CB), Color(0xFFD96570), Color(0xFFF2A60C)
+)
+private val CallBlue = Color(0xFFD3E3FD)
+
+@Composable
+private fun homeGradient(): Brush {
+    val light = Ask.ink.luminance() > 0.5f
+    return if (light)
+        Brush.verticalGradient(0f to Color(0xFFFCFCFD), 0.55f to Color(0xFFF4F7FC), 1f to Color(0xFFBFD9F2))
+    else
+        Brush.verticalGradient(0f to Color(0xFF0D0D0D), 0.6f to Color(0xFF0D0F14), 1f to Color(0xFF101C2E))
+}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -48,60 +66,48 @@ fun ChatScreen(app: AppState) {
     ModalNavigationDrawer(
         drawerState = drawer,
         drawerContent = {
-            ModalDrawerSheet(drawerContainerColor = Ask.ink, modifier = Modifier.fillMaxWidth(0.82f)) {
+            ModalDrawerSheet(drawerContainerColor = Ask.ink, modifier = Modifier.fillMaxWidth(0.88f)) {
                 Sidebar(app) { scope.launch { drawer.close() } }
             }
         }
     ) {
-        Scaffold(
-            containerColor = Ask.ink,
-            topBar = {
-                Column {
-                    Row(
-                        Modifier.fillMaxWidth().background(Ask.ink).padding(horizontal = 8.dp, vertical = 8.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        IconButton({ scope.launch { drawer.open() } }) {
-                            Icon(Icons.Default.Menu, "menu", tint = Ask.text)
-                        }
-                        Spacer(Modifier.weight(1f))
-                        Box {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                modifier = Modifier.clip(RoundedCornerShape(20.dp))
-                                    .border(1.dp, Ask.stroke, RoundedCornerShape(20.dp))
-                                    .background(Ask.ink2.copy(alpha = 0.6f))
-                                    .clickable { brainMenu = true }
-                                    .padding(horizontal = 14.dp, vertical = 7.dp)
-                            ) {
-                                Text("AskAI", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = Ask.text)
-                                Spacer(Modifier.width(6.dp))
-                                Text(if (app.brain == "turbo") "⚡ Turbo" else "✦ Parable 6",
-                                    fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = Ask.muted)
-                                Icon(Icons.Default.ArrowDropDown, "switch", tint = Ask.muted, modifier = Modifier.size(17.dp))
+        Box(Modifier.fillMaxSize().background(homeGradient())) {
+            Column(Modifier.fillMaxSize()) {
+                // Gemini-style floating top bar: round buttons + centered model title.
+                Row(
+                    Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    CircleButton(Icons.Default.Menu) { scope.launch { drawer.open() } }
+                    Spacer(Modifier.weight(1f))
+                    Box {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.clip(RoundedCornerShape(22.dp))
+                                .clickable { brainMenu = true }.padding(horizontal = 10.dp, vertical = 6.dp)
+                        ) {
+                            if (app.brain == "turbo") {
+                                Text("Turbo", fontWeight = FontWeight.Bold, fontSize = 20.sp, color = Ask.text)
+                                Text(" ⚡", fontSize = 20.sp, color = Ask.muted)
+                            } else {
+                                Text("Parable", fontWeight = FontWeight.Bold, fontSize = 20.sp, color = Ask.text)
+                                Text(" 6", fontSize = 20.sp, color = Ask.muted)
                             }
-                            DropdownMenu(brainMenu, { brainMenu = false }, modifier = Modifier.background(Ask.ink2)) {
-                                DropdownMenuItem(
-                                    text = { BrainMenuLabel("✦ Parable 6", "Deepest reasoning", app.brain == "parable") },
-                                    onClick = { app.selectBrain("parable"); brainMenu = false })
-                                DropdownMenuItem(
-                                    text = { BrainMenuLabel("⚡ Turbo", "Fast everyday answers", app.brain == "turbo") },
-                                    onClick = { app.selectBrain("turbo"); brainMenu = false })
-                            }
+                            Spacer(Modifier.width(2.dp))
+                            Icon(Icons.Default.KeyboardArrowDown, "switch", tint = Ask.muted, modifier = Modifier.size(22.dp))
                         }
-                        Spacer(Modifier.weight(1f))
-                        IconButton({ app.route = "call" }) {
-                            Icon(Icons.Default.GraphicEq, "voice call", tint = Ask.text)
-                        }
-                        IconButton({ app.openThread(null) }) {
-                            Icon(Icons.Default.Edit, "new", tint = Ask.text)
+                        DropdownMenu(brainMenu, { brainMenu = false }, modifier = Modifier.background(Ask.ink2)) {
+                            DropdownMenuItem(
+                                text = { BrainMenuLabel("✦ Parable 6", t("parable_menu_sub"), app.brain == "parable") },
+                                onClick = { app.selectBrain("parable"); brainMenu = false })
+                            DropdownMenuItem(
+                                text = { BrainMenuLabel("⚡ Turbo", t("turbo_menu_sub"), app.brain == "turbo") },
+                                onClick = { app.selectBrain("turbo"); brainMenu = false })
                         }
                     }
-                    Divider(color = Ask.stroke, thickness = 1.dp)
+                    Spacer(Modifier.weight(1f))
+                    CircleButton(Icons.Default.Edit) { app.openThread(null) }
                 }
-            }
-        ) { pad ->
-            Column(Modifier.padding(pad).fillMaxSize()) {
                 UpdateBanner(app)
                 MessageList(app, Modifier.weight(1f))
                 Composer(app)
@@ -111,33 +117,47 @@ fun ChatScreen(app: AppState) {
 }
 
 @Composable
+private fun CircleButton(icon: androidx.compose.ui.graphics.vector.ImageVector, onClick: () -> Unit) {
+    Box(
+        Modifier.size(46.dp).shadow(2.dp, CircleShape, spotColor = Color(0x22000000))
+            .clip(CircleShape).background(Ask.ink)
+            .border(1.dp, Ask.stroke, CircleShape)
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center
+    ) { Icon(icon, null, tint = Ask.text, modifier = Modifier.size(21.dp)) }
+}
+
+@Composable
 private fun UpdateBanner(app: AppState) {
     val u = app.update ?: return
     val ctx = LocalContext.current
     Row(
-        Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp)
-            .clip(RoundedCornerShape(14.dp)).background(Ask.accent).padding(horizontal = 14.dp, vertical = 10.dp),
+        Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 4.dp)
+            .shadow(4.dp, RoundedCornerShape(18.dp), spotColor = Color(0x22000000))
+            .clip(RoundedCornerShape(18.dp)).background(Ask.ink)
+            .padding(horizontal = 14.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Icon(Icons.Default.SystemUpdate, "update", tint = Ask.onAccent, modifier = Modifier.size(20.dp))
+        Icon(Icons.Default.SystemUpdate, "update", tint = Ask.text, modifier = Modifier.size(20.dp))
         Spacer(Modifier.width(10.dp))
         Column(Modifier.weight(1f)) {
-            Text("Update available — v${u.version}", color = Ask.onAccent, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+            Text(t("update_available").replace("%s", u.version), color = Ask.text, fontWeight = FontWeight.SemiBold, fontSize = 13.5.sp)
             val p = app.updateProgress
             Text(
-                if (p != null) "Downloading ${(p * 100).toInt()}%…" else "You have v${app.currentVersion}. Tap to install.",
-                color = Ask.onAccent.copy(alpha = 0.8f), fontSize = 12.sp
+                if (p != null) t("downloading").replace("%s", "${(p * 100).toInt()}")
+                else t("you_have").replace("%s", app.currentVersion),
+                color = Ask.muted, fontSize = 12.sp
             )
         }
         if (app.updateProgress == null) {
-            TextButton({ app.dismissUpdate() }) { Text("Later", color = Ask.onAccent.copy(alpha = 0.8f), fontSize = 13.sp) }
+            TextButton({ app.dismissUpdate() }) { Text(t("later"), color = Ask.muted, fontSize = 13.sp) }
             Button(
                 onClick = { app.installUpdate(ctx) },
-                colors = ButtonDefaults.buttonColors(containerColor = Ask.onAccent, contentColor = Ask.accent),
+                colors = ButtonDefaults.buttonColors(containerColor = Ask.accent, contentColor = Ask.onAccent),
                 contentPadding = PaddingValues(horizontal = 14.dp, vertical = 4.dp)
-            ) { Text("Update", fontWeight = FontWeight.Bold, fontSize = 13.sp) }
+            ) { Text(t("update"), fontWeight = FontWeight.Bold, fontSize = 13.sp) }
         } else {
-            CircularProgressIndicator(Modifier.size(20.dp), color = Ask.onAccent, strokeWidth = 2.dp)
+            CircularProgressIndicator(Modifier.size(20.dp), color = Ask.muted, strokeWidth = 2.dp)
         }
     }
 }
@@ -160,26 +180,20 @@ private fun MessageList(app: AppState, modifier: Modifier) {
         if (app.messages.isNotEmpty()) listState.animateScrollToItem(app.messages.size - 1)
     }
     if (app.messages.isEmpty()) {
+        // Gemini-style home: rainbow spark + personal greeting, nothing else.
         Column(
-            modifier.fillMaxSize().padding(horizontal = 24.dp),
+            modifier.fillMaxSize().padding(horizontal = 32.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center
         ) {
-            Box(Modifier.size(56.dp).clip(RoundedCornerShape(17.dp)).background(Ask.accent),
-                contentAlignment = Alignment.Center) {
-                Text("✦", fontSize = 26.sp, color = Ask.onAccent)
-            }
-            Spacer(Modifier.height(16.dp))
-            Text("How can I help?", color = Ask.text, fontSize = 24.sp, fontWeight = FontWeight.Bold)
-            Spacer(Modifier.height(6.dp))
-            Text("Ask anything — Parable 6 can search, build, see and create.",
-                color = Ask.muted, fontSize = 14.sp,
-                textAlign = androidx.compose.ui.text.style.TextAlign.Center)
-            Spacer(Modifier.height(24.dp))
-            SuggestChip("🌍  What's happening in the World Cup?") { app.send("What's happening in the World Cup today?") }
-            SuggestChip("🎨  Generate an image of a neon city") { app.send("Generate an image of a futuristic neon city at night") }
-            SuggestChip("🌐  Build me a website for a pizza shop") { app.send("Build me a modern website for a pizza shop") }
-            SuggestChip("💡  Give me a startup idea") { app.send("Give me one great startup idea and how to launch it") }
+            Text("✦", style = TextStyle(fontSize = 52.sp, brush = Brush.linearGradient(SparkColors)))
+            Spacer(Modifier.height(18.dp))
+            val name = app.displayName.trim().ifBlank { "you" }.split(" ").first()
+            Text(
+                t("greeting").replace("%s", name),
+                color = Ask.text, fontSize = 30.sp, fontWeight = FontWeight.Medium,
+                textAlign = androidx.compose.ui.text.style.TextAlign.Center
+            )
         }
     } else {
         LazyColumn(modifier.fillMaxSize(), state = listState, contentPadding = PaddingValues(16.dp)) {
@@ -192,32 +206,17 @@ private fun MessageList(app: AppState, modifier: Modifier) {
 }
 
 @Composable
-private fun SuggestChip(label: String, onClick: () -> Unit) {
-    Box(
-        Modifier.fillMaxWidth().padding(vertical = 4.dp)
-            .clip(RoundedCornerShape(16.dp))
-            .border(1.dp, Ask.stroke, RoundedCornerShape(16.dp))
-            .background(Ask.ink2.copy(alpha = 0.5f))
-            .clickable(onClick = onClick)
-            .padding(horizontal = 16.dp, vertical = 13.dp)
-    ) {
-        Text(label, color = Ask.text, fontSize = 14.5.sp)
-    }
-}
-
-@Composable
 private fun MessageRow(m: Msg, showRegen: Boolean, onRegen: () -> Unit) {
     val isUser = m.sender == "user"
     Row(Modifier.fillMaxWidth().padding(vertical = 6.dp),
         horizontalArrangement = if (isUser) Arrangement.End else Arrangement.Start) {
         if (!isUser) {
-            Box(Modifier.size(30.dp).clip(RoundedCornerShape(9.dp)).background(Ask.accent),
-                contentAlignment = Alignment.Center) { Text("✦", color = Ask.onAccent, fontSize = 14.sp) }
+            Text("✦", style = TextStyle(fontSize = 20.sp, brush = Brush.linearGradient(SparkColors)),
+                modifier = Modifier.padding(top = 2.dp))
             Spacer(Modifier.width(10.dp))
         }
         Column(horizontalAlignment = if (isUser) Alignment.End else Alignment.Start,
             modifier = Modifier.widthIn(max = 320.dp)) {
-            if (!isUser) Text("AskAI", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = Ask.muted)
             m.images.forEach { url ->
                 AsyncImage(url, "image", modifier = Modifier.padding(vertical = 4.dp)
                     .widthIn(max = 300.dp).clip(RoundedCornerShape(16.dp)))
@@ -226,11 +225,13 @@ private fun MessageRow(m: Msg, showRegen: Boolean, onRegen: () -> Unit) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     CircularProgressIndicator(Modifier.size(16.dp), color = Ask.muted, strokeWidth = 2.dp)
                     Spacer(Modifier.width(8.dp))
-                    Text(if (m.status == "thinking") "Thinking…" else m.status, color = Ask.muted, fontSize = 14.sp)
+                    Text(if (m.status == "thinking") t("thinking") else m.status, color = Ask.muted, fontSize = 14.sp)
                 }
             } else if (m.content.isNotEmpty()) {
                 if (isUser) {
-                    Box(Modifier.clip(RoundedCornerShape(20.dp)).background(Ask.ink2).padding(horizontal = 15.dp, vertical = 10.dp)) {
+                    Box(Modifier.shadow(2.dp, RoundedCornerShape(20.dp), spotColor = Color(0x14000000))
+                        .clip(RoundedCornerShape(20.dp)).background(Ask.ink)
+                        .padding(horizontal = 15.dp, vertical = 10.dp)) {
                         Text(m.content, color = Ask.text, fontSize = 16.sp)
                     }
                 } else {
@@ -241,7 +242,7 @@ private fun MessageRow(m: Msg, showRegen: Boolean, onRegen: () -> Unit) {
                             verticalAlignment = Alignment.CenterVertically) {
                             Icon(Icons.Default.Refresh, "regen", tint = Ask.muted, modifier = Modifier.size(15.dp))
                             Spacer(Modifier.width(4.dp))
-                            Text("Regenerate", color = Ask.muted, fontSize = 12.sp)
+                            Text(t("regenerate"), color = Ask.muted, fontSize = 12.sp)
                         }
                     }
                 }
@@ -284,12 +285,11 @@ private fun Composer(app: AppState) {
         runCatching {
             voice.launch(Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
                 putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-                putExtra(RecognizerIntent.EXTRA_PROMPT, "Speak to AskAI")
             })
         }
     }
 
-    Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp)) {
+    Column(Modifier.fillMaxWidth().padding(horizontal = 14.dp)) {
         if (app.pending.isNotEmpty() || app.uploading) {
             LazyRow(Modifier.fillMaxWidth().padding(bottom = 6.dp)) {
                 items(app.pending, key = { it.url }) { a ->
@@ -310,35 +310,40 @@ private fun Composer(app: AppState) {
                 }
             }
         }
+        // Gemini-style floating pill composer.
         Row(
-            Modifier.fillMaxWidth().padding(bottom = 12.dp)
-                .clip(RoundedCornerShape(28.dp))
-                .border(1.dp, Ask.stroke, RoundedCornerShape(28.dp))
-                .background(Ask.ink2.copy(alpha = 0.7f))
-                .padding(horizontal = 8.dp, vertical = 6.dp),
-            verticalAlignment = Alignment.Bottom
+            Modifier.fillMaxWidth().padding(bottom = 14.dp)
+                .shadow(10.dp, RoundedCornerShape(32.dp), spotColor = Color(0x33000000))
+                .clip(RoundedCornerShape(32.dp)).background(Ask.ink)
+                .padding(horizontal = 10.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically
         ) {
-            IconButton({ picker.launch("image/*") }, modifier = Modifier.size(38.dp)) {
-                Icon(Icons.Default.Add, "photo", tint = Ask.text, modifier = Modifier.size(23.dp))
+            IconButton({ picker.launch("image/*") }, modifier = Modifier.size(40.dp)) {
+                Icon(Icons.Default.Add, "photo", tint = Ask.text, modifier = Modifier.size(24.dp))
             }
-            IconButton({ camera.launch(null) }, modifier = Modifier.size(38.dp)) {
-                Icon(Icons.Default.PhotoCamera, "camera", tint = Ask.text, modifier = Modifier.size(21.dp))
+            IconButton({ camera.launch(null) }, modifier = Modifier.size(36.dp)) {
+                Icon(Icons.Default.PhotoCamera, "camera", tint = Ask.muted, modifier = Modifier.size(20.dp))
             }
             BasicComposerField(text, { text = it }, Modifier.weight(1f))
             val canSend = (text.isNotBlank() || app.pending.isNotEmpty()) && !app.sending
-            if (!canSend && !app.sending) {
-                IconButton({ startVoice() }, modifier = Modifier.size(38.dp)) {
-                    Icon(Icons.Default.Mic, "voice", tint = Ask.text, modifier = Modifier.size(22.dp))
-                }
+            IconButton({ startVoice() }, modifier = Modifier.size(38.dp)) {
+                Icon(Icons.Default.Mic, "dictate", tint = Ask.text, modifier = Modifier.size(22.dp))
             }
-            IconButton(
-                onClick = { if (canSend) { app.send(text); text = "" } },
-                enabled = canSend,
-                modifier = Modifier.size(38.dp).clip(CircleShape)
-                    .background(if (canSend) Ask.accent else Ask.muted.copy(alpha = 0.3f))
-            ) {
-                if (app.sending) CircularProgressIndicator(Modifier.size(18.dp), color = Ask.onAccent, strokeWidth = 2.dp)
-                else Icon(Icons.Default.ArrowUpward, "send", tint = Ask.onAccent, modifier = Modifier.size(18.dp))
+            Spacer(Modifier.width(2.dp))
+            if (app.sending) {
+                Box(Modifier.size(42.dp).clip(CircleShape).background(CallBlue), contentAlignment = Alignment.Center) {
+                    CircularProgressIndicator(Modifier.size(18.dp), color = Color(0xFF1A1C1E), strokeWidth = 2.dp)
+                }
+            } else if (canSend) {
+                Box(Modifier.size(42.dp).clip(CircleShape).background(Ask.accent)
+                    .clickable { app.send(text); text = "" }, contentAlignment = Alignment.Center) {
+                    Icon(Icons.Default.ArrowUpward, "send", tint = Ask.onAccent, modifier = Modifier.size(20.dp))
+                }
+            } else {
+                Box(Modifier.size(42.dp).clip(CircleShape).background(CallBlue)
+                    .clickable { app.route = "call" }, contentAlignment = Alignment.Center) {
+                    Icon(Icons.Default.GraphicEq, "voice mode", tint = Color(0xFF1A1C1E), modifier = Modifier.size(20.dp))
+                }
             }
         }
     }
@@ -348,12 +353,12 @@ private fun Composer(app: AppState) {
 private fun BasicComposerField(value: String, onChange: (String) -> Unit, modifier: Modifier) {
     androidx.compose.foundation.text.BasicTextField(
         value = value, onValueChange = onChange,
-        modifier = modifier.padding(vertical = 10.dp, horizontal = 4.dp),
-        textStyle = androidx.compose.ui.text.TextStyle(color = Ask.text, fontSize = 16.sp),
+        modifier = modifier.padding(vertical = 10.dp, horizontal = 6.dp),
+        textStyle = TextStyle(color = Ask.text, fontSize = 16.5.sp),
         cursorBrush = androidx.compose.ui.graphics.SolidColor(Ask.text),
         keyboardOptions = KeyboardOptions.Default,
         decorationBox = { inner ->
-            if (value.isEmpty()) Text("Ask AskAI", color = Ask.muted, fontSize = 16.sp)
+            if (value.isEmpty()) Text(t("ask"), color = Ask.muted, fontSize = 16.5.sp)
             inner()
         }
     )
@@ -361,44 +366,84 @@ private fun BasicComposerField(value: String, onChange: (String) -> Unit, modifi
 
 @Composable
 private fun Sidebar(app: AppState, close: () -> Unit) {
-    Column(Modifier.fillMaxSize().background(Ask.ink).padding(top = 24.dp)) {
-        Text("AskAI", fontSize = 28.sp, fontWeight = FontWeight.Bold, color = Ask.text,
-            modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp))
-
-        NavRow(Icons.Default.Add, "New chat") { app.openThread(null); close() }
-        NavRow(Icons.Default.GraphicEq, "Voice call") { app.route = "call"; close() }
-        NavRow(Icons.Default.SmartToy, "Agents") { app.route = "agents"; close() }
-        NavRow(Icons.Default.Tag, "Channels") { app.route = "channels"; close() }
-        NavRow(Icons.Default.WorkOutline, "Jobs") { app.route = "jobs"; close() }
-        NavRow(Icons.Default.MenuBook, "Knowledge") { app.route = "knowledge"; close() }
-        NavRow(Icons.Default.Apps, "Apps") { app.route = "apps"; close() }
-        NavRow(Icons.Default.Settings, "Settings") { app.route = "settings"; close() }
-
-        Text("Recents", fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = Ask.muted,
-            modifier = Modifier.padding(horizontal = 20.dp, vertical = 10.dp))
+    var query by remember { mutableStateOf("") }
+    var searching by remember { mutableStateOf(false) }
+    Column(Modifier.fillMaxSize().background(Ask.ink).padding(top = 18.dp)) {
+        Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically) {
+            Text("AskAI", fontSize = 26.sp, fontWeight = FontWeight.Bold, color = Ask.text)
+            Spacer(Modifier.weight(1f))
+            Box(Modifier.size(40.dp).clip(CircleShape).background(Ask.ink2).clickable(onClick = close),
+                contentAlignment = Alignment.Center) {
+                Icon(Icons.Default.Close, "close", tint = Ask.text, modifier = Modifier.size(19.dp))
+            }
+        }
+        Spacer(Modifier.height(8.dp))
+        // Highlighted "New chat" pill, Gemini-style.
+        Row(Modifier.padding(horizontal = 14.dp).fillMaxWidth()
+            .clip(RoundedCornerShape(26.dp)).background(Ask.ink2)
+            .clickable { app.openThread(null); close() }.padding(horizontal = 16.dp, vertical = 14.dp),
+            verticalAlignment = Alignment.CenterVertically) {
+            Icon(Icons.Default.Edit, null, tint = Ask.text, modifier = Modifier.size(19.dp))
+            Spacer(Modifier.width(12.dp))
+            Text(t("new_chat"), color = Ask.text, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+        }
+        Spacer(Modifier.height(4.dp))
+        if (searching) {
+            OutlinedTextField(
+                query, { query = it }, singleLine = true,
+                placeholder = { Text(t("search_chats"), color = Ask.muted, fontSize = 15.sp) },
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 4.dp),
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedTextColor = Ask.text, unfocusedTextColor = Ask.text,
+                    focusedBorderColor = Ask.stroke, unfocusedBorderColor = Ask.stroke
+                )
+            )
+        } else {
+            NavRow(Icons.Default.Search, t("search_chats")) { searching = true }
+        }
+        NavRow(Icons.Default.GraphicEq, t("voice_call")) { app.route = "call"; close() }
+        NavRow(Icons.Default.SmartToy, t("agents")) { app.route = "agents"; close() }
+        NavRow(Icons.Default.Apps, t("apps")) { app.route = "apps"; close() }
+        Text(t("workspace"), fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = Ask.muted,
+            modifier = Modifier.padding(horizontal = 22.dp).padding(top = 12.dp, bottom = 2.dp))
+        NavRow(Icons.Default.Tag, t("channels")) { app.route = "channels"; close() }
+        NavRow(Icons.Default.WorkOutline, t("jobs")) { app.route = "jobs"; close() }
+        NavRow(Icons.Default.MenuBook, t("knowledge")) { app.route = "knowledge"; close() }
+        Text(t("recent"), fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = Ask.muted,
+            modifier = Modifier.padding(horizontal = 22.dp).padding(top = 12.dp, bottom = 2.dp))
+        val shown = if (query.isBlank()) app.threads else app.threads.filter { it.title.contains(query, ignoreCase = true) }
         LazyColumn(Modifier.weight(1f), contentPadding = PaddingValues(horizontal = 10.dp)) {
-            items(app.threads, key = { it.id }) { t ->
-                Text(t.title, color = Ask.text, fontSize = 16.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
+            items(shown, key = { it.id }) { th ->
+                Text(th.title, color = Ask.text, fontSize = 16.sp, fontWeight = FontWeight.Medium,
+                    maxLines = 1, overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.fillMaxWidth().padding(vertical = 1.dp)
                         .clip(RoundedCornerShape(12.dp))
-                        .background(if (app.currentThread == t.id) Ask.ink2 else Color.Transparent)
-                        .clickable { app.openThread(t.id); close() }
+                        .background(if (app.currentThread == th.id) Ask.ink2 else Color.Transparent)
+                        .clickable { app.openThread(th.id); close() }
                         .padding(horizontal = 12.dp, vertical = 12.dp))
             }
         }
-        Divider(color = Ask.stroke)
-        Row(Modifier.fillMaxWidth().clickable { app.signOut() }.padding(20.dp),
+        // Bottom bar: avatar + name + settings gear, like Gemini.
+        Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
             verticalAlignment = Alignment.CenterVertically) {
-            Icon(Icons.AutoMirrored.Filled.Logout, "out", tint = Ask.muted)
+            Box(Modifier.size(36.dp).clip(CircleShape).background(Ask.ink3), contentAlignment = Alignment.Center) {
+                Text(app.displayName.trim().take(1).uppercase().ifBlank { "U" },
+                    color = Ask.text, fontWeight = FontWeight.Bold, fontSize = 15.sp)
+            }
             Spacer(Modifier.width(10.dp))
-            Text("Sign out (${app.displayName})", color = Ask.muted)
+            Text(app.displayName, color = Ask.text, fontSize = 16.sp, fontWeight = FontWeight.SemiBold,
+                maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+            IconButton({ app.route = "settings"; close() }) {
+                Icon(Icons.Default.Settings, t("settings"), tint = Ask.text, modifier = Modifier.size(22.dp))
+            }
         }
     }
 }
 
 @Composable
 private fun NavRow(icon: androidx.compose.ui.graphics.vector.ImageVector, label: String, onClick: () -> Unit) {
-    Row(Modifier.fillMaxWidth().clickable(onClick = onClick).padding(horizontal = 20.dp, vertical = 12.dp),
+    Row(Modifier.fillMaxWidth().clickable(onClick = onClick).padding(horizontal = 22.dp, vertical = 13.dp),
         verticalAlignment = Alignment.CenterVertically) {
         Icon(icon, label, tint = Ask.text, modifier = Modifier.size(20.dp))
         Spacer(Modifier.width(14.dp))

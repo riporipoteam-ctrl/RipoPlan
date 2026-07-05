@@ -29,6 +29,7 @@ object AgentRunner {
     var workspaceId: String? = null
     var worldBrief: String = ""
     var instructions: String = ""
+    var language: String = "en"           // "en" | "bs" — reply language
 
     private val parableModels = listOf(
         "z-ai/glm-5.2", "openai/gpt-oss-120b", "moonshotai/kimi-k2.6",
@@ -100,6 +101,8 @@ object AgentRunner {
             ${if (worldBrief.isNotEmpty()) "\n📡 LIVE WORLD BRAIN (background signal; still search for anything precise):\n${worldBrief.take(600)}" else ""}
         """.trimIndent() else ""
         val custom = if (instructions.isNotBlank()) "\nUser custom instructions — always follow: ${instructions.take(800)}" else ""
+        val langRule = if (language == "bs")
+            "\nIMPORTANT: The user's app language is Bosnian. ALWAYS write your entire reply in Bosnian (bosanski jezik), no matter what language the user writes in." else ""
         val system = """
             You are AskAI, the user's AI assistant. Today is $today. $brainTxt
             Match effort to the task: greetings/thanks/simple questions get a short direct reply with NO
@@ -108,7 +111,7 @@ object AgentRunner {
             at most ONE search, then you MUST call build_app with one long self-contained HTML file (modern
             CSS, gradient hero, animations, responsive, real content, images via
             https://image.pollinations.ai/prompt/{desc}?width=800&height=500, sticky nav). Never stall.
-            If a message has [Uploaded image: URL], call view_image on it first. Answer in clean Markdown.$custom
+            If a message has [Uploaded image: URL], call view_image on it first. Answer in clean Markdown.$custom$langRule
         """.trimIndent()
 
         val msgs = JSONArray().put(JSONObject().put("role", "system").put("content", system))
@@ -176,7 +179,8 @@ object AgentRunner {
         if (firstMsg.isBlank()) return@withContext null
         val m = JSONArray()
             .put(JSONObject().put("role", "system").put("content",
-                "Give a 2-5 word title for this chat. Title Case, no quotes, no punctuation at the end."))
+                "Give a 2-5 word title for this chat. Title Case, no quotes, no punctuation at the end." +
+                if (language == "bs") " Write the title in Bosnian." else ""))
             .put(JSONObject().put("role", "user").put("content", firstMsg.take(500)))
         val t = chat(m, null)?.optString("content", "")?.trim()
             ?.replace("\"", "")?.replace(Regex("[.]+$"), "")?.trim()

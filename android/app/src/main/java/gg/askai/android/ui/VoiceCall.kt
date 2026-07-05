@@ -52,13 +52,13 @@ fun VoiceCallScreen(app: AppState, onBack: () -> Unit) {
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
     var phase by remember { mutableStateOf("idle") }        // idle|listening|thinking|speaking
-    var caption by remember { mutableStateOf("Tap to start a live conversation") }
+    var caption by remember { mutableStateOf(tr(app.language, "tap_to_start")) }
     var active by remember { mutableStateOf(false) }
     var granted by remember {
         mutableStateOf(ContextCompat.checkSelfPermission(ctx, Manifest.permission.RECORD_AUDIO)
                 == PackageManager.PERMISSION_GRANTED)
     }
-    val session = remember { VoiceSession(ctx, scope, { phase = it }, { caption = it }) }
+    val session = remember { VoiceSession(ctx, scope, app.language, { phase = it }, { caption = it }) }
     DisposableEffect(Unit) { session.init(); onDispose { session.release() } }
 
     val permLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { ok ->
@@ -75,7 +75,7 @@ fun VoiceCallScreen(app: AppState, onBack: () -> Unit) {
         containerColor = Ask.ink,
         topBar = {
             TopAppBar(
-                title = { Text("Voice call", color = Ask.text, fontWeight = FontWeight.Bold) },
+                title = { Text(t("voice_call"), color = Ask.text, fontWeight = FontWeight.Bold) },
                 navigationIcon = { IconButton(onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "back", tint = Ask.text) } },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = Ask.ink)
             )
@@ -92,8 +92,8 @@ fun VoiceCallScreen(app: AppState, onBack: () -> Unit) {
             Spacer(Modifier.height(28.dp))
             Text(
                 when (phase) {
-                    "listening" -> "Listening…"; "thinking" -> "Thinking…"
-                    "speaking" -> "Speaking…"; else -> if (active) "Connecting…" else "Ready"
+                    "listening" -> t("listening"); "thinking" -> t("thinking")
+                    "speaking" -> t("speaking"); else -> if (active) t("connecting") else t("ready")
                 },
                 color = Ask.text, fontSize = 20.sp, fontWeight = FontWeight.SemiBold
             )
@@ -111,7 +111,7 @@ fun VoiceCallScreen(app: AppState, onBack: () -> Unit) {
             ) {
                 Icon(if (active) Icons.Default.CallEnd else Icons.Default.Call, "toggle")
                 Spacer(Modifier.width(10.dp))
-                Text(if (active) "End call" else "Start call", fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                Text(if (active) t("end_call") else t("start_call"), fontWeight = FontWeight.Bold, fontSize = 16.sp)
             }
         }
     }
@@ -144,6 +144,7 @@ private fun VoiceOrb(phase: String) {
 private class VoiceSession(
     private val ctx: Context,
     private val scope: CoroutineScope,
+    private val lang: String,
     private val onPhase: (String) -> Unit,
     private val onCaption: (String) -> Unit,
 ) {
@@ -154,22 +155,26 @@ private class VoiceSession(
     private val main = Handler(Looper.getMainLooper())
 
     fun init() {
-        tts = TextToSpeech(ctx) { status -> if (status == TextToSpeech.SUCCESS) tts?.language = Locale.US }
+        tts = TextToSpeech(ctx) { status ->
+            if (status == TextToSpeech.SUCCESS)
+                tts?.language = if (lang == "bs") Locale("bs", "BA") else Locale.US
+        }
         if (SpeechRecognizer.isRecognitionAvailable(ctx)) {
             sr = SpeechRecognizer.createSpeechRecognizer(ctx).also { it.setRecognitionListener(listener) }
         }
     }
 
     fun start() { active = true; listen() }
-    fun stop() { active = false; main.post { runCatching { sr?.cancel() } }; tts?.stop(); onPhase("idle"); onCaption("Tap to talk again") }
+    fun stop() { active = false; main.post { runCatching { sr?.cancel() } }; tts?.stop(); onPhase("idle"); onCaption(tr(lang, "tap_again")) }
     fun release() { active = false; main.post { runCatching { sr?.destroy() } }; tts?.stop(); tts?.shutdown() }
 
     private fun listen() {
-        onPhase("listening"); onCaption("Listening…")
+        onPhase("listening"); onCaption(tr(lang, "listening"))
         val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
             putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
             putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
-            putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.getDefault())
+            if (lang == "bs") putExtra(RecognizerIntent.EXTRA_LANGUAGE, "bs-BA")
+            else putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.getDefault())
         }
         main.post { runCatching { sr?.startListening(intent) } }
     }

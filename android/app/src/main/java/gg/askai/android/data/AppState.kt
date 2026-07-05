@@ -37,6 +37,8 @@ class AppState : ViewModel() {
     var instructions by mutableStateOf(Supa.getPref("instructions", ""))
     // Appearance: "light" (default) | "dark" | "system"
     var theme by mutableStateOf(Supa.getPref("theme", "light"))
+    // Language: "en" (default) | "bs" — translates the UI and AI replies
+    var language by mutableStateOf(Supa.getPref("language", "en"))
 
     val threads = mutableStateListOf<Thread>()
     val messages = mutableStateListOf<Msg>()
@@ -90,25 +92,27 @@ class AppState : ViewModel() {
     fun signIn(email: String, password: String, onErr: (String) -> Unit) {
         viewModelScope.launch {
             if (Supa.signIn(email, password)) { authed = true; loadAll() }
-            else onErr("Wrong email or password.")
+            else onErr(gg.askai.android.ui.tr(language, "auth_err_login"))
         }
     }
     fun signUp(email: String, password: String, onErr: (String) -> Unit) {
         viewModelScope.launch {
             if (Supa.signUp(email, password)) { authed = true; loadAll() }
-            else onErr("Couldn't create the account.")
+            else onErr(gg.askai.android.ui.tr(language, "auth_err_signup"))
         }
     }
     fun signOut() { Supa.signOut(); authed = false; route = "chat"; threads.clear(); messages.clear(); apps.clear() }
 
     fun selectBrain(b: String) { brain = b; Supa.setPref("brain", b); AgentRunner.brain = b }
     fun selectTheme(t: String) { theme = t; Supa.setPref("theme", t) }
+    fun selectLanguage(l: String) { language = l; Supa.setPref("language", l); AgentRunner.language = l }
     fun saveInstructions(v: String) { instructions = v; Supa.setPref("instructions", v); AgentRunner.instructions = v }
 
     private suspend fun loadAll() {
         AgentRunner.loadKeys()
         AgentRunner.brain = brain
         AgentRunner.instructions = instructions
+        AgentRunner.language = language
         val uid = Supa.userId ?: return
         val profs = Supa.select("profiles?id=eq.$uid&select=*&limit=1")
         profs.optJSONObject(0)?.let { displayName = it.optString("display_name", "You") }

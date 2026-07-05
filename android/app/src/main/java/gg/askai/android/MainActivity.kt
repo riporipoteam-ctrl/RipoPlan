@@ -24,6 +24,8 @@ import gg.askai.android.ui.SettingsScreen
 import gg.askai.android.ui.AppsScreen
 import gg.askai.android.ui.AgentsScreen
 import gg.askai.android.ui.ListScreen
+import gg.askai.android.ui.LocalLang
+import gg.askai.android.ui.t
 import gg.askai.android.ui.VoiceCallScreen
 import gg.askai.android.ui.WorldCupIntro
 
@@ -33,6 +35,7 @@ class MainActivity : ComponentActivity() {
         Supa.init(applicationContext)
         setContent {
             val app: AppState = viewModel()
+            androidx.compose.runtime.CompositionLocalProvider(LocalLang provides app.language) {
             AskAITheme(mode = app.theme) {
                 Surface(color = Ask.ink) {
                     LaunchedEffect(Unit) { app.boot() }
@@ -43,13 +46,14 @@ class MainActivity : ComponentActivity() {
                         app.route == "settings" -> SettingsScreen(app) { app.route = "chat" }
                         app.route == "apps" -> AppsScreen(app) { app.route = "chat" }
                         app.route == "agents" -> AgentsScreen(app) { app.route = "chat" }
-                        app.route == "channels" -> ListScreen("Channels", "#️⃣", "Team channels will appear here.", app.channels, { app.loadChannels() }) { app.route = "chat" }
-                        app.route == "jobs" -> ListScreen("Jobs", "💼", "Background jobs and tasks will appear here.", app.jobs, { app.loadJobs() }) { app.route = "chat" }
-                        app.route == "knowledge" -> ListScreen("Knowledge", "📄", "Your knowledge base documents will appear here.", app.knowledge, { app.loadKnowledge() }) { app.route = "chat" }
+                        app.route == "channels" -> ListScreen(t("channels"), "#️⃣", t("channels_line"), app.channels, { app.loadChannels() }) { app.route = "chat" }
+                        app.route == "jobs" -> ListScreen(t("jobs"), "💼", t("jobs_line"), app.jobs, { app.loadJobs() }) { app.route = "chat" }
+                        app.route == "knowledge" -> ListScreen(t("knowledge"), "📄", t("knowledge_line"), app.knowledge, { app.loadKnowledge() }) { app.route = "chat" }
                         app.route == "call" -> VoiceCallScreen(app) { app.route = "chat" }
                         else -> ChatScreen(app)
                     }
                 }
+            }
             }
         }
     }
@@ -87,10 +91,10 @@ private fun AuthScreen(app: AppState) {
         Text("Your team of AI agents · Parable 6", fontSize = 13.sp, color = Ask.muted)
         Spacer(Modifier.height(28.dp))
 
-        OutlinedTextField(email, { email = it }, label = { Text("Email") },
+        OutlinedTextField(email, { email = it }, label = { Text(t("email")) },
             singleLine = true, modifier = Modifier.fillMaxWidth())
         Spacer(Modifier.height(10.dp))
-        OutlinedTextField(password, { password = it }, label = { Text("Password") },
+        OutlinedTextField(password, { password = it }, label = { Text(t("password")) },
             singleLine = true, visualTransformation = PasswordVisualTransformation(),
             modifier = Modifier.fillMaxWidth())
 
@@ -108,11 +112,11 @@ private fun AuthScreen(app: AppState) {
             modifier = Modifier.fillMaxWidth().height(52.dp)
         ) {
             if (busy) CircularProgressIndicator(color = Ask.onAccent, strokeWidth = 2.dp, modifier = Modifier.size(20.dp))
-            else Text(if (isSignUp) "Create account" else "Sign in", fontWeight = FontWeight.Bold)
+            else Text(if (isSignUp) t("create_account") else t("sign_in"), fontWeight = FontWeight.Bold)
         }
         Spacer(Modifier.height(14.dp))
         TextButton({ isSignUp = !isSignUp }) {
-            Text(if (isSignUp) "Have an account? Sign in" else "New here? Create an account", color = Ask.muted)
+            Text(if (isSignUp) t("have_account") else t("new_here"), color = Ask.muted)
         }
     }
 }

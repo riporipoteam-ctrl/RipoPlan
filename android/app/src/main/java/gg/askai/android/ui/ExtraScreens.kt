@@ -4,6 +4,8 @@ import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -37,40 +39,48 @@ fun SettingsScreen(app: AppState, onBack: () -> Unit) {
         containerColor = Ask.ink,
         topBar = {
             TopAppBar(
-                title = { Text("Settings", color = Ask.text, fontWeight = FontWeight.Bold) },
+                title = { Text(t("settings"), color = Ask.text, fontWeight = FontWeight.Bold) },
                 navigationIcon = { IconButton(onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "back", tint = Ask.text) } },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = Ask.ink)
             )
         }
     ) { pad ->
-        Column(Modifier.padding(pad).padding(20.dp)) {
-            Text("Account", fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = Ask.muted)
+        Column(Modifier.padding(pad).padding(20.dp).verticalScroll(rememberScrollState())) {
+            Text(t("account"), fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = Ask.muted)
             Spacer(Modifier.height(6.dp))
             Text(app.displayName, color = Ask.text, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
             gg.askai.android.data.Supa.email?.let { Text(it, color = Ask.muted, fontSize = 13.sp) }
 
             Spacer(Modifier.height(24.dp))
-            Text("Model", fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = Ask.muted)
+            Text(t("model"), fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = Ask.muted)
             Spacer(Modifier.height(8.dp))
-            BrainOption("✦  Parable 6", "Flagship — deepest reasoning & research", app.brain == "parable") { app.selectBrain("parable") }
+            BrainOption("✦  Parable 6", t("parable_sub"), app.brain == "parable") { app.selectBrain("parable") }
             Spacer(Modifier.height(8.dp))
-            BrainOption("⚡  Turbo", "Faster answers for everyday tasks", app.brain == "turbo") { app.selectBrain("turbo") }
+            BrainOption("⚡  Turbo", t("turbo_sub"), app.brain == "turbo") { app.selectBrain("turbo") }
 
             Spacer(Modifier.height(24.dp))
-            Text("Appearance", fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = Ask.muted)
+            Text(t("appearance"), fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = Ask.muted)
             Spacer(Modifier.height(8.dp))
             Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(Ask.ink2).padding(4.dp)) {
-                ThemeChip("☀️ Light", app.theme == "light", Modifier.weight(1f)) { app.selectTheme("light") }
-                ThemeChip("🌙 Dark", app.theme == "dark", Modifier.weight(1f)) { app.selectTheme("dark") }
-                ThemeChip("📱 Auto", app.theme == "system", Modifier.weight(1f)) { app.selectTheme("system") }
+                ThemeChip(t("light"), app.theme == "light", Modifier.weight(1f)) { app.selectTheme("light") }
+                ThemeChip(t("dark"), app.theme == "dark", Modifier.weight(1f)) { app.selectTheme("dark") }
+                ThemeChip(t("auto"), app.theme == "system", Modifier.weight(1f)) { app.selectTheme("system") }
             }
 
             Spacer(Modifier.height(24.dp))
-            Text("Custom instructions", fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = Ask.muted)
+            Text(t("language"), fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = Ask.muted)
+            Spacer(Modifier.height(8.dp))
+            Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(Ask.ink2).padding(4.dp)) {
+                ThemeChip("🇬🇧 English", app.language == "en", Modifier.weight(1f)) { app.selectLanguage("en") }
+                ThemeChip("🇧🇦 Bosanski", app.language == "bs", Modifier.weight(1f)) { app.selectLanguage("bs") }
+            }
+
+            Spacer(Modifier.height(24.dp))
+            Text(t("custom_instructions"), fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = Ask.muted)
             Spacer(Modifier.height(8.dp))
             OutlinedTextField(
                 instr, { instr = it },
-                placeholder = { Text("How should Parable 6 respond? (tone, style, what you're working on…)", color = Ask.muted) },
+                placeholder = { Text(t("instructions_hint"), color = Ask.muted) },
                 modifier = Modifier.fillMaxWidth().heightIn(min = 110.dp),
                 colors = OutlinedTextFieldDefaults.colors(
                     focusedTextColor = Ask.text, unfocusedTextColor = Ask.text,
@@ -82,10 +92,10 @@ fun SettingsScreen(app: AppState, onBack: () -> Unit) {
                 onClick = { app.saveInstructions(instr) },
                 colors = ButtonDefaults.buttonColors(containerColor = Ask.accent, contentColor = Ask.onAccent),
                 modifier = Modifier.fillMaxWidth().height(48.dp)
-            ) { Text("Save", fontWeight = FontWeight.Bold) }
+            ) { Text(t("save"), fontWeight = FontWeight.Bold) }
 
             Spacer(Modifier.height(24.dp))
-            Text("App", fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = Ask.muted)
+            Text(t("app_section"), fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = Ask.muted)
             Spacer(Modifier.height(8.dp))
             val ctx = LocalContext.current
             val up = app.update
@@ -97,15 +107,15 @@ fun SettingsScreen(app: AppState, onBack: () -> Unit) {
                 Icon(Icons.Default.SystemUpdate, "update", tint = Ask.text)
                 Spacer(Modifier.width(12.dp))
                 Column(Modifier.weight(1f)) {
-                    Text(if (up != null) "Install update v${up.version}" else "Check for updates",
+                    Text(if (up != null) t("install_update").replace("%s", up.version) else t("check_updates"),
                         color = Ask.text, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
                     Text(
                         when {
-                            app.updateProgress != null -> "Downloading ${((app.updateProgress ?: 0f) * 100).toInt()}%…"
-                            up != null -> "A newer version is ready to install"
-                            app.checkingUpdate -> "Checking…"
-                            app.updateChecked -> "You're on the latest — v${app.currentVersion}"
-                            else -> "Current version v${app.currentVersion}"
+                            app.updateProgress != null -> t("downloading").replace("%s", "${((app.updateProgress ?: 0f) * 100).toInt()}")
+                            up != null -> t("newer_ready")
+                            app.checkingUpdate -> t("checking")
+                            app.updateChecked -> t("on_latest").replace("%s", app.currentVersion)
+                            else -> t("current_ver").replace("%s", app.currentVersion)
                         },
                         color = Ask.muted, fontSize = 12.sp
                     )
@@ -119,7 +129,7 @@ fun SettingsScreen(app: AppState, onBack: () -> Unit) {
                 .background(Ask.ink2).padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
                 Icon(Icons.AutoMirrored.Filled.Logout, "out", tint = Ask.muted)
                 Spacer(Modifier.width(10.dp))
-                Text("Sign out", color = Ask.text)
+                Text(t("sign_out"), color = Ask.text)
             }
             Spacer(Modifier.height(20.dp))
             Text("AskAI · Parable 6 · Ripo Team", color = Ask.muted, fontSize = 12.sp,
@@ -166,7 +176,7 @@ fun AppsScreen(app: AppState, onBack: () -> Unit) {
         containerColor = Ask.ink,
         topBar = {
             TopAppBar(
-                title = { Text("Apps", color = Ask.text, fontWeight = FontWeight.Bold) },
+                title = { Text(t("apps"), color = Ask.text, fontWeight = FontWeight.Bold) },
                 navigationIcon = { IconButton(onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "back", tint = Ask.text) } },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = Ask.ink)
             )
@@ -177,8 +187,8 @@ fun AppsScreen(app: AppState, onBack: () -> Unit) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     Text("🛠️", fontSize = 40.sp)
                     Spacer(Modifier.height(8.dp))
-                    Text("No apps yet", color = Ask.text, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
-                    Text("Ask Parable 6 to build a website or app.", color = Ask.muted, fontSize = 13.sp)
+                    Text(t("no_apps"), color = Ask.text, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+                    Text(t("apps_line"), color = Ask.muted, fontSize = 13.sp)
                 }
             }
         } else {
@@ -193,7 +203,7 @@ fun AppsScreen(app: AppState, onBack: () -> Unit) {
                         Column(Modifier.weight(1f)) {
                             Text(a.name, color = Ask.text, fontSize = 16.sp, fontWeight = FontWeight.SemiBold,
                                 maxLines = 1, overflow = TextOverflow.Ellipsis)
-                            Text("Tap to open", color = Ask.muted, fontSize = 12.sp)
+                            Text(t("tap_open"), color = Ask.muted, fontSize = 12.sp)
                         }
                         Icon(Icons.AutoMirrored.Filled.ArrowForward, "open", tint = Ask.muted)
                     }
@@ -211,7 +221,7 @@ fun AgentsScreen(app: AppState, onBack: () -> Unit) {
         containerColor = Ask.ink,
         topBar = {
             TopAppBar(
-                title = { Text("Agents", color = Ask.text, fontWeight = FontWeight.Bold) },
+                title = { Text(t("agents"), color = Ask.text, fontWeight = FontWeight.Bold) },
                 navigationIcon = { IconButton(onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "back", tint = Ask.text) } },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = Ask.ink)
             )
@@ -222,8 +232,8 @@ fun AgentsScreen(app: AppState, onBack: () -> Unit) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     Text("🤖", fontSize = 40.sp)
                     Spacer(Modifier.height(8.dp))
-                    Text("No agents yet", color = Ask.text, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
-                    Text("Your team's AI agents will appear here.", color = Ask.muted, fontSize = 13.sp)
+                    Text(t("no_agents"), color = Ask.text, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+                    Text(t("agents_line"), color = Ask.muted, fontSize = 13.sp)
                 }
             }
         } else {
@@ -268,7 +278,7 @@ fun ListScreen(title: String, emptyEmoji: String, emptyLine: String, items: List
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     Text(emptyEmoji, fontSize = 40.sp)
                     Spacer(Modifier.height(8.dp))
-                    Text("Nothing here yet", color = Ask.text, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+                    Text(t("nothing_yet"), color = Ask.text, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
                     Text(emptyLine, color = Ask.muted, fontSize = 13.sp)
                 }
             }
