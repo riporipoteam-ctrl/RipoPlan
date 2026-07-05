@@ -52,6 +52,10 @@ object Supa {
         accessToken = null; refreshToken = null; userId = null; email = null; persist()
     }
 
+    // MARK: local preferences (brain choice, custom instructions, theme…)
+    fun getPref(key: String, def: String): String = prefs.getString("pref_$key", def) ?: def
+    fun setPref(key: String, value: String) { prefs.edit().putString("pref_$key", value).apply() }
+
     private fun authHeader() = "Bearer " + (accessToken ?: anonKey)
 
     // MARK: Auth

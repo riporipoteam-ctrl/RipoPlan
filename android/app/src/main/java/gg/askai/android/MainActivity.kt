@@ -20,6 +20,8 @@ import gg.askai.android.data.Supa
 import gg.askai.android.ui.AskAITheme
 import gg.askai.android.ui.Ask
 import gg.askai.android.ui.ChatScreen
+import gg.askai.android.ui.SettingsScreen
+import gg.askai.android.ui.AppsScreen
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -32,8 +34,10 @@ class MainActivity : ComponentActivity() {
                     LaunchedEffect(Unit) { app.boot() }
                     when {
                         app.booting -> Splash()
-                        app.authed -> ChatScreen(app)
-                        else -> AuthScreen(app)
+                        !app.authed -> AuthScreen(app)
+                        app.route == "settings" -> SettingsScreen(app) { app.route = "chat" }
+                        app.route == "apps" -> AppsScreen(app) { app.route = "chat" }
+                        else -> ChatScreen(app)
                     }
                 }
             }
