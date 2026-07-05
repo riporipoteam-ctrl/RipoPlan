@@ -86,6 +86,9 @@ fun ChatScreen(app: AppState) {
                         }
                     }
                     Spacer(Modifier.weight(1f))
+                    IconButton({ app.route = "call" }) {
+                        Icon(Icons.Default.GraphicEq, "voice call", tint = Ask.text)
+                    }
                     IconButton({ app.openThread(null) }) {
                         Icon(Icons.Default.Edit, "new", tint = Ask.text)
                     }
