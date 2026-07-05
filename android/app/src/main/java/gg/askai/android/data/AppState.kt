@@ -18,6 +18,7 @@ data class Msg(val id: String, val sender: String, var content: String, var stat
                val agentId: String?, val images: List<String> = emptyList())
 data class Attachment(val url: String, val type: String, val name: String)
 data class AppItem(val id: String, val name: String, val html: String)
+data class AgentItem(val id: String, val name: String, val subtitle: String, val emoji: String)
 
 class AppState : ViewModel() {
     var authed by mutableStateOf(Supa.isAuthed)
@@ -36,6 +37,7 @@ class AppState : ViewModel() {
     val messages = mutableStateListOf<Msg>()
     val pending = mutableStateListOf<Attachment>()   // staged uploads for next send
     val apps = mutableStateListOf<AppItem>()
+    val agents = mutableStateListOf<AgentItem>()
     var currentThread by mutableStateOf<String?>(null)
     var sending by mutableStateOf(false)
     var uploading by mutableStateOf(false)
@@ -130,6 +132,22 @@ class AppState : ViewModel() {
             for (i in 0 until rows.length()) {
                 val o = rows.getJSONObject(i)
                 apps.add(AppItem(o.optString("id"), o.optString("name", "App"), o.optString("html", "")))
+            }
+        }
+    }
+
+    fun loadAgents() {
+        viewModelScope.launch {
+            val ws = workspaceId ?: return@launch
+            val rows = Supa.select("agents?workspace_id=eq.$ws&select=*&limit=60")
+            agents.clear()
+            for (i in 0 until rows.length()) {
+                val o = rows.getJSONObject(i)
+                val sub = o.optString("description", "").ifBlank {
+                    o.optString("role", "").ifBlank { o.optString("kind", "AI agent") }
+                }
+                val emoji = o.optString("emoji", "").ifBlank { o.optString("avatar", "").ifBlank { "🤖" } }
+                agents.add(AgentItem(o.optString("id"), o.optString("name", "Agent").ifEmpty { "Agent" }, sub, emoji))
             }
         }
     }

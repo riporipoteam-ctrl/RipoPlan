@@ -329,6 +329,8 @@ private fun Sidebar(app: AppState, close: () -> Unit) {
             modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp))
 
         NavRow(Icons.Default.Add, "New chat") { app.openThread(null); close() }
+        NavRow(Icons.Default.GraphicEq, "Voice call") { app.route = "call"; close() }
+        NavRow(Icons.Default.SmartToy, "Agents") { app.route = "agents"; close() }
         NavRow(Icons.Default.Apps, "Apps") { app.route = "apps"; close() }
         NavRow(Icons.Default.Settings, "Settings") { app.route = "settings"; close() }
 

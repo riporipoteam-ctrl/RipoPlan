@@ -24,6 +24,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
+import gg.askai.android.data.AgentItem
 import gg.askai.android.data.AppItem
 import gg.askai.android.data.AppState
 
@@ -172,6 +173,50 @@ fun AppsScreen(app: AppState, onBack: () -> Unit) {
                             Text("Tap to open", color = Ask.muted, fontSize = 12.sp)
                         }
                         Icon(Icons.AutoMirrored.Filled.ArrowForward, "open", tint = Ask.muted)
+                    }
+                }
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun AgentsScreen(app: AppState, onBack: () -> Unit) {
+    LaunchedEffect(Unit) { app.loadAgents() }
+    Scaffold(
+        containerColor = Ask.ink,
+        topBar = {
+            TopAppBar(
+                title = { Text("Agents", color = Ask.text, fontWeight = FontWeight.Bold) },
+                navigationIcon = { IconButton(onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "back", tint = Ask.text) } },
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = Ask.ink)
+            )
+        }
+    ) { pad ->
+        if (app.agents.isEmpty()) {
+            Box(Modifier.padding(pad).fillMaxSize(), contentAlignment = Alignment.Center) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text("🤖", fontSize = 40.sp)
+                    Spacer(Modifier.height(8.dp))
+                    Text("No agents yet", color = Ask.text, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+                    Text("Your team's AI agents will appear here.", color = Ask.muted, fontSize = 13.sp)
+                }
+            }
+        } else {
+            LazyColumn(Modifier.padding(pad).fillMaxSize(), contentPadding = PaddingValues(16.dp)) {
+                items(app.agents, key = { it.id }) { a ->
+                    Row(Modifier.fillMaxWidth().padding(vertical = 6.dp).clip(RoundedCornerShape(14.dp))
+                        .background(Ask.ink2).clickable { app.route = "chat"; app.openThread(null) }.padding(16.dp),
+                        verticalAlignment = Alignment.CenterVertically) {
+                        Box(Modifier.size(42.dp).clip(RoundedCornerShape(12.dp)).background(Ask.ink3),
+                            contentAlignment = Alignment.Center) { Text(a.emoji, fontSize = 20.sp) }
+                        Spacer(Modifier.width(12.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text(a.name, color = Ask.text, fontSize = 16.sp, fontWeight = FontWeight.SemiBold,
+                                maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            Text(a.subtitle, color = Ask.muted, fontSize = 12.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                        }
                     }
                 }
             }
