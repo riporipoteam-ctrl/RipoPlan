@@ -23,6 +23,7 @@ import gg.askai.android.ui.ChatScreen
 import gg.askai.android.ui.SettingsScreen
 import gg.askai.android.ui.AppsScreen
 import gg.askai.android.ui.AgentsScreen
+import gg.askai.android.ui.ListScreen
 import gg.askai.android.ui.VoiceCallScreen
 
 class MainActivity : ComponentActivity() {
@@ -40,6 +41,9 @@ class MainActivity : ComponentActivity() {
                         app.route == "settings" -> SettingsScreen(app) { app.route = "chat" }
                         app.route == "apps" -> AppsScreen(app) { app.route = "chat" }
                         app.route == "agents" -> AgentsScreen(app) { app.route = "chat" }
+                        app.route == "channels" -> ListScreen("Channels", "#️⃣", "Team channels will appear here.", app.channels, { app.loadChannels() }) { app.route = "chat" }
+                        app.route == "jobs" -> ListScreen("Jobs", "💼", "Background jobs and tasks will appear here.", app.jobs, { app.loadJobs() }) { app.route = "chat" }
+                        app.route == "knowledge" -> ListScreen("Knowledge", "📄", "Your knowledge base documents will appear here.", app.knowledge, { app.loadKnowledge() }) { app.route = "chat" }
                         app.route == "call" -> VoiceCallScreen(app) { app.route = "chat" }
                         else -> ChatScreen(app)
                     }

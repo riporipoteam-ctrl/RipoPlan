@@ -27,6 +27,7 @@ import androidx.compose.ui.viewinterop.AndroidView
 import gg.askai.android.data.AgentItem
 import gg.askai.android.data.AppItem
 import gg.askai.android.data.AppState
+import gg.askai.android.data.ListRow
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -216,6 +217,52 @@ fun AgentsScreen(app: AppState, onBack: () -> Unit) {
                             Text(a.name, color = Ask.text, fontSize = 16.sp, fontWeight = FontWeight.SemiBold,
                                 maxLines = 1, overflow = TextOverflow.Ellipsis)
                             Text(a.subtitle, color = Ask.muted, fontSize = 12.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** Generic read-only list page reused for Channels, Jobs and Knowledge. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun ListScreen(title: String, emptyEmoji: String, emptyLine: String, items: List<ListRow>,
+               load: () -> Unit, onBack: () -> Unit) {
+    LaunchedEffect(Unit) { load() }
+    Scaffold(
+        containerColor = Ask.ink,
+        topBar = {
+            TopAppBar(
+                title = { Text(title, color = Ask.text, fontWeight = FontWeight.Bold) },
+                navigationIcon = { IconButton(onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "back", tint = Ask.text) } },
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = Ask.ink)
+            )
+        }
+    ) { pad ->
+        if (items.isEmpty()) {
+            Box(Modifier.padding(pad).fillMaxSize(), contentAlignment = Alignment.Center) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text(emptyEmoji, fontSize = 40.sp)
+                    Spacer(Modifier.height(8.dp))
+                    Text("Nothing here yet", color = Ask.text, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+                    Text(emptyLine, color = Ask.muted, fontSize = 13.sp)
+                }
+            }
+        } else {
+            LazyColumn(Modifier.padding(pad).fillMaxSize(), contentPadding = PaddingValues(16.dp)) {
+                items(items, key = { it.id }) { r ->
+                    Row(Modifier.fillMaxWidth().padding(vertical = 6.dp).clip(RoundedCornerShape(14.dp))
+                        .background(Ask.ink2).padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Box(Modifier.size(42.dp).clip(RoundedCornerShape(12.dp)).background(Ask.ink3),
+                            contentAlignment = Alignment.Center) { Text(r.emoji, fontSize = 20.sp) }
+                        Spacer(Modifier.width(12.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text(r.title, color = Ask.text, fontSize = 16.sp, fontWeight = FontWeight.SemiBold,
+                                maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            if (r.subtitle.isNotBlank())
+                                Text(r.subtitle, color = Ask.muted, fontSize = 12.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
                         }
                     }
                 }

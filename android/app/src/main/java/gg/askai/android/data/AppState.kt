@@ -19,6 +19,7 @@ data class Msg(val id: String, val sender: String, var content: String, var stat
 data class Attachment(val url: String, val type: String, val name: String)
 data class AppItem(val id: String, val name: String, val html: String)
 data class AgentItem(val id: String, val name: String, val subtitle: String, val emoji: String)
+data class ListRow(val id: String, val title: String, val subtitle: String, val emoji: String)
 
 class AppState : ViewModel() {
     var authed by mutableStateOf(Supa.isAuthed)
@@ -38,6 +39,9 @@ class AppState : ViewModel() {
     val pending = mutableStateListOf<Attachment>()   // staged uploads for next send
     val apps = mutableStateListOf<AppItem>()
     val agents = mutableStateListOf<AgentItem>()
+    val channels = mutableStateListOf<ListRow>()
+    val jobs = mutableStateListOf<ListRow>()
+    val knowledge = mutableStateListOf<ListRow>()
     var currentThread by mutableStateOf<String?>(null)
     var sending by mutableStateOf(false)
     var uploading by mutableStateOf(false)
@@ -151,6 +155,22 @@ class AppState : ViewModel() {
             }
         }
     }
+
+    private suspend fun fetchList(table: String, titleKeys: List<String>, subKeys: List<String>, emoji: String): List<ListRow> {
+        val ws = workspaceId ?: return emptyList()
+        val rows = Supa.select("$table?workspace_id=eq.$ws&select=*&limit=80")
+        val out = mutableListOf<ListRow>()
+        for (i in 0 until rows.length()) {
+            val o = rows.getJSONObject(i)
+            val title = titleKeys.firstNotNullOfOrNull { k -> o.optString(k, "").ifBlank { null } } ?: "Untitled"
+            val sub = subKeys.firstNotNullOfOrNull { k -> o.optString(k, "").ifBlank { null } } ?: ""
+            out.add(ListRow(o.optString("id"), title, sub, emoji))
+        }
+        return out
+    }
+    fun loadChannels() { viewModelScope.launch { channels.clear(); channels.addAll(fetchList("channels", listOf("name", "title"), listOf("description", "topic", "purpose"), "#️⃣")) } }
+    fun loadJobs() { viewModelScope.launch { jobs.clear(); jobs.addAll(fetchList("jobs", listOf("title", "name"), listOf("status", "description", "state"), "💼")) } }
+    fun loadKnowledge() { viewModelScope.launch { knowledge.clear(); knowledge.addAll(fetchList("knowledge", listOf("title", "name"), listOf("description", "summary", "type"), "📄")) } }
 
     fun openThread(id: String?) {
         currentThread = id; messages.clear(); pending.clear(); route = "chat"

@@ -331,6 +331,9 @@ private fun Sidebar(app: AppState, close: () -> Unit) {
         NavRow(Icons.Default.Add, "New chat") { app.openThread(null); close() }
         NavRow(Icons.Default.GraphicEq, "Voice call") { app.route = "call"; close() }
         NavRow(Icons.Default.SmartToy, "Agents") { app.route = "agents"; close() }
+        NavRow(Icons.Default.Tag, "Channels") { app.route = "channels"; close() }
+        NavRow(Icons.Default.WorkOutline, "Jobs") { app.route = "jobs"; close() }
+        NavRow(Icons.Default.MenuBook, "Knowledge") { app.route = "knowledge"; close() }
         NavRow(Icons.Default.Apps, "Apps") { app.route = "apps"; close() }
         NavRow(Icons.Default.Settings, "Settings") { app.route = "settings"; close() }
 
