@@ -18,6 +18,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -72,7 +73,37 @@ fun SettingsScreen(app: AppState, onBack: () -> Unit) {
                 modifier = Modifier.fillMaxWidth().height(48.dp)
             ) { Text("Save", fontWeight = FontWeight.Bold) }
 
-            Spacer(Modifier.height(28.dp))
+            Spacer(Modifier.height(24.dp))
+            Text("App", fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = Ask.muted)
+            Spacer(Modifier.height(8.dp))
+            val ctx = LocalContext.current
+            val up = app.update
+            Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp))
+                .clickable(enabled = !app.checkingUpdate) {
+                    if (up != null) app.installUpdate(ctx) else app.checkForUpdate(manual = true)
+                }
+                .background(Ask.ink2).padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Default.SystemUpdate, "update", tint = Ask.text)
+                Spacer(Modifier.width(12.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(if (up != null) "Install update v${up.version}" else "Check for updates",
+                        color = Ask.text, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+                    Text(
+                        when {
+                            app.updateProgress != null -> "Downloading ${((app.updateProgress ?: 0f) * 100).toInt()}%…"
+                            up != null -> "A newer version is ready to install"
+                            app.checkingUpdate -> "Checking…"
+                            app.updateChecked -> "You're on the latest — v${app.currentVersion}"
+                            else -> "Current version v${app.currentVersion}"
+                        },
+                        color = Ask.muted, fontSize = 12.sp
+                    )
+                }
+                if (app.checkingUpdate || app.updateProgress != null)
+                    CircularProgressIndicator(Modifier.size(20.dp), color = Ask.muted, strokeWidth = 2.dp)
+            }
+
+            Spacer(Modifier.height(24.dp))
             Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).clickable { app.signOut() }
                 .background(Ask.ink2).padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
                 Icon(Icons.AutoMirrored.Filled.Logout, "out", tint = Ask.muted)

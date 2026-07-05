@@ -93,9 +93,42 @@ fun ChatScreen(app: AppState) {
             }
         ) { pad ->
             Column(Modifier.padding(pad).fillMaxSize()) {
+                UpdateBanner(app)
                 MessageList(app, Modifier.weight(1f))
                 Composer(app)
             }
+        }
+    }
+}
+
+@Composable
+private fun UpdateBanner(app: AppState) {
+    val u = app.update ?: return
+    val ctx = LocalContext.current
+    Row(
+        Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp)
+            .clip(RoundedCornerShape(14.dp)).background(Ask.accent).padding(horizontal = 14.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Icon(Icons.Default.SystemUpdate, "update", tint = Ask.onAccent, modifier = Modifier.size(20.dp))
+        Spacer(Modifier.width(10.dp))
+        Column(Modifier.weight(1f)) {
+            Text("Update available — v${u.version}", color = Ask.onAccent, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+            val p = app.updateProgress
+            Text(
+                if (p != null) "Downloading ${(p * 100).toInt()}%…" else "You have v${app.currentVersion}. Tap to install.",
+                color = Ask.onAccent.copy(alpha = 0.8f), fontSize = 12.sp
+            )
+        }
+        if (app.updateProgress == null) {
+            TextButton({ app.dismissUpdate() }) { Text("Later", color = Ask.onAccent.copy(alpha = 0.8f), fontSize = 13.sp) }
+            Button(
+                onClick = { app.installUpdate(ctx) },
+                colors = ButtonDefaults.buttonColors(containerColor = Ask.onAccent, contentColor = Ask.accent),
+                contentPadding = PaddingValues(horizontal = 14.dp, vertical = 4.dp)
+            ) { Text("Update", fontWeight = FontWeight.Bold, fontSize = 13.sp) }
+        } else {
+            CircularProgressIndicator(Modifier.size(20.dp), color = Ask.onAccent, strokeWidth = 2.dp)
         }
     }
 }

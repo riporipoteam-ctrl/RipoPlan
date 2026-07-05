@@ -6,7 +6,9 @@ import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import android.content.Context
 import gg.askai.android.agent.AgentRunner
+import gg.askai.android.update.Updater
 import kotlinx.coroutines.launch
 import org.json.JSONArray
 import org.json.JSONObject
@@ -38,13 +40,42 @@ class AppState : ViewModel() {
     var sending by mutableStateOf(false)
     var uploading by mutableStateOf(false)
 
+    // Self-update
+    var update by mutableStateOf<Updater.Update?>(null)
+    var updateProgress by mutableStateOf<Float?>(null)
+    var checkingUpdate by mutableStateOf(false)
+    var updateChecked by mutableStateOf(false)
+    val currentVersion: String get() = Updater.currentVersion
+
     fun boot() {
         viewModelScope.launch {
             authed = Supa.isAuthed
             if (authed) { Supa.refreshIfPossible(); loadAll() }
             booting = false
         }
+        checkForUpdate()
     }
+
+    fun checkForUpdate(manual: Boolean = false) {
+        if (checkingUpdate) return
+        checkingUpdate = true
+        viewModelScope.launch {
+            update = runCatching { Updater.check() }.getOrNull()
+            checkingUpdate = false
+            updateChecked = true
+        }
+    }
+
+    fun installUpdate(ctx: Context) {
+        val u = update ?: return
+        if (updateProgress != null) return
+        updateProgress = 0f
+        viewModelScope.launch {
+            val ok = runCatching { Updater.downloadAndInstall(ctx, u.url) { updateProgress = it } }.getOrDefault(false)
+            if (!ok) updateProgress = null   // let them retry; success hands off to the installer
+        }
+    }
+    fun dismissUpdate() { update = null }
 
     fun signIn(email: String, password: String, onErr: (String) -> Unit) {
         viewModelScope.launch {
