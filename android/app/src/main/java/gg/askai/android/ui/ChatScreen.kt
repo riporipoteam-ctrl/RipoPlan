@@ -74,10 +74,10 @@ fun ChatScreen(app: AppState) {
                         DropdownMenu(brainMenu, { brainMenu = false }, modifier = Modifier.background(Ask.ink2)) {
                             DropdownMenuItem(
                                 text = { BrainMenuLabel("✦ Parable 6", "Deepest reasoning", app.brain == "parable") },
-                                onClick = { app.setBrain("parable"); brainMenu = false })
+                                onClick = { app.selectBrain("parable"); brainMenu = false })
                             DropdownMenuItem(
                                 text = { BrainMenuLabel("⚡ Turbo", "Fast everyday answers", app.brain == "turbo") },
-                                onClick = { app.setBrain("turbo"); brainMenu = false })
+                                onClick = { app.selectBrain("turbo"); brainMenu = false })
                         }
                     }
                     Spacer(Modifier.weight(1f))

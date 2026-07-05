@@ -60,8 +60,8 @@ class AppState : ViewModel() {
     }
     fun signOut() { Supa.signOut(); authed = false; route = "chat"; threads.clear(); messages.clear(); apps.clear() }
 
-    fun setBrain(b: String) { brain = b; Supa.setPref("brain", b); AgentRunner.brain = b }
-    fun setInstructions(v: String) { instructions = v; Supa.setPref("instructions", v); AgentRunner.instructions = v }
+    fun selectBrain(b: String) { brain = b; Supa.setPref("brain", b); AgentRunner.brain = b }
+    fun saveInstructions(v: String) { instructions = v; Supa.setPref("instructions", v); AgentRunner.instructions = v }
 
     private suspend fun loadAll() {
         AgentRunner.loadKeys()

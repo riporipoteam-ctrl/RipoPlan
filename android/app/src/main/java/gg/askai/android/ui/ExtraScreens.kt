@@ -49,9 +49,9 @@ fun SettingsScreen(app: AppState, onBack: () -> Unit) {
             Spacer(Modifier.height(24.dp))
             Text("Model", fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = Ask.muted)
             Spacer(Modifier.height(8.dp))
-            BrainOption("✦  Parable 6", "Flagship — deepest reasoning & research", app.brain == "parable") { app.setBrain("parable") }
+            BrainOption("✦  Parable 6", "Flagship — deepest reasoning & research", app.brain == "parable") { app.selectBrain("parable") }
             Spacer(Modifier.height(8.dp))
-            BrainOption("⚡  Turbo", "Faster answers for everyday tasks", app.brain == "turbo") { app.setBrain("turbo") }
+            BrainOption("⚡  Turbo", "Faster answers for everyday tasks", app.brain == "turbo") { app.selectBrain("turbo") }
 
             Spacer(Modifier.height(24.dp))
             Text("Custom instructions", fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = Ask.muted)
@@ -67,7 +67,7 @@ fun SettingsScreen(app: AppState, onBack: () -> Unit) {
             )
             Spacer(Modifier.height(10.dp))
             Button(
-                onClick = { app.setInstructions(instr) },
+                onClick = { app.saveInstructions(instr) },
                 colors = ButtonDefaults.buttonColors(containerColor = Ask.accent, contentColor = Ask.onAccent),
                 modifier = Modifier.fillMaxWidth().height(48.dp)
             ) { Text("Save", fontWeight = FontWeight.Bold) }
