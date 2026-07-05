@@ -46,6 +46,7 @@ import java.util.Locale
  * Listens with the on-device recognizer, sends the transcript through the same
  * agent engine, speaks the reply, then listens again — like a phone call.
  */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun VoiceCallScreen(app: AppState, onBack: () -> Unit) {
     val ctx = LocalContext.current
