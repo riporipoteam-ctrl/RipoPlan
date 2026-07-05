@@ -1,7 +1,12 @@
 package gg.askai.android.ui
 
+import android.app.Activity
+import android.content.Intent
+import android.graphics.Bitmap
+import android.speech.RecognizerIntent
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import java.io.ByteArrayOutputStream
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -192,6 +197,27 @@ private fun Composer(app: AppState) {
             }
         }
     }
+    val camera = rememberLauncherForActivityResult(ActivityResultContracts.TakePicturePreview()) { bmp ->
+        if (bmp != null) runCatching {
+            val bos = ByteArrayOutputStream()
+            bmp.compress(Bitmap.CompressFormat.JPEG, 92, bos)
+            app.uploadImage(bos.toByteArray(), "jpg", "image/jpeg")
+        }
+    }
+    val voice = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { res ->
+        if (res.resultCode == Activity.RESULT_OK) {
+            val spoken = res.data?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)?.firstOrNull()
+            if (!spoken.isNullOrBlank()) text = if (text.isBlank()) spoken else "$text $spoken"
+        }
+    }
+    fun startVoice() {
+        runCatching {
+            voice.launch(Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+                putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+                putExtra(RecognizerIntent.EXTRA_PROMPT, "Speak to AskAI")
+            })
+        }
+    }
 
     Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp)) {
         if (app.pending.isNotEmpty() || app.uploading) {
@@ -219,11 +245,19 @@ private fun Composer(app: AppState) {
                 .clip(RoundedCornerShape(28.dp)).background(Ask.ink2).padding(horizontal = 8.dp, vertical = 6.dp),
             verticalAlignment = Alignment.Bottom
         ) {
-            IconButton({ picker.launch("image/*") }, modifier = Modifier.size(40.dp)) {
-                Icon(Icons.Default.Add, "add", tint = Ask.text, modifier = Modifier.size(24.dp))
+            IconButton({ picker.launch("image/*") }, modifier = Modifier.size(38.dp)) {
+                Icon(Icons.Default.Add, "photo", tint = Ask.text, modifier = Modifier.size(23.dp))
+            }
+            IconButton({ camera.launch(null) }, modifier = Modifier.size(38.dp)) {
+                Icon(Icons.Default.PhotoCamera, "camera", tint = Ask.text, modifier = Modifier.size(21.dp))
             }
             BasicComposerField(text, { text = it }, Modifier.weight(1f))
             val canSend = (text.isNotBlank() || app.pending.isNotEmpty()) && !app.sending
+            if (!canSend && !app.sending) {
+                IconButton({ startVoice() }, modifier = Modifier.size(38.dp)) {
+                    Icon(Icons.Default.Mic, "voice", tint = Ask.text, modifier = Modifier.size(22.dp))
+                }
+            }
             IconButton(
                 onClick = { if (canSend) { app.send(text); text = "" } },
                 enabled = canSend,
