@@ -8,6 +8,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import java.io.ByteArrayOutputStream
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -55,43 +56,48 @@ fun ChatScreen(app: AppState) {
         Scaffold(
             containerColor = Ask.ink,
             topBar = {
-                Row(
-                    Modifier.fillMaxWidth().background(Ask.ink).padding(horizontal = 8.dp, vertical = 6.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    IconButton({ scope.launch { drawer.open() } }) {
-                        Icon(Icons.Default.Menu, "menu", tint = Ask.text)
-                    }
-                    Spacer(Modifier.weight(1f))
-                    Box {
-                        Column(
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            modifier = Modifier.clip(RoundedCornerShape(10.dp)).clickable { brainMenu = true }
-                                .padding(horizontal = 12.dp, vertical = 2.dp)
-                        ) {
-                            Text("AskAI", fontWeight = FontWeight.Bold, fontSize = 17.sp, color = Ask.text)
-                            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column {
+                    Row(
+                        Modifier.fillMaxWidth().background(Ask.ink).padding(horizontal = 8.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        IconButton({ scope.launch { drawer.open() } }) {
+                            Icon(Icons.Default.Menu, "menu", tint = Ask.text)
+                        }
+                        Spacer(Modifier.weight(1f))
+                        Box {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.clip(RoundedCornerShape(20.dp))
+                                    .border(1.dp, Ask.stroke, RoundedCornerShape(20.dp))
+                                    .background(Ask.ink2.copy(alpha = 0.6f))
+                                    .clickable { brainMenu = true }
+                                    .padding(horizontal = 14.dp, vertical = 7.dp)
+                            ) {
+                                Text("AskAI", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = Ask.text)
+                                Spacer(Modifier.width(6.dp))
                                 Text(if (app.brain == "turbo") "⚡ Turbo" else "✦ Parable 6",
-                                    fontSize = 10.sp, fontWeight = FontWeight.SemiBold, color = Ask.muted)
-                                Icon(Icons.Default.ArrowDropDown, "switch", tint = Ask.muted, modifier = Modifier.size(14.dp))
+                                    fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = Ask.muted)
+                                Icon(Icons.Default.ArrowDropDown, "switch", tint = Ask.muted, modifier = Modifier.size(17.dp))
+                            }
+                            DropdownMenu(brainMenu, { brainMenu = false }, modifier = Modifier.background(Ask.ink2)) {
+                                DropdownMenuItem(
+                                    text = { BrainMenuLabel("✦ Parable 6", "Deepest reasoning", app.brain == "parable") },
+                                    onClick = { app.selectBrain("parable"); brainMenu = false })
+                                DropdownMenuItem(
+                                    text = { BrainMenuLabel("⚡ Turbo", "Fast everyday answers", app.brain == "turbo") },
+                                    onClick = { app.selectBrain("turbo"); brainMenu = false })
                             }
                         }
-                        DropdownMenu(brainMenu, { brainMenu = false }, modifier = Modifier.background(Ask.ink2)) {
-                            DropdownMenuItem(
-                                text = { BrainMenuLabel("✦ Parable 6", "Deepest reasoning", app.brain == "parable") },
-                                onClick = { app.selectBrain("parable"); brainMenu = false })
-                            DropdownMenuItem(
-                                text = { BrainMenuLabel("⚡ Turbo", "Fast everyday answers", app.brain == "turbo") },
-                                onClick = { app.selectBrain("turbo"); brainMenu = false })
+                        Spacer(Modifier.weight(1f))
+                        IconButton({ app.route = "call" }) {
+                            Icon(Icons.Default.GraphicEq, "voice call", tint = Ask.text)
+                        }
+                        IconButton({ app.openThread(null) }) {
+                            Icon(Icons.Default.Edit, "new", tint = Ask.text)
                         }
                     }
-                    Spacer(Modifier.weight(1f))
-                    IconButton({ app.route = "call" }) {
-                        Icon(Icons.Default.GraphicEq, "voice call", tint = Ask.text)
-                    }
-                    IconButton({ app.openThread(null) }) {
-                        Icon(Icons.Default.Edit, "new", tint = Ask.text)
-                    }
+                    Divider(color = Ask.stroke, thickness = 1.dp)
                 }
             }
         ) { pad ->
@@ -154,12 +160,26 @@ private fun MessageList(app: AppState, modifier: Modifier) {
         if (app.messages.isNotEmpty()) listState.animateScrollToItem(app.messages.size - 1)
     }
     if (app.messages.isEmpty()) {
-        Box(modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Text("✦", fontSize = 40.sp, color = Ask.text)
-                Spacer(Modifier.height(8.dp))
-                Text("What should Parable 6 get done?", color = Ask.muted, fontSize = 15.sp)
+        Column(
+            modifier.fillMaxSize().padding(horizontal = 24.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center
+        ) {
+            Box(Modifier.size(56.dp).clip(RoundedCornerShape(17.dp)).background(Ask.accent),
+                contentAlignment = Alignment.Center) {
+                Text("✦", fontSize = 26.sp, color = Ask.onAccent)
             }
+            Spacer(Modifier.height(16.dp))
+            Text("How can I help?", color = Ask.text, fontSize = 24.sp, fontWeight = FontWeight.Bold)
+            Spacer(Modifier.height(6.dp))
+            Text("Ask anything — Parable 6 can search, build, see and create.",
+                color = Ask.muted, fontSize = 14.sp,
+                textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+            Spacer(Modifier.height(24.dp))
+            SuggestChip("🌍  What's happening in the World Cup?") { app.send("What's happening in the World Cup today?") }
+            SuggestChip("🎨  Generate an image of a neon city") { app.send("Generate an image of a futuristic neon city at night") }
+            SuggestChip("🌐  Build me a website for a pizza shop") { app.send("Build me a modern website for a pizza shop") }
+            SuggestChip("💡  Give me a startup idea") { app.send("Give me one great startup idea and how to launch it") }
         }
     } else {
         LazyColumn(modifier.fillMaxSize(), state = listState, contentPadding = PaddingValues(16.dp)) {
@@ -168,6 +188,20 @@ private fun MessageList(app: AppState, modifier: Modifier) {
                 MessageRow(m, showRegen = isLast && m.sender == "agent" && m.status == "complete" && !app.sending) { app.regenerate() }
             }
         }
+    }
+}
+
+@Composable
+private fun SuggestChip(label: String, onClick: () -> Unit) {
+    Box(
+        Modifier.fillMaxWidth().padding(vertical = 4.dp)
+            .clip(RoundedCornerShape(16.dp))
+            .border(1.dp, Ask.stroke, RoundedCornerShape(16.dp))
+            .background(Ask.ink2.copy(alpha = 0.5f))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 16.dp, vertical = 13.dp)
+    ) {
+        Text(label, color = Ask.text, fontSize = 14.5.sp)
     }
 }
 
@@ -278,7 +312,10 @@ private fun Composer(app: AppState) {
         }
         Row(
             Modifier.fillMaxWidth().padding(bottom = 12.dp)
-                .clip(RoundedCornerShape(28.dp)).background(Ask.ink2).padding(horizontal = 8.dp, vertical = 6.dp),
+                .clip(RoundedCornerShape(28.dp))
+                .border(1.dp, Ask.stroke, RoundedCornerShape(28.dp))
+                .background(Ask.ink2.copy(alpha = 0.7f))
+                .padding(horizontal = 8.dp, vertical = 6.dp),
             verticalAlignment = Alignment.Bottom
         ) {
             IconButton({ picker.launch("image/*") }, modifier = Modifier.size(38.dp)) {
@@ -339,13 +376,14 @@ private fun Sidebar(app: AppState, close: () -> Unit) {
 
         Text("Recents", fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = Ask.muted,
             modifier = Modifier.padding(horizontal = 20.dp, vertical = 10.dp))
-        LazyColumn(Modifier.weight(1f)) {
+        LazyColumn(Modifier.weight(1f), contentPadding = PaddingValues(horizontal = 10.dp)) {
             items(app.threads, key = { it.id }) { t ->
-                Text(t.title, color = Ask.text, fontSize = 17.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.fillMaxWidth()
-                        .clickable { app.openThread(t.id); close() }
+                Text(t.title, color = Ask.text, fontSize = 16.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 1.dp)
+                        .clip(RoundedCornerShape(12.dp))
                         .background(if (app.currentThread == t.id) Ask.ink2 else Color.Transparent)
-                        .padding(horizontal = 20.dp, vertical = 12.dp))
+                        .clickable { app.openThread(t.id); close() }
+                        .padding(horizontal = 12.dp, vertical = 12.dp))
             }
         }
         Divider(color = Ask.stroke)

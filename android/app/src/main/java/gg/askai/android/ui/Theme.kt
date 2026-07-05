@@ -30,8 +30,18 @@ val DarkColors = AskColors(
 val LocalAsk = compositionLocalOf { LightColors }
 val Ask: AskColors @Composable get() = LocalAsk.current
 
+/**
+ * App theme. mode: "light" (default), "dark", or "system".
+ * Light is the product default — dark only when the user picks it
+ * (or picks System on a dark phone).
+ */
 @Composable
-fun AskAITheme(dark: Boolean = isSystemInDarkTheme(), content: @Composable () -> Unit) {
+fun AskAITheme(mode: String = "light", content: @Composable () -> Unit) {
+    val dark = when (mode) {
+        "dark" -> true
+        "system" -> isSystemInDarkTheme()
+        else -> false
+    }
     val ask = if (dark) DarkColors else LightColors
     val scheme = if (dark)
         darkColorScheme(background = ask.ink, surface = ask.ink, primary = ask.accent, onPrimary = ask.onAccent)

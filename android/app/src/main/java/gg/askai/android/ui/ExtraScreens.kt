@@ -57,6 +57,15 @@ fun SettingsScreen(app: AppState, onBack: () -> Unit) {
             BrainOption("⚡  Turbo", "Faster answers for everyday tasks", app.brain == "turbo") { app.selectBrain("turbo") }
 
             Spacer(Modifier.height(24.dp))
+            Text("Appearance", fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = Ask.muted)
+            Spacer(Modifier.height(8.dp))
+            Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(Ask.ink2).padding(4.dp)) {
+                ThemeChip("☀️ Light", app.theme == "light", Modifier.weight(1f)) { app.selectTheme("light") }
+                ThemeChip("🌙 Dark", app.theme == "dark", Modifier.weight(1f)) { app.selectTheme("dark") }
+                ThemeChip("📱 Auto", app.theme == "system", Modifier.weight(1f)) { app.selectTheme("system") }
+            }
+
+            Spacer(Modifier.height(24.dp))
             Text("Custom instructions", fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = Ask.muted)
             Spacer(Modifier.height(8.dp))
             OutlinedTextField(
@@ -116,6 +125,19 @@ fun SettingsScreen(app: AppState, onBack: () -> Unit) {
             Text("AskAI · Parable 6 · Ripo Team", color = Ask.muted, fontSize = 12.sp,
                 modifier = Modifier.fillMaxWidth(), textAlign = androidx.compose.ui.text.style.TextAlign.Center)
         }
+    }
+}
+
+@Composable
+private fun ThemeChip(label: String, selected: Boolean, modifier: Modifier, onClick: () -> Unit) {
+    Box(
+        modifier.clip(RoundedCornerShape(11.dp))
+            .background(if (selected) Ask.ink else androidx.compose.ui.graphics.Color.Transparent)
+            .clickable(onClick = onClick).padding(vertical = 10.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(label, fontSize = 14.sp, color = if (selected) Ask.text else Ask.muted,
+            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal)
     }
 }
 

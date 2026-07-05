@@ -32,9 +32,9 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         Supa.init(applicationContext)
         setContent {
-            AskAITheme {
+            val app: AppState = viewModel()
+            AskAITheme(mode = app.theme) {
                 Surface(color = Ask.ink) {
-                    val app: AppState = viewModel()
                     LaunchedEffect(Unit) { app.boot() }
                     when {
                         app.booting -> Splash()

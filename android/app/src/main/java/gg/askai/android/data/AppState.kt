@@ -35,6 +35,8 @@ class AppState : ViewModel() {
     // Model brain: "parable" (Parable 6) | "turbo" (fast)
     var brain by mutableStateOf(Supa.getPref("brain", "parable"))
     var instructions by mutableStateOf(Supa.getPref("instructions", ""))
+    // Appearance: "light" (default) | "dark" | "system"
+    var theme by mutableStateOf(Supa.getPref("theme", "light"))
 
     val threads = mutableStateListOf<Thread>()
     val messages = mutableStateListOf<Msg>()
@@ -100,6 +102,7 @@ class AppState : ViewModel() {
     fun signOut() { Supa.signOut(); authed = false; route = "chat"; threads.clear(); messages.clear(); apps.clear() }
 
     fun selectBrain(b: String) { brain = b; Supa.setPref("brain", b); AgentRunner.brain = b }
+    fun selectTheme(t: String) { theme = t; Supa.setPref("theme", t) }
     fun saveInstructions(v: String) { instructions = v; Supa.setPref("instructions", v); AgentRunner.instructions = v }
 
     private suspend fun loadAll() {
