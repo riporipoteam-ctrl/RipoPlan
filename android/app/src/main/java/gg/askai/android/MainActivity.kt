@@ -25,6 +25,7 @@ import gg.askai.android.ui.AppsScreen
 import gg.askai.android.ui.AgentsScreen
 import gg.askai.android.ui.ListScreen
 import gg.askai.android.ui.VoiceCallScreen
+import gg.askai.android.ui.WorldCupIntro
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -37,6 +38,7 @@ class MainActivity : ComponentActivity() {
                     LaunchedEffect(Unit) { app.boot() }
                     when {
                         app.booting -> Splash()
+                        app.showIntro -> WorldCupIntro { app.showIntro = false }
                         !app.authed -> AuthScreen(app)
                         app.route == "settings" -> SettingsScreen(app) { app.route = "chat" }
                         app.route == "apps" -> AppsScreen(app) { app.route = "chat" }

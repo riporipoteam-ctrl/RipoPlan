@@ -27,8 +27,10 @@ class AppState : ViewModel() {
     var workspaceId: String? = null
     var displayName by mutableStateOf("You")
 
-    // In-app navigation: "chat" | "settings" | "apps"
+    // In-app navigation: "chat" | "settings" | "apps" | "agents" | "channels" | "jobs" | "knowledge" | "call"
     var route by mutableStateOf("chat")
+    // One-time World Cup intro animation per app launch.
+    var showIntro by mutableStateOf(true)
 
     // Model brain: "parable" (Parable 6) | "turbo" (fast)
     var brain by mutableStateOf(Supa.getPref("brain", "parable"))
