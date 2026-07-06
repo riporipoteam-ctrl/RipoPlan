@@ -21,6 +21,9 @@ import java.util.concurrent.TimeUnit
 object AgentRunner {
     private val http = OkHttpClient.Builder()
         .connectTimeout(30, TimeUnit.SECONDS).readTimeout(120, TimeUnit.SECONDS).build()
+    // Vision gets its own short-fuse client so a slow model falls through fast.
+    private val visionHttp = OkHttpClient.Builder()
+        .connectTimeout(10, TimeUnit.SECONDS).readTimeout(22, TimeUnit.SECONDS).build()
     private val JSON = "application/json".toMediaType()
 
     var nvidiaKey: String = ""
@@ -123,7 +126,7 @@ object AgentRunner {
         }
         lastUser?.optString("content")?.let { c ->
             Regex("\\[Uploaded image: (\\S+?)\\]").findAll(c).take(3).forEach { mt ->
-                onStep("Looking at the image…")
+                onStep(label("view_image"))
                 val d = viewImage(mt.groupValues[1], "Describe in detail and READ ALL TEXT exactly.")
                 msgs.put(JSONObject().put("role", "user").put("content", "(Automatic image analysis) $d"))
                 steps.add("view_image")
@@ -160,7 +163,7 @@ object AgentRunner {
                 msgs.put(toolMsg(call, name, out.take(6000)))
             }
         }
-        onStep("Writing the answer…")
+        onStep(if (language == "bs") "Pišem odgovor…" else "Writing the answer…")
         msgs.put(JSONObject().put("role", "user").put("content", "Now write your complete final answer in plain Markdown. No tool syntax."))
         chat(msgs, null)?.optString("content", "")?.trim()?.let { if (it.isNotEmpty()) return@withContext Result(it, images, steps) }
         if (images.isNotEmpty()) return@withContext Result("Here's what I made.", images, steps)
@@ -190,7 +193,13 @@ object AgentRunner {
     private fun toolMsg(call: JSONObject, name: String, content: String) =
         JSONObject().put("role", "tool").put("tool_call_id", call.optString("id")).put("name", name).put("content", content)
 
-    private fun label(t: String) = when (t) {
+    private fun label(t: String) = if (language == "bs") when (t) {
+        "web_search" -> "Pretražujem web…"; "deep_search" -> "Dubinski istražujem…"
+        "browse" -> "Pregledam stranicu…"; "wiki" -> "Čitam Wikipediju…"
+        "generate_image" -> "Generišem sliku…"; "find_images" -> "Tražim prave fotografije…"
+        "view_image" -> "Gledam sliku…"; "build_app" -> "Pravim tvoju aplikaciju…"
+        "world_cup" -> "Provjeravam Svjetsko prvenstvo…"; else -> "Radim…"
+    } else when (t) {
         "web_search" -> "Searching the web…"; "deep_search" -> "Researching deeply…"
         "browse" -> "Browsing the web…"; "wiki" -> "Reading Wikipedia…"
         "generate_image" -> "Generating an image…"; "find_images" -> "Finding real photos…"
@@ -239,20 +248,27 @@ object AgentRunner {
         return null
     }
 
+    /**
+     * SEE an image FAST (same trick as iOS): download + downscale it in-app and
+     * send base64 so the model doesn't re-fetch from storage, cap the output
+     * tokens (decode time is linear in output), and use a short-fuse client so
+     * a slow model falls through to the next in ~20s instead of hanging.
+     */
     suspend fun viewImage(url: String, question: String): String = withContext(Dispatchers.IO) {
         if (nvidiaKey.isEmpty() || url.isEmpty()) return@withContext "Vision unavailable."
-        val ask = question.ifEmpty { "Describe this image; READ ALL TEXT exactly." }
+        val ask = question.ifEmpty { "Describe this image and READ ALL TEXT exactly. Be concise but complete." }
+        val imageField = if (url.startsWith("http")) downscaledBase64(url) ?: url else url
         for (model in visionModels) {
             val content = JSONArray()
                 .put(JSONObject().put("type", "text").put("text", ask))
-                .put(JSONObject().put("type", "image_url").put("image_url", JSONObject().put("url", url)))
-            val body = JSONObject().put("model", model).put("max_tokens", 512)
+                .put(JSONObject().put("type", "image_url").put("image_url", JSONObject().put("url", imageField)))
+            val body = JSONObject().put("model", model).put("max_tokens", 320)
                 .put("messages", JSONArray().put(JSONObject().put("role", "user").put("content", content)))
             runCatching {
                 val req = Request.Builder().url("https://integrate.api.nvidia.com/v1/chat/completions")
                     .addHeader("Authorization", "Bearer $nvidiaKey").addHeader("Content-Type", "application/json")
                     .post(body.toString().toRequestBody(JSON)).build()
-                http.newCall(req).execute().use { r ->
+                visionHttp.newCall(req).execute().use { r ->
                     if (r.isSuccessful) {
                         val t = JSONObject(r.body?.string() ?: "{}").optJSONArray("choices")
                             ?.optJSONObject(0)?.optJSONObject("message")?.optString("content", "") ?: ""
@@ -263,6 +279,24 @@ object AgentRunner {
         }
         "Couldn't analyze the image."
     }
+
+    /** Fetch an image and return a ≤1280px JPEG data URI (fast one-hop vision). */
+    private fun downscaledBase64(url: String): String? = runCatching {
+        val req = Request.Builder().url(url).build()
+        val bytes = visionHttp.newCall(req).execute().use { r ->
+            if (!r.isSuccessful) return null
+            r.body?.bytes() ?: return null
+        }
+        val bounds = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
+        var sample = 1
+        while (maxOf(bounds.outWidth, bounds.outHeight) / (sample * 2) >= 1280) sample *= 2
+        val opts = android.graphics.BitmapFactory.Options().apply { inSampleSize = sample }
+        val bmp = android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size, opts) ?: return null
+        val out = java.io.ByteArrayOutputStream()
+        bmp.compress(android.graphics.Bitmap.CompressFormat.JPEG, 72, out)
+        "data:image/jpeg;base64," + android.util.Base64.encodeToString(out.toByteArray(), android.util.Base64.NO_WRAP)
+    }.getOrNull()
 
     // MARK: keyless tools
     private fun webSearch(query: String): String {

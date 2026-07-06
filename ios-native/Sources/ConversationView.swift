@@ -369,6 +369,7 @@ struct MessageBubble: View {
     @State private var viewerURL: String?
     @State private var liked = false
     @State private var disliked = false
+    @State private var thinkStart = Date()
 
     var isUser: Bool { message.sender_type == "user" }
     var thinking: Bool { message.status == "thinking" }
@@ -569,9 +570,27 @@ struct MessageBubble: View {
             HStack(spacing: 7) {
                 ProgressView().scaleEffect(0.7)
                 ShimmerText(text: last.label ?? "Working…")
+                ElapsedLabel(since: thinkStart)
             }
         } else {
-            TypingDots()
+            HStack(spacing: 7) {
+                TypingDots()
+                ElapsedLabel(since: thinkStart)
+            }
+        }
+    }
+}
+
+/// Live "· 12s" counter next to Thinking…/tool steps so you can see how long
+/// the agent has been working.
+struct ElapsedLabel: View {
+    let since: Date
+    var body: some View {
+        TimelineView(.periodic(from: since, by: 1)) { ctx in
+            let s = max(0, Int(ctx.date.timeIntervalSince(since)))
+            Text("· \(s)s")
+                .font(.caption.monospacedDigit().weight(.medium))
+                .foregroundStyle(Theme.muted.opacity(0.8))
         }
     }
 }

@@ -10,6 +10,7 @@ import android.content.Context
 import gg.askai.android.agent.AgentRunner
 import gg.askai.android.update.Updater
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -204,14 +205,35 @@ class AppState : ViewModel() {
         messages.clear(); messages.addAll(list)
     }
 
-    /** Upload picked bytes to Storage and stage them for the next message. */
+    /**
+     * Upload picked bytes to Storage and stage them for the next message.
+     * Big camera-roll photos are downscaled to ≤1600px JPEG first — uploads are
+     * ~10x smaller and the vision models read them much faster.
+     */
     fun uploadImage(bytes: ByteArray, ext: String, contentType: String) {
         uploading = true
         viewModelScope.launch {
-            val url = Supa.uploadFile(bytes, ext, contentType)
+            val (b, e, c) = withContext(kotlinx.coroutines.Dispatchers.Default) { shrinkForUpload(bytes, ext, contentType) }
+            val url = Supa.uploadFile(b, e, c)
             if (url != null) pending.add(Attachment(url, "image", "Image"))
             uploading = false
         }
+    }
+
+    private fun shrinkForUpload(bytes: ByteArray, ext: String, contentType: String): Triple<ByteArray, String, String> {
+        if (!contentType.startsWith("image/") || bytes.size < 350_000) return Triple(bytes, ext, contentType)
+        return runCatching {
+            val bounds = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
+            var sample = 1
+            while (maxOf(bounds.outWidth, bounds.outHeight) / (sample * 2) >= 1600) sample *= 2
+            val opts = android.graphics.BitmapFactory.Options().apply { inSampleSize = sample }
+            val bmp = android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size, opts)
+                ?: return Triple(bytes, ext, contentType)
+            val out = java.io.ByteArrayOutputStream()
+            bmp.compress(android.graphics.Bitmap.CompressFormat.JPEG, 82, out)
+            Triple(out.toByteArray(), "jpg", "image/jpeg")
+        }.getOrDefault(Triple(bytes, ext, contentType))
     }
     fun removePending(a: Attachment) { pending.remove(a) }
 

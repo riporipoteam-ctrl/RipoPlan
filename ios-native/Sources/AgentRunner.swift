@@ -423,11 +423,11 @@ enum AgentRunner {
     /// SEE an image FAST. Downloads + downscales the image in-app and sends it as
     /// base64 (one hop — the model doesn't re-fetch from storage), tries small/fast
     /// vision models first, and times out quickly so it never hangs.
-    static func viewImage(_ url: String, _ question: String) async -> String {
+    static func viewImage(_ url: String, _ question: String, tokens: Int = 320) async -> String {
         guard !url.isEmpty else { return "No image URL given." }
         let key = nvidiaKey
         guard !key.isEmpty else { return "Image viewing is unavailable right now — ask the user to describe the image." }
-        let ask = question.isEmpty ? "Look carefully and describe this image in detail. READ ALL TEXT, numbers, signs and license plates EXACTLY, character by character — do not guess. Note objects, people, brands, colors and context." : question
+        let ask = question.isEmpty ? "Look carefully and describe this image. READ ALL TEXT, numbers, signs and license plates EXACTLY, character by character — do not guess. Note objects, people, brands and context. Be concise but complete." : question
 
         // Prepare a base64 payload (fast one-hop; higher res so small text like
         // license plates and receipts is legible).
@@ -447,14 +447,16 @@ enum AgentRunner {
                 "messages": [["role": "user",
                               "content": [["type": "text", "text": ask],
                                           ["type": "image_url", "image_url": ["url": imageField]]]]],
-                "max_tokens": 512
+                // Decode time is linear in output length — a smaller cap cuts
+                // seconds off long descriptions (read_text passes a bigger one).
+                "max_tokens": tokens
             ]
             var req = URLRequest(url: URL(string: "https://integrate.api.nvidia.com/v1/chat/completions")!)
             req.httpMethod = "POST"
             req.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
             req.setValue("application/json", forHTTPHeaderField: "Content-Type")
             req.httpBody = try? JSONSerialization.data(withJSONObject: payload)
-            req.timeoutInterval = 20
+            req.timeoutInterval = 15
             if let (d, r) = try? await URLSession.shared.data(for: req),
                let h = r as? HTTPURLResponse, (200..<300).contains(h.statusCode),
                let o = try? JSONSerialization.jsonObject(with: d) as? [String: Any],
@@ -745,7 +747,7 @@ enum AgentRunner {
             images.append(contentsOf: found.map { $0.1 })
             return "Found \(found.count) real photo(s), now shown to the user: " + found.map { $0.0 }.joined(separator: "; ")
         case "view_image": return await viewImage(str(args["url"]), str(args["question"]))
-        case "read_text": return await viewImage(str(args["url"]), "Transcribe ALL text in this image EXACTLY as written — every word, number, symbol, license plate and line. Preserve layout/order. Output only the transcribed text.")
+        case "read_text": return await viewImage(str(args["url"]), "Transcribe ALL text in this image EXACTLY as written — every word, number, symbol, license plate and line. Preserve layout/order. Output only the transcribed text.", tokens: 800)
         case "read_file": return await readFile(str(args["url"]))
         case "maps_search": return await mapsSearch(str(args["query"]))
         case "search_knowledge": return await searchKnowledge(ctx.workspaceId, str(args["query"]))

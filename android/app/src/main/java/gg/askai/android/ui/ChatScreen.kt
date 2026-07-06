@@ -6,6 +6,13 @@ import android.graphics.Bitmap
 import android.speech.RecognizerIntent
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -24,7 +31,9 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.scale
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -180,13 +189,20 @@ private fun MessageList(app: AppState, modifier: Modifier) {
         if (app.messages.isNotEmpty()) listState.animateScrollToItem(app.messages.size - 1)
     }
     if (app.messages.isEmpty()) {
-        // Gemini-style home: rainbow spark + personal greeting, nothing else.
+        // Gemini-style home: rainbow spark + personal greeting, animated in.
+        var shown by remember { mutableStateOf(false) }
+        LaunchedEffect(Unit) { shown = true }
+        val fade by animateFloatAsState(if (shown) 1f else 0f, tween(600), label = "fade")
+        val breath = rememberInfiniteTransition(label = "breath")
+        val sparkScale by breath.animateFloat(1f, 1.08f,
+            infiniteRepeatable(tween(1600, easing = FastOutSlowInEasing), RepeatMode.Reverse), label = "s")
         Column(
-            modifier.fillMaxSize().padding(horizontal = 32.dp),
+            modifier.fillMaxSize().padding(horizontal = 32.dp).alpha(fade),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center
         ) {
-            Text("✦", style = TextStyle(fontSize = 52.sp, brush = Brush.linearGradient(SparkColors)))
+            Text("✦", style = TextStyle(fontSize = 52.sp, brush = Brush.linearGradient(SparkColors)),
+                modifier = Modifier.scale(sparkScale))
             Spacer(Modifier.height(18.dp))
             val name = app.displayName.trim().ifBlank { "you" }.split(" ").first()
             Text(
@@ -199,7 +215,9 @@ private fun MessageList(app: AppState, modifier: Modifier) {
         LazyColumn(modifier.fillMaxSize(), state = listState, contentPadding = PaddingValues(16.dp)) {
             items(app.messages, key = { it.id }) { m ->
                 val isLast = m.id == app.messages.lastOrNull()?.id
-                MessageRow(m, showRegen = isLast && m.sender == "agent" && m.status == "complete" && !app.sending) { app.regenerate() }
+                Box(Modifier.animateItem()) {
+                    MessageRow(m, showRegen = isLast && m.sender == "agent" && m.status == "complete" && !app.sending) { app.regenerate() }
+                }
             }
         }
     }
@@ -222,11 +240,7 @@ private fun MessageRow(m: Msg, showRegen: Boolean, onRegen: () -> Unit) {
                     .widthIn(max = 300.dp).clip(RoundedCornerShape(16.dp)))
             }
             if (m.content.isEmpty() && m.status != "complete") {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    CircularProgressIndicator(Modifier.size(16.dp), color = Ask.muted, strokeWidth = 2.dp)
-                    Spacer(Modifier.width(8.dp))
-                    Text(if (m.status == "thinking") t("thinking") else m.status, color = Ask.muted, fontSize = 14.sp)
-                }
+                ThinkingStatus(m)
             } else if (m.content.isNotEmpty()) {
                 if (isUser) {
                     Box(Modifier.shadow(2.dp, RoundedCornerShape(20.dp), spotColor = Color(0x14000000))
@@ -248,6 +262,29 @@ private fun MessageRow(m: Msg, showRegen: Boolean, onRegen: () -> Unit) {
                 }
             }
         }
+    }
+}
+
+/**
+ * Live status row while the agent works: pulsing spinner + step label + a
+ * ticking elapsed-seconds counter so you always see how long it's taking.
+ */
+@Composable
+private fun ThinkingStatus(m: Msg) {
+    var secs by remember(m.id) { mutableStateOf(0) }
+    LaunchedEffect(m.id) {
+        while (true) { kotlinx.coroutines.delay(1000); secs++ }
+    }
+    val pulse = rememberInfiniteTransition(label = "think")
+    val a by pulse.animateFloat(0.5f, 1f,
+        infiniteRepeatable(tween(650, easing = FastOutSlowInEasing), RepeatMode.Reverse), label = "a")
+    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.alpha(a)) {
+        CircularProgressIndicator(Modifier.size(16.dp), color = Ask.muted, strokeWidth = 2.dp)
+        Spacer(Modifier.width(8.dp))
+        Text(if (m.status == "thinking") t("thinking") else m.status, color = Ask.muted, fontSize = 14.sp)
+        Spacer(Modifier.width(7.dp))
+        Text("· ${secs}s", color = Ask.muted.copy(alpha = 0.75f), fontSize = 12.5.sp,
+            fontWeight = FontWeight.Medium)
     }
 }
 
