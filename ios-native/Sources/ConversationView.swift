@@ -439,11 +439,8 @@ struct MessageBubble: View {
                                 .font(.footnote).foregroundStyle(Theme.muted)
                         }
                     }
-                    // All browsed pages collapse into ONE drop-down browser card.
-                    let links = atts.filter { $0.type == "link" }
-                    if !links.isEmpty {
-                        BrowserSessionCard(pages: links, live: thinking)
-                    }
+                    // Live browser preview removed (was flaky) — the agent still
+                    // browses; sources are summarized in the reply instead.
                 }
                 if thinking && (message.content ?? "").isEmpty {
                     activityOrDots
@@ -631,7 +628,10 @@ struct TypewriterText: View {
     var body: some View {
         Group {
             if finished || !animate {
+                // Selectable once typed out — long-press to select part of the
+                // reply and copy just that, instead of copying everything.
                 RichText(text: text)
+                    .textSelection(.enabled)
             } else {
                 // Reveal word-by-word (smoother than char-by-char) with a soft
                 // fade on the newest chunk and a blinking caret while it types.

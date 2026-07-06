@@ -88,7 +88,10 @@ object AgentRunner {
         put(fn("generate_image", "Generate an original image from a text prompt (shown to the user).", listOf("prompt"), listOf("prompt")))
         put(fn("find_images", "Find REAL photos of brands/cars/products/places and show them in the chat.", listOf("query"), listOf("query")))
         put(fn("view_image", "Look at an image URL and describe/read it. Use for any [Uploaded image: URL].", listOf("url", "question"), listOf("url")))
-        put(fn("build_app", "Build & publish a website/mini-app as one self-contained HTML file.", listOf("name", "html"), listOf("name", "html")))
+        put(fn("build_app", "Build or UPDATE a website/mini-app as one self-contained HTML file. If an app with the same name already exists it is UPDATED in place — reuse the exact name to edit.", listOf("name", "html"), listOf("name", "html")))
+        put(fn("list_apps", "List the apps/websites already built in this workspace (names).", listOf(), listOf()))
+        put(fn("get_app", "Read the current HTML of an existing app by name — call this BEFORE editing an app so you keep what works and change only what was asked.", listOf("name"), listOf("name")))
+        put(fn("weather", "Current weather + 3-day forecast for any city.", listOf("city"), listOf("city")))
         put(fn("world_cup", "Live FIFA World Cup results, fixtures and standings.", listOf(), listOf()))
     }
 
@@ -110,10 +113,20 @@ object AgentRunner {
             You are AskAI, the user's AI assistant. Today is $today. $brainTxt
             Match effort to the task: greetings/thanks/simple questions get a short direct reply with NO
             tools. For factual/current questions, web_search or deep_search first, then answer with sources.
-            When asked to BUILD a website/app: for a general topic do NO research, for a specific business do
-            at most ONE search, then you MUST call build_app with one long self-contained HTML file (modern
-            CSS, gradient hero, animations, responsive, real content, images via
-            https://image.pollinations.ai/prompt/{desc}?width=800&height=500, sticky nav). Never stall.
+            WEBSITES/APPS — you are an elite product designer. When asked to BUILD: do NO research for a
+            general topic (ONE search max for a specific business), then call build_app with ONE long
+            self-contained HTML file. When asked to EDIT/CHANGE/FIX an existing app: call list_apps, then
+            get_app to read its current HTML, then build_app with the SAME name (that updates it in place —
+            never create a second app for an edit). NON-NEGOTIABLE design spec for every app:
+            • Google Fonts (<link> Inter or Poppins), CSS variables for a cohesive palette, dark-glass sticky nav
+            • Hero with a real background IMAGE layered under a gradient — never a flat color block
+            • AT LEAST 5 <img> tags via https://image.pollinations.ai/prompt/{detailed%20scene}?width=800&height=520&nologo=true (write vivid prompts)
+            • Feature/product card grid with images + hover lift, testimonials, stats row, big footer
+            • Scroll-reveal animations (IntersectionObserver adding a .visible class), smooth-scroll nav, buttons with hover states
+            • Fully responsive (grid/flex + media queries), real convincing copy — never lorem ipsum
+            • WORKING functionality with a virtual backend: JS + localStorage as the database (forms save,
+              carts/lists/logins persist, panels update live). Everything must run offline in the preview.
+            NEVER print HTML/code in the chat message — code goes ONLY inside build_app. Never stall.
             If a message has [Uploaded image: URL], call view_image on it first. Answer in clean Markdown.$custom$langRule
         """.trimIndent()
 
@@ -141,7 +154,7 @@ object AgentRunner {
             val content = message.optString("content", "")
             val calls = message.optJSONArray("tool_calls")
             if (calls == null || calls.length() == 0) {
-                val cleaned = content.trim()
+                val cleaned = presentable(content)
                 if (cleaned.isNotEmpty()) return@withContext Result(cleaned, images, steps)
                 break
             }
@@ -160,12 +173,15 @@ object AgentRunner {
                 onStep(label(name)); steps.add(name)
                 val out = runTool(name, args, images)
                 if (out.isNotEmpty()) lastTool = out
-                msgs.put(toolMsg(call, name, out.take(6000)))
+                msgs.put(toolMsg(call, name, out.take(if (name == "get_app") 15000 else 6000)))
             }
         }
         onStep(if (language == "bs") "Pišem odgovor…" else "Writing the answer…")
-        msgs.put(JSONObject().put("role", "user").put("content", "Now write your complete final answer in plain Markdown. No tool syntax."))
-        chat(msgs, null)?.optString("content", "")?.trim()?.let { if (it.isNotEmpty()) return@withContext Result(it, images, steps) }
+        msgs.put(JSONObject().put("role", "user").put("content", "Now write your complete final answer in plain Markdown. No tool syntax, no code dumps."))
+        chat(msgs, null)?.optString("content", "")?.let { raw ->
+            val fin = presentable(raw)
+            if (fin.isNotEmpty()) return@withContext Result(fin, images, steps)
+        }
         if (images.isNotEmpty()) return@withContext Result("Here's what I made.", images, steps)
         if (lastTool.isNotEmpty()) return@withContext Result(lastTool, images, steps)
         // Last-resort tiny retry.
@@ -188,6 +204,32 @@ object AgentRunner {
         val t = chat(m, null)?.optString("content", "")?.trim()
             ?.replace("\"", "")?.replace(Regex("[.]+$"), "")?.trim()
         if (t.isNullOrBlank() || t.length > 60) null else t
+    }
+
+    /**
+     * Make a model reply presentable: strip leaked tool-call syntax, and if a
+     * whole HTML page leaked into the chat text, publish it to Apps instead of
+     * showing raw code to the user.
+     */
+    private suspend fun presentable(raw: String): String {
+        var t = raw
+            .replace(Regex("(?s)<tool_call>.*?</tool_call>"), "")
+            .replace(Regex("<\\|[a-zA-Z_/]+\\|>"), "")
+            .replace(Regex("(?s)```json\\s*\\{\\s*\"name\"\\s*:.*?```"), "")
+            .replace(Regex("(?m)^\\{\\s*\"name\"\\s*:\\s*\"[a-z_]+\".*$"), "")
+            .trim()
+        val i1 = t.indexOf("<!DOCTYPE", 0, true)
+        val i2 = t.indexOf("<html", 0, true)
+        val htmlIdx = if (i1 >= 0) i1 else i2
+        if (htmlIdx >= 0 && t.length - htmlIdx > 400) {
+            val html = t.substring(htmlIdx).removeSuffix("```").trim()
+            val name = Regex("<title>(.*?)</title>", RegexOption.IGNORE_CASE)
+                .find(html)?.groupValues?.get(1)?.trim()?.take(40)?.ifBlank { null } ?: "App"
+            val res = buildApp(name, html)
+            val before = t.substring(0, htmlIdx).replace(Regex("```[a-z]*\\s*$"), "").trim()
+            t = (if (before.isBlank()) res else "$before\n\n$res").trim()
+        }
+        return t
     }
 
     private fun toolMsg(call: JSONObject, name: String, content: String) =
@@ -219,6 +261,9 @@ object AgentRunner {
         }
         "view_image" -> viewImage(args.optString("url"), args.optString("question"))
         "build_app" -> buildApp(args.optString("name"), args.optString("html"))
+        "list_apps" -> listApps()
+        "get_app" -> getApp(args.optString("name"))
+        "weather" -> weather(args.optString("city"))
         "world_cup" -> worldCup()
         else -> "Unknown tool."
     }
@@ -232,7 +277,7 @@ object AgentRunner {
         return null
     }
     private fun callModel(endpoint: String, key: String, model: String, messages: JSONArray, tools: JSONArray?): JSONObject? {
-        val body = JSONObject().put("model", model).put("messages", messages).put("temperature", 0.5).put("max_tokens", 6000)
+        val body = JSONObject().put("model", model).put("messages", messages).put("temperature", 0.5).put("max_tokens", 8192)
         if (model.contains("kimi")) body.put("chat_template_kwargs", JSONObject().put("thinking", false))
         if (tools != null) body.put("tools", tools).put("tool_choice", "auto")
         repeat(2) {
@@ -365,13 +410,68 @@ object AgentRunner {
         }
         url
     }
+    /** Build a new app, or UPDATE in place when the name already exists. */
     private suspend fun buildApp(name: String, html: String): String = withContext(Dispatchers.IO) {
         val ws = workspaceId ?: return@withContext "No workspace."
         if (html.length < 40) return@withContext "The HTML was empty — write the full page."
-        val row = JSONObject().put("workspace_id", ws).put("name", name.ifEmpty { "App" }).put("html", html)
-        Supa.userId?.let { row.put("created_by", it) }
-        Supa.insert("apps", row, false)
-        "✅ Built and published \"${name.ifEmpty { "App" }}\" to the Apps page."
+        val appName = name.ifEmpty { "App" }
+        val existing = Supa.select("apps?workspace_id=eq.$ws&select=id,name&limit=60")
+        var matchId: String? = null
+        for (i in 0 until existing.length()) {
+            val o = existing.optJSONObject(i) ?: continue
+            if (o.optString("name").trim().equals(appName.trim(), ignoreCase = true)) {
+                matchId = o.optString("id"); break
+            }
+        }
+        if (matchId != null) {
+            Supa.update("apps?id=eq.$matchId", JSONObject().put("html", html))
+            "✅ Updated \"$appName\" in place — the Apps page now shows the new version."
+        } else {
+            val row = JSONObject().put("workspace_id", ws).put("name", appName).put("html", html)
+            Supa.userId?.let { row.put("created_by", it) }
+            Supa.insert("apps", row, false)
+            "✅ Built and published \"$appName\" to the Apps page."
+        }
+    }
+
+    private suspend fun listApps(): String = withContext(Dispatchers.IO) {
+        val ws = workspaceId ?: return@withContext "No workspace."
+        val rows = Supa.select("apps?workspace_id=eq.$ws&select=name&order=created_at.desc&limit=40")
+        val names = (0 until rows.length()).mapNotNull { rows.optJSONObject(it)?.optString("name") }
+        if (names.isEmpty()) "No apps built yet." else "Existing apps: " + names.joinToString(", ")
+    }
+
+    private suspend fun getApp(name: String): String = withContext(Dispatchers.IO) {
+        val ws = workspaceId ?: return@withContext "No workspace."
+        val rows = Supa.select("apps?workspace_id=eq.$ws&select=name,html&limit=60")
+        for (i in 0 until rows.length()) {
+            val o = rows.optJSONObject(i) ?: continue
+            if (o.optString("name").trim().equals(name.trim(), ignoreCase = true)) {
+                val html = o.optString("html")
+                return@withContext "Current HTML of \"${o.optString("name")}\" (${html.length} chars):\n" + html.take(14000)
+            }
+        }
+        "No app named \"$name\". " + listApps()
+    }
+
+    /** Keyless weather via Open-Meteo (geocoding + forecast). */
+    private fun weather(city: String): String {
+        if (city.isBlank()) return "Which city?"
+        val geo = get("https://geocoding-api.open-meteo.com/v1/search?name=${enc(city)}&count=1") ?: return "Couldn't find $city."
+        val loc = runCatching { JSONObject(geo).getJSONArray("results").getJSONObject(0) }.getOrNull()
+            ?: return "Couldn't find $city."
+        val lat = loc.optDouble("latitude"); val lon = loc.optDouble("longitude")
+        val place = loc.optString("name") + (loc.optString("country", "").takeIf { it.isNotBlank() }?.let { ", $it" } ?: "")
+        val f = get("https://api.open-meteo.com/v1/forecast?latitude=$lat&longitude=$lon&current=temperature_2m,apparent_temperature,weather_code,wind_speed_10m&daily=temperature_2m_max,temperature_2m_min,precipitation_probability_max&timezone=auto&forecast_days=3")
+            ?: return "Weather service unavailable."
+        return runCatching {
+            val j = JSONObject(f); val cur = j.getJSONObject("current"); val d = j.getJSONObject("daily")
+            val sb = StringBuilder("Weather in $place: ${cur.optDouble("temperature_2m")}°C (feels ${cur.optDouble("apparent_temperature")}°C), wind ${cur.optDouble("wind_speed_10m")} km/h.\n")
+            val days = d.getJSONArray("time")
+            for (i in 0 until minOf(3, days.length()))
+                sb.append("${days.getString(i)}: ${d.getJSONArray("temperature_2m_min").optDouble(i)}–${d.getJSONArray("temperature_2m_max").optDouble(i)}°C, rain ${d.getJSONArray("precipitation_probability_max").optInt(i)}%\n")
+            sb.toString()
+        }.getOrDefault("Weather service unavailable.")
     }
     private fun worldCup(): String {
         val today = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US).format(java.util.Date())

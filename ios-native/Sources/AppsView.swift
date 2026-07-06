@@ -89,16 +89,26 @@ struct AppPreviewSheet: View {
     @State private var askEdit = false
     @State private var editRequest = ""
     @State private var editSent = false
+    @State private var showConsole = false
+    @State private var logs: [String] = []
 
     var body: some View {
         NavigationStack {
-            HTMLView(html: miniApp.html ?? "<h3 style='font-family:sans-serif'>Nothing to preview</h3>")
+            HTMLView(html: miniApp.html ?? "<h3 style='font-family:sans-serif'>Nothing to preview</h3>",
+                     onLog: { line in
+                         logs.append(line)
+                         if logs.count > 200 { logs.removeFirst(logs.count - 200) }
+                     })
                 .ignoresSafeArea(edges: .bottom)
                 .navigationTitle(miniApp.name).navigationBarTitleDisplayMode(.inline)
                 .toolbar {
                     ToolbarItem(placement: .cancellationAction) { Button("Done") { dismiss() } }
                     ToolbarItem(placement: .navigationBarTrailing) {
                         HStack(spacing: 14) {
+                            Button { Haptic.light(); showConsole.toggle() } label: {
+                                Image(systemName: "terminal")
+                                    .foregroundStyle(showConsole ? Theme.text : Theme.muted)
+                            }
                             Button { Haptic.light(); showCode = true } label: {
                                 Image(systemName: "chevron.left.forwardslash.chevron.right").foregroundStyle(Theme.text)
                             }
@@ -107,6 +117,9 @@ struct AppPreviewSheet: View {
                             }
                         }
                     }
+                }
+                .safeAreaInset(edge: .bottom) {
+                    if showConsole { consolePanel }
                 }
                 .alert("Improve with AI", isPresented: $askEdit) {
                     TextField("What should the agent change?", text: $editRequest)
@@ -160,13 +173,74 @@ struct AppPreviewSheet: View {
                 }
         }
     }
+
+    /// Terminal-style command panel: live console output from the running app,
+    /// so you can watch its virtual backend work right inside the preview.
+    private var consolePanel: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("CONSOLE")
+                .font(.system(size: 10, weight: .bold, design: .monospaced))
+                .foregroundStyle(Color(red: 0.54, green: 0.89, blue: 0.2))
+            ScrollView {
+                VStack(alignment: .leading, spacing: 2) {
+                    if logs.isEmpty {
+                        Text("— no output yet —")
+                            .font(.system(size: 11, design: .monospaced))
+                            .foregroundStyle(Color(white: 0.5))
+                    }
+                    ForEach(Array(logs.enumerated()), id: \.offset) { _, line in
+                        Text(line)
+                            .font(.system(size: 11, design: .monospaced))
+                            .foregroundStyle(Color(white: 0.85))
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                }
+            }
+            .frame(maxHeight: 170)
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color(red: 0.066, green: 0.07, blue: 0.08))
+    }
 }
 
-/// Minimal WKWebView to preview a published mini-app's HTML.
+/// WKWebView preview that pipes console.log/warn/error out to a live panel.
 struct HTMLView: UIViewRepresentable {
     let html: String
-    func makeUIView(context: Context) -> WKWebView { WKWebView() }
+    var onLog: (String) -> Void = { _ in }
+
+    final class Coord: NSObject, WKScriptMessageHandler {
+        let onLog: (String) -> Void
+        var lastHTML: String = ""
+        init(onLog: @escaping (String) -> Void) { self.onLog = onLog }
+        func userContentController(_ ucc: WKUserContentController, didReceive message: WKScriptMessage) {
+            if let s = message.body as? String { onLog(s) }
+        }
+    }
+    func makeCoordinator() -> Coord { Coord(onLog: onLog) }
+
+    func makeUIView(context: Context) -> WKWebView {
+        let cfg = WKWebViewConfiguration()
+        let js = """
+        (function(){
+          function send(tag,args){try{window.webkit.messageHandlers.console.postMessage(tag+' '+Array.from(args).map(function(a){try{return typeof a==='object'?JSON.stringify(a):String(a)}catch(e){return String(a)}}).join(' '))}catch(e){}}
+          var L=console.log,W=console.warn,E=console.error;
+          console.log=function(){send('\\u203a',arguments);L.apply(console,arguments)};
+          console.warn=function(){send('\\u26a0',arguments);W.apply(console,arguments)};
+          console.error=function(){send('\\u2716',arguments);E.apply(console,arguments)};
+          window.addEventListener('error',function(e){send('\\u2716',[e.message])});
+        })();
+        """
+        let script = WKUserScript(source: js, injectionTime: .atDocumentStart, forMainFrameOnly: false)
+        cfg.userContentController.addUserScript(script)
+        cfg.userContentController.add(context.coordinator, name: "console")
+        return WKWebView(frame: .zero, configuration: cfg)
+    }
     func updateUIView(_ web: WKWebView, context: Context) {
+        // Only reload when the HTML actually changed (state toggles like the
+        // console panel must not restart the running app).
+        guard context.coordinator.lastHTML != html else { return }
+        context.coordinator.lastHTML = html
         web.loadHTMLString(html, baseURL: nil)
     }
 }

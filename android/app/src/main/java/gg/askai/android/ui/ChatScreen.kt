@@ -24,6 +24,7 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Logout
 import androidx.compose.material.icons.filled.*
@@ -246,10 +247,10 @@ private fun MessageRow(m: Msg, showRegen: Boolean, onRegen: () -> Unit) {
                     Box(Modifier.shadow(2.dp, RoundedCornerShape(20.dp), spotColor = Color(0x14000000))
                         .clip(RoundedCornerShape(20.dp)).background(Ask.ink)
                         .padding(horizontal = 15.dp, vertical = 10.dp)) {
-                        Text(m.content, color = Ask.text, fontSize = 16.sp)
+                        SelectionContainer { Text(m.content, color = Ask.text, fontSize = 16.sp) }
                     }
                 } else {
-                    Markdown(m.content)
+                    SelectionContainer { Markdown(m.content) }
                     if (showRegen) {
                         Spacer(Modifier.height(4.dp))
                         Row(Modifier.clip(RoundedCornerShape(8.dp)).clickable(onClick = onRegen).padding(4.dp),

@@ -228,17 +228,21 @@ enum AgentRunner {
         ones, keep it quick and to the point.
         RULE 3 — BUILD REQUESTS ALWAYS END WITH build_app, FAST. When asked for a website/app: for a \
         SPECIFIC real business, do AT MOST ONE web_search; for a general/topic site (e.g. "a website \
-        about nature") do NO research at all — you already know enough. Do NOT use find_images for \
-        websites; put pictures directly in the HTML via \
-        https://image.pollinations.ai/prompt/{description}?width=800&height=500 (these need no search). \
-        If a search is rate-limited or returns a CAPTCHA, DO NOT retry it — build immediately with your \
-        own knowledge. You MUST call build_app within your first 2 tool calls. Ending a build request \
-        without build_app is failure. The HTML: one long self-contained file with modern CSS (custom \
-        properties, gradient hero, glassmorphism cards, smooth scroll-behavior), animations (CSS \
-        keyframes, hover transitions, reveal-on-scroll via IntersectionObserver), fully responsive, \
-        real content (never lorem ipsum), Pollinations images, sections (hero, about, features, gallery, \
-        testimonials, contact), sticky nav. AFTER build_app succeeds: create_channel for the project and \
-        post_channel a kickoff tagging the builder teammate's @handle (list_apps + edit_app to iterate).
+        about nature") do NO research at all — you already know enough. If asked to EDIT/CHANGE/FIX an \
+        existing app: list_apps first, then edit_app (or build_app with the EXACT same name — that \
+        updates in place). NEVER create a second app for an edit; keep everything that works and change \
+        only what was asked. If a search is rate-limited or returns a CAPTCHA, DO NOT retry — build \
+        immediately. You MUST call build_app within your first 2 tool calls. NON-NEGOTIABLE design spec: \
+        Google Fonts <link> (Inter/Poppins), CSS custom properties palette, dark-glass sticky nav, hero \
+        with a real background IMAGE under a gradient (never a flat color block), AT LEAST 5 <img> tags \
+        via https://image.pollinations.ai/prompt/{detailed%20vivid%20scene}?width=800&height=520&nologo=true, \
+        feature/product card grid with images + hover lift, testimonials, stats row, big footer, \
+        reveal-on-scroll (IntersectionObserver adding .visible), fully responsive, real convincing copy \
+        (never lorem ipsum), and a WORKING virtual backend: JS + localStorage as the database so forms \
+        save, carts/lists/logins persist and panels update live — everything runs offline in the preview, \
+        with console.log progress lines so the preview Console shows activity. NEVER print HTML or code \
+        in the chat message — code goes ONLY inside build_app/edit_app. AFTER build_app succeeds: \
+        create_channel for the project and post_channel a kickoff tagging the builder teammate's @handle.
         RULE 4 — TEAMWORK. For big builds: create_channel for the project, then post_channel a kickoff \
         brief that TAGS the right teammate with their @handle (from the roster) — tagged teammates are \
         pinged automatically and reply in the channel themselves; never write their reply for them. \

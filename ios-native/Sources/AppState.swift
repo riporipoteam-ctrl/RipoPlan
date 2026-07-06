@@ -949,6 +949,14 @@ final class AppState: ObservableObject {
     private func toolBuildApp(_ name: String, _ html: String) async -> String {
         guard let ws = workspace?.id else { return "No workspace." }
         let nm = name.isEmpty ? "Web App" : name
+        // Upsert: same name = update in place, so "edit my site" never creates
+        // a duplicate app even when the model calls build_app instead of edit_app.
+        let q = nm.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? nm
+        if let rows: [MiniApp] = try? await Supa.shared.select("mini_apps?workspace_id=eq.\(ws)&name=ilike.\(q)&select=id,name&limit=1"),
+           let existing = rows.first {
+            try? await Supa.shared.update("mini_apps?id=eq.\(existing.id)", ["html": html, "updated_at": isoNow()])
+            return "✅ Updated **\(existing.name)** in place — the new version is live on the Apps page."
+        }
         var row: [String: Any] = ["workspace_id": ws, "name": nm, "html": html, "status": "ready"]
         if let uid = Supa.shared.userId { row["created_by"] = uid }
         _ = try? await Supa.shared.insert("mini_apps", row, returning: false) as [Message]

@@ -306,27 +306,73 @@ fun ListScreen(title: String, emptyEmoji: String, emptyLine: String, items: List
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AppViewer(item: AppItem, onBack: () -> Unit) {
+    // Command/console panel: captures console.log/warn/error from the app so
+    // you can see its virtual backend working right inside the preview.
+    val logs = remember { mutableStateListOf<String>() }
+    var showConsole by remember { mutableStateOf(false) }
     Scaffold(
         containerColor = Ask.ink,
         topBar = {
             TopAppBar(
                 title = { Text(item.name, color = Ask.text, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis) },
                 navigationIcon = { IconButton(onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "back", tint = Ask.text) } },
+                actions = {
+                    IconButton({ showConsole = !showConsole }) {
+                        Icon(Icons.Default.Terminal, "console",
+                            tint = if (showConsole) Ask.text else Ask.muted)
+                    }
+                },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = Ask.ink)
             )
         }
     ) { pad ->
-        AndroidView(
-            modifier = Modifier.padding(pad).fillMaxSize(),
-            factory = { ctx ->
-                WebView(ctx).apply {
-                    webViewClient = WebViewClient()
-                    settings.javaScriptEnabled = true
-                    settings.domStorageEnabled = true
-                    loadDataWithBaseURL(null, item.html, "text/html", "utf-8", null)
+        Column(Modifier.padding(pad).fillMaxSize()) {
+            AndroidView(
+                modifier = Modifier.weight(1f).fillMaxWidth(),
+                factory = { ctx ->
+                    WebView(ctx).apply {
+                        webViewClient = WebViewClient()
+                        webChromeClient = object : android.webkit.WebChromeClient() {
+                            override fun onConsoleMessage(msg: android.webkit.ConsoleMessage): Boolean {
+                                val tag = when (msg.messageLevel()) {
+                                    android.webkit.ConsoleMessage.MessageLevel.ERROR -> "✖"
+                                    android.webkit.ConsoleMessage.MessageLevel.WARNING -> "⚠"
+                                    else -> "›"
+                                }
+                                logs.add("$tag ${msg.message()}")
+                                if (logs.size > 200) logs.removeAt(0)
+                                return true
+                            }
+                        }
+                        settings.javaScriptEnabled = true
+                        settings.domStorageEnabled = true
+                        loadDataWithBaseURL(null, item.html, "text/html", "utf-8", null)
+                    }
+                },
+                update = { }
+            )
+            if (showConsole) {
+                Column(
+                    Modifier.fillMaxWidth().heightIn(max = 220.dp)
+                        .background(androidx.compose.ui.graphics.Color(0xFF111214))
+                        .padding(10.dp)
+                ) {
+                    Text("Console", color = androidx.compose.ui.graphics.Color(0xFF8AE234),
+                        fontSize = 11.sp, fontWeight = FontWeight.Bold,
+                        fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace)
+                    LazyColumn(Modifier.fillMaxWidth()) {
+                        items(logs.size) { i ->
+                            Text(logs[i], color = androidx.compose.ui.graphics.Color(0xFFD6D8DB),
+                                fontSize = 11.5.sp,
+                                fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace)
+                        }
+                        if (logs.isEmpty()) item {
+                            Text("— no output yet —", color = androidx.compose.ui.graphics.Color(0xFF6E7076),
+                                fontSize = 11.5.sp, fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace)
+                        }
+                    }
                 }
-            },
-            update = { it.loadDataWithBaseURL(null, item.html, "text/html", "utf-8", null) }
-        )
+            }
+        }
     }
 }
