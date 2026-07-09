@@ -20,18 +20,25 @@ import gg.askai.android.data.Supa
 import gg.askai.android.ui.AskAITheme
 import gg.askai.android.ui.Ask
 import gg.askai.android.ui.ChatScreen
+import gg.askai.android.ui.SettingsScreen
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         Supa.init(applicationContext)
         setContent {
-            AskAITheme {
+            val app: AppState = viewModel()
+            val dark = when (app.themeMode) {
+                "dark" -> true
+                "light" -> false
+                else -> androidx.compose.foundation.isSystemInDarkTheme()
+            }
+            AskAITheme(dark = dark) {
                 Surface(color = Ask.ink) {
-                    val app: AppState = viewModel()
                     LaunchedEffect(Unit) { app.boot() }
                     when {
                         app.booting -> Splash()
+                        app.authed && app.showSettings -> SettingsScreen(app)
                         app.authed -> ChatScreen(app)
                         else -> AuthScreen(app)
                     }
