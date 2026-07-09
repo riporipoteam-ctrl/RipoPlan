@@ -74,17 +74,33 @@ fun ChatScreen(app: AppState) {
                     }
                     Spacer(Modifier.weight(1f))
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text("AskAI", fontWeight = FontWeight.Bold, fontSize = 17.sp, color = Ask.text)
-                        Text("✦ Parable 6", fontSize = 10.sp, fontWeight = FontWeight.SemiBold, color = Ask.muted)
+                        Text(app.chatAgent?.name ?: "AskAI", fontWeight = FontWeight.Bold, fontSize = 17.sp, color = Ask.text)
+                        Text(app.chatAgent?.role ?: "✦ Parable 6", fontSize = 10.sp, fontWeight = FontWeight.SemiBold, color = Ask.muted)
                     }
                     Spacer(Modifier.weight(1f))
-                    IconButton({ app.openThread(null) }) {
+                    IconButton({ app.startAgentChat(null) }) {
                         Icon(Icons.Default.Edit, "new", tint = Ask.text)
                     }
                 }
             }
         ) { pad ->
             Column(Modifier.padding(pad).fillMaxSize()) {
+                app.updateVersion?.let { v ->
+                    val ctx = LocalContext.current
+                    Row(
+                        Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp)
+                            .clip(RoundedCornerShape(12.dp)).background(Ask.ink2).padding(12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(Icons.Default.SystemUpdate, null, tint = Ask.text, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(8.dp))
+                        Text("AskAI v$v is out", color = Ask.text, fontSize = 13.sp, modifier = Modifier.weight(1f))
+                        TextButton({ app.installUpdate(ctx) }, enabled = !app.updateBusy) {
+                            if (app.updateBusy) CircularProgressIndicator(Modifier.size(14.dp), color = Ask.text, strokeWidth = 2.dp)
+                            else Text("Update", color = Ask.text, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
                 app.loadError?.let { err ->
                     Row(
                         Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp)
@@ -171,27 +187,15 @@ private fun MessageRow(m: Msg, onRetry: (String) -> Unit) {
     }
 }
 
-/** Tiny cloud-save status under messages sent this session. */
+/** Quiet unless something went wrong: failed saves get a red tap-to-retry. */
 @Composable
 private fun SaveBadge(m: Msg, onRetry: (String) -> Unit) {
-    when (m.save) {
-        "saving" -> Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 3.dp)) {
-            CircularProgressIndicator(Modifier.size(9.dp), color = Ask.muted, strokeWidth = 1.5.dp)
-            Spacer(Modifier.width(5.dp))
-            Text("Saving…", fontSize = 11.sp, color = Ask.muted)
-        }
-        "saved" -> Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 3.dp)) {
-            Icon(Icons.Default.CloudDone, null, tint = Ask.muted, modifier = Modifier.size(11.dp))
-            Spacer(Modifier.width(4.dp))
-            Text("Saved", fontSize = 11.sp, color = Ask.muted)
-        }
-        "failed" -> Text(
-            "Not saved — tap to retry", fontSize = 11.sp, color = Color(0xFFEF6B6B),
-            fontWeight = FontWeight.SemiBold,
-            modifier = Modifier.padding(top = 3.dp).clip(RoundedCornerShape(6.dp))
-                .clickable { onRetry(m.id) }.padding(2.dp)
-        )
-    }
+    if (m.save == "failed") Text(
+        "Not saved — tap to retry", fontSize = 11.sp, color = Color(0xFFEF6B6B),
+        fontWeight = FontWeight.SemiBold,
+        modifier = Modifier.padding(top = 3.dp).clip(RoundedCornerShape(6.dp))
+            .clickable { onRetry(m.id) }.padding(2.dp)
+    )
 }
 
 @Composable
@@ -279,6 +283,18 @@ private fun BasicComposerField(value: String, onChange: (String) -> Unit, modifi
     )
 }
 
+@Composable
+private fun NavRow(icon: androidx.compose.ui.graphics.vector.ImageVector, label: String, onClick: () -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().clickable(onClick = onClick).padding(horizontal = 20.dp, vertical = 11.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Icon(icon, null, tint = Ask.text, modifier = Modifier.size(20.dp))
+        Spacer(Modifier.width(12.dp))
+        Text(label, color = Ask.text, fontSize = 15.sp, fontWeight = FontWeight.Medium)
+    }
+}
+
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun Sidebar(app: AppState, close: () -> Unit) {
@@ -287,6 +303,10 @@ private fun Sidebar(app: AppState, close: () -> Unit) {
     Column(Modifier.fillMaxSize().background(Ask.ink).padding(top = 24.dp)) {
         Text("AskAI", fontSize = 28.sp, fontWeight = FontWeight.Bold, color = Ask.text,
             modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp))
+        NavRow(Icons.Default.Groups, "Agents") { app.screen = "agents"; close() }
+        NavRow(Icons.Default.NotificationsNone, "Activity") { app.screen = "activity"; close() }
+        NavRow(Icons.Default.Psychology, "Knowledge & memory") { app.screen = "knowledge"; close() }
+        Divider(color = Ask.stroke, modifier = Modifier.padding(vertical = 6.dp))
         Row(
             Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 10.dp),
             verticalAlignment = Alignment.CenterVertically
@@ -317,7 +337,7 @@ private fun Sidebar(app: AppState, close: () -> Unit) {
         Divider(color = Ask.stroke)
         Row(
             Modifier.fillMaxWidth()
-                .clickable { app.showSettings = true; close() }
+                .clickable { app.screen = "settings"; close() }
                 .padding(horizontal = 16.dp, vertical = 14.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {

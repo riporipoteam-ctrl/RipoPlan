@@ -63,6 +63,11 @@ object Supa {
         get() = prefs.getString("theme", "system") ?: "system"
         set(v) { prefs.edit().putString("theme", v).apply() }
 
+    /** The user's custom instructions — injected into every agent run. */
+    var instructionsPref: String
+        get() = prefs.getString("instructions", "") ?: ""
+        set(v) { prefs.edit().putString("instructions", v).apply() }
+
     private fun persist() {
         prefs.edit()
             .putString("access", accessToken).putString("refresh", refreshToken)

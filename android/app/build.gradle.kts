@@ -16,11 +16,21 @@ android {
         versionName = "1.0.0"
     }
 
+    signingConfigs {
+        // Stable committed key so every release has the SAME signature — required
+        // for in-place (and auto) updates. Not a secret: this is a sideloaded
+        // personal app in a public repo; Play-store keys would live in CI secrets.
+        create("release") {
+            storeFile = file("../askai-release.keystore")
+            storePassword = "askai2026"
+            keyAlias = "askai"
+            keyPassword = "askai2026"
+        }
+    }
     buildTypes {
         release {
             isMinifyEnabled = false
-            // Signed with the debug key so the APK installs directly (personal use).
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = signingConfigs.getByName("release")
         }
     }
     compileOptions {

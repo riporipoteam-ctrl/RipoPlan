@@ -216,6 +216,8 @@ enum AgentRunner {
         \(agent.description ?? "") \(agent.system_prompt ?? "")
         Today is \(today). Teammates: \(roster).\(parableText)
 
+        LANGUAGE RULE — ALWAYS answer in the same language the user writes in. An English message gets a \
+        pure-English answer. NEVER use Chinese words or characters unless the user's own message is Chinese.
         RULE 0 — MATCH EFFORT TO THE TASK. Don't over-think. For greetings, thanks, chit-chat, opinions, \
         or simple questions you already know, reply DIRECTLY in one short turn with NO tools and no visible \
         deliberation. Save the deep work for questions that actually need it.
@@ -891,11 +893,23 @@ enum AgentRunner {
             || lc.contains("unusual traffic") || lc.contains("are you a robot")
             || lc.contains("challenge") && lc.contains("human")
     }
+    /// True if the string contains CJK (Chinese/Japanese/Korean) characters.
+    static func containsCJK(_ s: String) -> Bool {
+        s.unicodeScalars.contains { u in
+            let v = Int(u.value)
+            return (0x4E00...0x9FFF).contains(v) || (0x3400...0x4DBF).contains(v)
+                || (0x3040...0x30FF).contains(v) || (0xAC00...0xD7AF).contains(v)
+                || (0x3000...0x303F).contains(v)
+        }
+    }
+
     /// Generate a short, natural chat title (3–5 words) from the first message.
+    /// Always in the user's language — some fast models drift into Chinese, so
+    /// a CJK title for a non-CJK message is rejected (word-based title stays).
     static func titleFor(_ message: String) async -> String? {
         let msg = message.trimmingCharacters(in: .whitespacesAndNewlines)
         guard msg.count > 1 else { return nil }
-        let sys = "You write ultra-short chat titles. Given the user's first message, reply with ONLY a 2–5 word title (Title Case, no quotes, no punctuation at the end, no emoji). Nothing else."
+        let sys = "You write ultra-short chat titles. Given the user's first message, reply with ONLY a 2–5 word title (Title Case, no quotes, no punctuation at the end, no emoji). CRITICAL: the title MUST be in the SAME LANGUAGE as the user's message — an English message gets a pure-English title. NEVER use Chinese characters unless the message itself is Chinese. Nothing else."
         guard let m = await chat([["role": "system", "content": sys],
                                   ["role": "user", "content": String(msg.prefix(500))]], tools: nil),
               var t = (m["content"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines), !t.isEmpty
@@ -905,6 +919,7 @@ enum AgentRunner {
         t = t.components(separatedBy: "\n").first ?? t
         let words = t.split(separator: " ").prefix(6)
         let title = words.joined(separator: " ")
+        guard !(containsCJK(title) && !containsCJK(msg)) else { return nil }
         return title.count >= 2 ? String(title.prefix(60)) : nil
     }
 

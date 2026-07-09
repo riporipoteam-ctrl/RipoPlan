@@ -9,13 +9,17 @@ import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.swipeUp
 import androidx.test.core.app.ApplicationProvider
 import com.github.takahirom.roborazzi.captureRoboImage
+import gg.askai.android.data.Agent
 import gg.askai.android.data.AppState
+import gg.askai.android.data.MemoryItem
 import gg.askai.android.data.Msg
 import gg.askai.android.data.Supa
 import gg.askai.android.data.Thread
+import gg.askai.android.ui.AgentsScreen
 import gg.askai.android.ui.AskAITheme
 import gg.askai.android.ui.Ask
 import gg.askai.android.ui.ChatScreen
+import gg.askai.android.ui.KnowledgeScreen
 import gg.askai.android.ui.SettingsScreen
 import org.junit.Before
 import org.junit.Rule
@@ -46,6 +50,17 @@ class Screenshots {
             Thread("t2", "Fix my resume wording", null),
             Thread("t3", "Ideas for the car-detailing promo", null),
             Thread("t4", "Explain how RLS works", null),
+        ))
+        agents.addAll(listOf(
+            Agent("a1", "AskAI", "Chief of Staff", "Coordinates the team and gets things done.", "#0D0D0D", null, true),
+            Agent("a2", "Researcher", "Research Analyst", "Digs into web research and fact-finding.", "#3b82f6", null, false),
+            Agent("a3", "Builder", "Automation Builder", "Builds apps, code, and automations.", "#8b5cf6", null, false),
+            Agent("a4", "Writer", "Content Writer", "Writes emails, docs, and posts.", "#10b981", null, false),
+        ))
+        memories.addAll(listOf(
+            MemoryItem("k1", "knowledge", "Business", "Armin runs a car-detailing business in Sarajevo.", "2026-07-09"),
+            MemoryItem("k2", "knowledge", "Style", "Prefers short, direct answers.", "2026-07-08"),
+            MemoryItem("m1", "agent_memories", "Memory", "Planning a trip to Mostar this summer.", "2026-07-07"),
         ))
     }
 
@@ -107,6 +122,22 @@ class Screenshots {
         compose.onRoot().performTouchInput { swipeUp(startY = bottom * 0.9f, endY = top + 80f, durationMillis = 300) }
         compose.mainClock.advanceTimeBy(2000)
         compose.onRoot().captureRoboImage("screenshots/06-settings-dark-bottom.png")
+    }
+
+    @Test fun agentsPage() {
+        val app = demoApp()
+        compose.mainClock.autoAdvance = false
+        compose.setContent { AskAITheme(dark = true) { Surface(color = Ask.ink) { AgentsScreen(app) } } }
+        compose.mainClock.advanceTimeBy(600)
+        compose.onRoot().captureRoboImage("screenshots/07-agents.png")
+    }
+
+    @Test fun knowledgePage() {
+        val app = demoApp()
+        compose.mainClock.autoAdvance = false
+        compose.setContent { AskAITheme(dark = true) { Surface(color = Ask.ink) { KnowledgeScreen(app) } } }
+        compose.mainClock.advanceTimeBy(600)
+        compose.onRoot().captureRoboImage("screenshots/08-knowledge-memory.png")
     }
 
     @Test fun settingsLight() {

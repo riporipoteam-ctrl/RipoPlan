@@ -25,13 +25,10 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import gg.askai.android.data.AppState
-import kotlinx.coroutines.Dispatchers
+import gg.askai.android.data.UpdateManager
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
-import org.json.JSONObject
 
 private const val WEB_APP_URL = "https://riporipoteam-ctrl.github.io/RipoPlan/"
-private const val RELEASES_URL = "https://github.com/riporipoteam-ctrl/RipoPlan/releases/tag/android-latest"
 
 @Composable
 fun SettingsScreen(app: AppState) {
@@ -41,13 +38,14 @@ fun SettingsScreen(app: AppState) {
     var confirmSignOut by remember { mutableStateOf(false) }
     var editName by remember { mutableStateOf(false) }
     var editWorkspace by remember { mutableStateOf(false) }
+    var editInstructions by remember { mutableStateOf(false) }
     var checkingUpdate by remember { mutableStateOf(false) }
     val version = remember {
         runCatching { ctx.packageManager.getPackageInfo(ctx.packageName, 0).versionName }
             .getOrNull() ?: "1.0.0"
     }
 
-    BackHandler { app.showSettings = false }
+    BackHandler { app.screen = "chat" }
 
     LaunchedEffect(app.toast) {
         app.toast?.let { snackbar.showSnackbar(it); app.toast = null }
@@ -61,7 +59,7 @@ fun SettingsScreen(app: AppState) {
                 Modifier.fillMaxWidth().background(Ask.ink).padding(horizontal = 8.dp, vertical = 6.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                IconButton({ app.showSettings = false }) {
+                IconButton({ app.screen = "chat" }) {
                     Icon(Icons.Default.ArrowBack, "back", tint = Ask.text)
                 }
                 Text("Settings", fontWeight = FontWeight.Bold, fontSize = 17.sp, color = Ask.text)
@@ -100,6 +98,21 @@ fun SettingsScreen(app: AppState) {
                     ThemeChip("Dark", "dark", app, Modifier.weight(1f))
                 }
                 Caption("Match your phone, or pick a look. AskAI's signature dark theme is one tap away.")
+            }
+
+            // Personalization
+            SettingsCard {
+                SectionTitle("Personalization")
+                SettingsRow(Icons.Default.EditNote, "Custom instructions",
+                    trailing = if (app.instructions.isEmpty()) "Off" else "On", chevron = true) {
+                    editInstructions = true
+                }
+                Divider(color = Ask.stroke)
+                SettingsRow(Icons.Default.Psychology, "Knowledge & memory",
+                    trailing = "${app.memories.size}", chevron = true) {
+                    app.screen = "knowledge"
+                }
+                Caption("Tell AskAI how to talk to you, and see everything it remembers about you from your chats.")
             }
 
             // Workspace
@@ -156,32 +169,52 @@ fun SettingsScreen(app: AppState) {
                     Text("v$version", color = Ask.muted, fontSize = 14.sp)
                 }
                 Divider(color = Ask.stroke)
-                Row(
-                    Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp))
-                        .clickable(enabled = !checkingUpdate) {
-                            checkingUpdate = true
-                            scope.launch {
-                                val latest = fetchLatestVersion()
-                                checkingUpdate = false
-                                when {
-                                    latest == null -> app.toast = "Couldn't check for updates — try again later."
-                                    latest == version -> app.toast = "You're on the latest version."
-                                    else -> ctx.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(RELEASES_URL)))
+                if (app.updateVersion != null) {
+                    Row(
+                        Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp))
+                            .clickable(enabled = !app.updateBusy) { app.installUpdate(ctx) }
+                            .padding(vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        if (app.updateBusy)
+                            CircularProgressIndicator(Modifier.size(20.dp), color = Ask.muted, strokeWidth = 2.dp)
+                        else Icon(Icons.Default.SystemUpdate, null, tint = Ask.text, modifier = Modifier.size(20.dp))
+                        Spacer(Modifier.width(12.dp))
+                        Text(if (app.updateBusy) "Downloading update…" else "Update to v${app.updateVersion}",
+                            color = Ask.text, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+                        Spacer(Modifier.weight(1f))
+                        Icon(Icons.Default.ChevronRight, null, tint = Ask.muted, modifier = Modifier.size(18.dp))
+                    }
+                } else {
+                    Row(
+                        Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp))
+                            .clickable(enabled = !checkingUpdate) {
+                                checkingUpdate = true
+                                scope.launch {
+                                    val rel = UpdateManager.latest()
+                                    checkingUpdate = false
+                                    when {
+                                        rel == null -> app.toast = "Couldn't check for updates — try again later."
+                                        UpdateManager.isNewer(rel.version, version) -> {
+                                            app.updateVersion = rel.version; app.updateUrl = rel.apkUrl
+                                        }
+                                        else -> app.toast = "You're on the latest version (v$version)."
+                                    }
                                 }
                             }
-                        }
-                        .padding(vertical = 10.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    if (checkingUpdate)
-                        CircularProgressIndicator(Modifier.size(20.dp), color = Ask.muted, strokeWidth = 2.dp)
-                    else Icon(Icons.Default.SystemUpdate, null, tint = Ask.text, modifier = Modifier.size(20.dp))
-                    Spacer(Modifier.width(12.dp))
-                    Text("Check for updates", color = Ask.text, fontSize = 15.sp)
-                    Spacer(Modifier.weight(1f))
-                    Icon(Icons.Default.ChevronRight, null, tint = Ask.muted, modifier = Modifier.size(18.dp))
+                            .padding(vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        if (checkingUpdate)
+                            CircularProgressIndicator(Modifier.size(20.dp), color = Ask.muted, strokeWidth = 2.dp)
+                        else Icon(Icons.Default.SystemUpdate, null, tint = Ask.text, modifier = Modifier.size(20.dp))
+                        Spacer(Modifier.width(12.dp))
+                        Text("Check for updates", color = Ask.text, fontSize = 15.sp)
+                        Spacer(Modifier.weight(1f))
+                        Icon(Icons.Default.ChevronRight, null, tint = Ask.muted, modifier = Modifier.size(18.dp))
+                    }
                 }
-                Caption("Powered by Parable 6 — the flagship model by the Ripo Team. New APKs land on the android-latest release.")
+                Caption("Updates download in the app and install in place — your chats and login are kept. Powered by Parable 6.")
             }
 
             // Sign out
@@ -211,6 +244,38 @@ fun SettingsScreen(app: AppState) {
         title = "Rename workspace", initial = app.workspaceName,
         onDismiss = { editWorkspace = false },
         onSave = { app.renameWorkspace(it); editWorkspace = false })
+
+    if (editInstructions) {
+        var draft by remember { mutableStateOf(app.instructions) }
+        AlertDialog(
+            onDismissRequest = { editInstructions = false },
+            containerColor = Ask.ink2,
+            title = { Text("Custom instructions", color = Ask.text) },
+            text = {
+                Column {
+                    Text("What should AskAI know about you, and how should it respond? Every chat follows these.",
+                        color = Ask.muted, fontSize = 13.sp)
+                    Spacer(Modifier.height(10.dp))
+                    OutlinedTextField(
+                        draft, { draft = it }, minLines = 4, maxLines = 8,
+                        placeholder = { Text("e.g. I'm Armin from Bosnia. Keep answers short. I run a car-detailing business.",
+                            color = Ask.muted, fontSize = 13.sp) },
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedTextColor = Ask.text, unfocusedTextColor = Ask.text,
+                            cursorColor = Ask.text,
+                            focusedBorderColor = Ask.muted, unfocusedBorderColor = Ask.stroke),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton({ app.saveInstructions(draft); editInstructions = false }) {
+                    Text("Save", color = Ask.text, fontWeight = FontWeight.SemiBold)
+                }
+            },
+            dismissButton = { TextButton({ editInstructions = false }) { Text("Cancel", color = Ask.muted) } }
+        )
+    }
 
     if (confirmSignOut) AlertDialog(
         onDismissRequest = { confirmSignOut = false },
@@ -325,16 +390,3 @@ private fun EditTextDialog(title: String, initial: String, onDismiss: () -> Unit
     )
 }
 
-/** Latest published Android version from the rolling GitHub release ("1.0.57"), or null. */
-private suspend fun fetchLatestVersion(): String? = withContext(Dispatchers.IO) {
-    runCatching {
-        val conn = java.net.URL("https://api.github.com/repos/riporipoteam-ctrl/RipoPlan/releases/tags/android-latest")
-            .openConnection() as java.net.HttpURLConnection
-        conn.connectTimeout = 10000; conn.readTimeout = 10000
-        conn.setRequestProperty("Accept", "application/vnd.github+json")
-        conn.setRequestProperty("User-Agent", "AskAI-Android")
-        val body = conn.inputStream.bufferedReader().use { it.readText() }
-        conn.disconnect()
-        Regex("v(\\d+\\.\\d+\\.\\d+)").find(JSONObject(body).optString("body", ""))?.groupValues?.get(1)
-    }.getOrNull()
-}
