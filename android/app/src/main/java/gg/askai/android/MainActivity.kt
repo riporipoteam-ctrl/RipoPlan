@@ -19,21 +19,34 @@ import gg.askai.android.data.AppState
 import gg.askai.android.data.Supa
 import gg.askai.android.ui.AskAITheme
 import gg.askai.android.ui.Ask
+import gg.askai.android.ui.ActivityScreen
+import gg.askai.android.ui.AgentsScreen
 import gg.askai.android.ui.ChatScreen
+import gg.askai.android.ui.KnowledgeScreen
+import gg.askai.android.ui.SettingsScreen
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         Supa.init(applicationContext)
         setContent {
-            AskAITheme {
+            val app: AppState = viewModel()
+            val dark = when (app.themeMode) {
+                "dark" -> true
+                "light" -> false
+                else -> androidx.compose.foundation.isSystemInDarkTheme()
+            }
+            AskAITheme(dark = dark) {
                 Surface(color = Ask.ink) {
-                    val app: AppState = viewModel()
-                    LaunchedEffect(Unit) { app.boot() }
+                    LaunchedEffect(Unit) { app.boot(applicationContext) }
                     when {
                         app.booting -> Splash()
-                        app.authed -> ChatScreen(app)
-                        else -> AuthScreen(app)
+                        !app.authed -> AuthScreen(app)
+                        app.screen == "settings" -> SettingsScreen(app)
+                        app.screen == "agents" -> AgentsScreen(app)
+                        app.screen == "activity" -> ActivityScreen(app)
+                        app.screen == "knowledge" -> KnowledgeScreen(app)
+                        else -> ChatScreen(app)
                     }
                 }
             }

@@ -65,16 +65,31 @@ object AgentRunner {
     }
 
     /** Run Parable 6 on the given chat history; returns the final answer + images. */
-    suspend fun run(history: JSONArray, onStep: suspend (String) -> Unit): Result = withContext(Dispatchers.IO) {
+    suspend fun run(
+        history: JSONArray,
+        persona: String = "",
+        memories: List<String> = emptyList(),
+        instructions: String = "",
+        onStep: suspend (String) -> Unit
+    ): Result = withContext(Dispatchers.IO) {
         val images = mutableListOf<String>()
         val steps = mutableListOf<String>()
         val today = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US).format(java.util.Date())
+        val personaText = if (persona.isEmpty()) "" else "\nIn this chat you act as $persona on the user's AskAI team."
+        val memText = if (memories.isEmpty()) "" else
+            "\nWorkspace knowledge & long-term memory about the user — use it naturally:\n- " +
+                memories.take(20).joinToString("\n- ") { it.take(300) }
+        val customText = if (instructions.isEmpty()) "" else
+            "\nThe user's custom instructions — ALWAYS follow them:\n${instructions.take(1200)}"
         val system = """
             You are Parable 6, the flagship AI model built by the Ripo Team. If asked which model you are or
             who made you, say "I'm Parable 6, made by the Ripo Team." NEVER reveal any underlying model or
-            provider. You are elite at coding, research, explaining and creating. Today is $today.
+            provider. You are elite at coding, research, explaining and creating. Today is $today.$personaText
+            LANGUAGE RULE: ALWAYS answer in the same language the user writes in. If the user writes in
+            English, answer ONLY in English. NEVER use Chinese words or characters unless the user's own
+            message is in Chinese.
             Match effort to the task: greet/thank/simple questions get a short direct reply with NO tools.
-            For anything factual or current, web_search first. Answer in clean Markdown.
+            For anything factual or current, web_search first. Answer in clean Markdown.$memText$customText
         """.trimIndent()
 
         val msgs = JSONArray().put(JSONObject().put("role", "system").put("content", system))
@@ -199,6 +214,76 @@ object AgentRunner {
         }
         "Couldn't analyze the image."
     }
+
+    /** True if the string contains CJK (Chinese/Japanese/Korean) characters. */
+    fun containsCJK(s: String): Boolean = s.any { c ->
+        val b = Character.UnicodeBlock.of(c)
+        b == Character.UnicodeBlock.CJK_UNIFIED_IDEOGRAPHS ||
+            b == Character.UnicodeBlock.CJK_UNIFIED_IDEOGRAPHS_EXTENSION_A ||
+            b == Character.UnicodeBlock.CJK_SYMBOLS_AND_PUNCTUATION ||
+            b == Character.UnicodeBlock.HIRAGANA || b == Character.UnicodeBlock.KATAKANA ||
+            b == Character.UnicodeBlock.HANGUL_SYLLABLES
+    }
+
+    /**
+     * Short, natural chat title (2–5 words) from the first message — always in
+     * the user's language. Some fast models drift into Chinese; if the title
+     * comes back in a script the user didn't write in, it's rejected.
+     */
+    suspend fun titleFor(message: String): String? = withContext(Dispatchers.IO) {
+        val msg = message.trim()
+        if (msg.length < 2) return@withContext null
+        val sys = "You write ultra-short chat titles. Reply with ONLY a 2-5 word title for the user's " +
+            "message (Title Case, no quotes, no emoji, no trailing punctuation). CRITICAL: the title MUST " +
+            "be in the SAME LANGUAGE as the user's message — if the message is English the title must be " +
+            "pure English. NEVER use Chinese characters unless the message itself is Chinese."
+        val msgs = JSONArray()
+            .put(JSONObject().put("role", "system").put("content", sys))
+            .put(JSONObject().put("role", "user").put("content", msg.take(500)))
+        var t = chat(msgs, null)?.optString("content", "")?.trim() ?: return@withContext null
+        t = t.replace("\"", "").replace("*", "").lineSequence().firstOrNull()?.trim() ?: return@withContext null
+        t = t.split(" ").take(6).joinToString(" ").take(60)
+        // Language guard: never accept a CJK title for a non-CJK message.
+        if (containsCJK(t) && !containsCJK(msg)) return@withContext null
+        if (t.length < 2) null else t
+    }
+
+    /**
+     * After a reply, quietly decide whether the exchange contained durable facts
+     * about the user worth remembering (mirrors iOS). Returns at most 2
+     * (title, fact) pairs — usually none.
+     */
+    suspend fun extractMemories(history: JSONArray, answer: String, known: List<String>): List<Pair<String, String>> =
+        withContext(Dispatchers.IO) {
+            val convo = StringBuilder()
+            val start = maxOf(0, history.length() - 6)
+            for (i in start until history.length()) {
+                val m = history.optJSONObject(i) ?: continue
+                val c = m.optString("content").take(400)
+                if (c.isNotEmpty()) convo.append(m.optString("role")).append(": ").append(c).append("\n")
+            }
+            if (convo.isEmpty()) return@withContext emptyList()
+            val sys = """
+                You silently maintain long-term memory about a user. From the conversation, extract AT MOST
+                2 NEW durable facts genuinely worth remembering forever — identity, preferences, businesses,
+                projects, goals, important people. NEVER save small talk, one-off requests, temporary info,
+                or anything already known. Be extremely selective; most conversations contain NOTHING worth
+                saving. Write the facts in English.
+                Already known:
+                - ${known.take(20).joinToString("\n- ") { it.take(200) }}
+                Reply ONLY with lines in the form `Title | fact`, or exactly `NONE`.
+            """.trimIndent()
+            val msgs = JSONArray()
+                .put(JSONObject().put("role", "system").put("content", sys))
+                .put(JSONObject().put("role", "user").put("content", convo.toString() + "assistant: " + answer.take(400)))
+            val raw = chat(msgs, null)?.optString("content", "") ?: return@withContext emptyList()
+            if (raw.uppercase().contains("NONE")) return@withContext emptyList()
+            raw.lineSequence().mapNotNull { line ->
+                val parts = line.split("|", limit = 2).map { it.trim() }
+                if (parts.size == 2 && parts[0].isNotEmpty() && parts[1].length > 5)
+                    parts[0].take(80) to parts[1].take(400) else null
+            }.take(2).toList()
+        }
 
     // MARK: keyless tools
     private fun webSearch(query: String): String {
