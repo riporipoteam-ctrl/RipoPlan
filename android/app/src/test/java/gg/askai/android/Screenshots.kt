@@ -69,7 +69,7 @@ class Screenshots {
             currentThread = "t1"
             messages.addAll(listOf(
                 Msg("m1", "user", "Plan a 3-day trip to Sarajevo for me", "complete", null, save = "saved"),
-                Msg("m2", "agent", "Here's a relaxed 3-day plan:\n\nDay 1 — Baščaršija old town, Sebilj fountain, ćevapi at Željo.\nDay 2 — War Tunnel Museum, cable car up Trebević.\nDay 3 — Vrelo Bosne springs, coffee on Ferhadija.", "complete", null, save = "saved"),
+                Msg("m2", "agent", "### Your 3-Day Sarajevo Plan\n\n**Day 1** — Baščaršija old town, Sebilj fountain, *ćevapi* at Željo.\n- Morning: coffee on Ferhadija\n- Evening: Yellow Fortress sunset\n\n**Day 2** — War Tunnel Museum, cable car up Trebević.\n**Day 3** — Vrelo Bosne springs and a slow lunch.", "complete", null, save = "saved"),
                 Msg("m3", "user", "Make day 2 more food-focused", "complete", null, save = "saving"),
                 Msg("m4", "agent", "", "thinking", null),
             ))

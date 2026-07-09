@@ -121,6 +121,13 @@ fun AgentsScreen(app: AppState) {
                             if (a.description.isNotEmpty())
                                 Text(a.description, color = Ask.muted, fontSize = 12.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
                         }
+                        if (a.avatarUrl.isNullOrEmpty()) {
+                            IconButton({ app.generateAgentPicture(a) }, enabled = !app.avatarBusy.contains(a.id)) {
+                                if (app.avatarBusy.contains(a.id))
+                                    CircularProgressIndicator(Modifier.size(16.dp), color = Ask.muted, strokeWidth = 2.dp)
+                                else Icon(Icons.Default.AutoAwesome, "generate picture", tint = Ask.muted, modifier = Modifier.size(18.dp))
+                            }
+                        }
                         IconButton({ pendingArchive = a }) {
                             Icon(Icons.Default.PersonRemove, "archive", tint = Ask.muted, modifier = Modifier.size(18.dp))
                         }

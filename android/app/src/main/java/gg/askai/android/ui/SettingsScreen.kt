@@ -100,6 +100,19 @@ fun SettingsScreen(app: AppState) {
                 Caption("Match your phone, or pick a look. AskAI's signature dark theme is one tap away.")
             }
 
+            // Intelligence
+            SettingsCard {
+                SectionTitle("Intelligence")
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    BrainChip("Parable 6", "parable", app, Modifier.weight(1f))
+                    BrainChip("Turbo", "turbo", app, Modifier.weight(1f))
+                }
+                Caption(if (app.brain == "parable")
+                    "Parable 6 — the flagship model by the Ripo Team. Thinks first, researches deeply, sees images and stays current. The smartest mode."
+                else
+                    "Parable 6 Turbo — a leaner, faster path for quick everyday answers.")
+            }
+
             // Personalization
             SettingsCard {
                 SectionTitle("Personalization")
@@ -346,6 +359,21 @@ private fun SettingsRow(
         Text(label, color = Ask.text, fontSize = 15.sp, modifier = Modifier.weight(1f))
         trailing?.let { Text(it, color = Ask.muted, fontSize = 14.sp) }
         if (chevron) Icon(Icons.Default.ChevronRight, null, tint = Ask.muted, modifier = Modifier.size(18.dp))
+    }
+}
+
+@Composable
+private fun BrainChip(label: String, mode: String, app: AppState, modifier: Modifier) {
+    val selected = app.brain == mode
+    Box(
+        modifier.clip(RoundedCornerShape(12.dp))
+            .background(if (selected) Ask.accent else Ask.ink3)
+            .clickable { app.chooseBrain(mode) }
+            .padding(vertical = 10.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(label, fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
+            color = if (selected) Ask.onAccent else Ask.text)
     }
 }
 

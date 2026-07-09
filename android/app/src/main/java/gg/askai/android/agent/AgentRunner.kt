@@ -25,10 +25,17 @@ object AgentRunner {
     var nvidiaKey: String = ""
     var groqKey: String = ""
 
+    /** "parable" (flagship, smartest) or "turbo" (leaner, faster) — Settings pick. */
+    var brain: String = "parable"
+
     // Parable 6 flagship lineup (all on the NVIDIA key).
     private val parableModels = listOf(
         "z-ai/glm-5.2", "openai/gpt-oss-120b", "moonshotai/kimi-k2.6",
         "qwen/qwen3-next-80b-a3b-instruct", "nvidia/llama-3.3-nemotron-super-49b-v1"
+    )
+    // Turbo: fastest-first ordering of the same lineup.
+    private val turboModels = listOf(
+        "openai/gpt-oss-120b", "moonshotai/kimi-k2.6", "qwen/qwen3-next-80b-a3b-instruct"
     )
     private val visionModels = listOf(
         "nvidia/nemotron-nano-12b-v2-vl", "moonshotai/kimi-k2.6",
@@ -158,7 +165,7 @@ object AgentRunner {
     // MARK: Model call (multi-model fallback on the NVIDIA key)
     private fun chat(messages: JSONArray, tools: JSONArray?): JSONObject? {
         if (nvidiaKey.isNotEmpty()) {
-            for (model in parableModels) {
+            for (model in if (brain == "turbo") turboModels else parableModels) {
                 callModel("https://integrate.api.nvidia.com/v1/chat/completions", nvidiaKey, model, messages, tools)?.let { return it }
             }
         }
@@ -314,6 +321,12 @@ object AgentRunner {
         val extract = runCatching { JSONObject(d).optString("extract") }.getOrDefault("")
         return extract.ifEmpty { "No article found." }.take(1200)
     }
+
+    /** Generate a profile portrait for an agent and host it in Storage. */
+    suspend fun generateAvatar(name: String, role: String): String? = generateImage(
+        "professional minimalist avatar portrait of $name, a friendly AI $role, " +
+            "clean flat vector style, dark monochrome palette, centered face, circular icon, high quality"
+    )
 
     private suspend fun generateImage(prompt: String): String? = withContext(Dispatchers.IO) {
         if (prompt.isEmpty()) return@withContext null

@@ -136,10 +136,26 @@ private fun MessageList(app: AppState, modifier: Modifier) {
         }
         app.messages.isEmpty() -> {
             Box(modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(horizontal = 24.dp)) {
                     Text("✦", fontSize = 40.sp, color = Ask.text)
                     Spacer(Modifier.height(8.dp))
-                    Text("What should Parable 6 get done?", color = Ask.muted, fontSize = 15.sp)
+                    Text(
+                        app.chatAgent?.let { "What should ${it.name} get done?" } ?: "What should Parable 6 get done?",
+                        color = Ask.muted, fontSize = 15.sp
+                    )
+                    Spacer(Modifier.height(22.dp))
+                    listOf(
+                        "Plan my week and keep me on track",
+                        "Research something and give me the facts",
+                        "Draw an image from my imagination",
+                        "Explain a tricky topic simply"
+                    ).forEach { s ->
+                        Text(s, color = Ask.text, fontSize = 14.sp,
+                            modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)
+                                .clip(RoundedCornerShape(14.dp)).background(Ask.ink2)
+                                .clickable { app.send(s) }
+                                .padding(horizontal = 16.dp, vertical = 12.dp))
+                    }
                 }
             }
         }
@@ -179,7 +195,7 @@ private fun MessageRow(m: Msg, onRetry: (String) -> Unit) {
                         Text(m.content, color = Ask.text, fontSize = 16.sp)
                     }
                 } else {
-                    Text(m.content, color = Ask.text, fontSize = 16.sp)
+                    MarkdownText(m.content)
                 }
             }
             SaveBadge(m, onRetry)
@@ -202,10 +218,15 @@ private fun SaveBadge(m: Msg, onRetry: (String) -> Unit) {
 private fun Composer(app: AppState) {
     var text by remember { mutableStateOf("") }
     var photo by remember { mutableStateOf<Uri?>(null) }
+    var attachMenu by remember { mutableStateOf(false) }
+    var cameraTarget by remember { mutableStateOf<Uri?>(null) }
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
         if (uri != null) photo = uri
+    }
+    val camera = rememberLauncherForActivityResult(ActivityResultContracts.TakePicture()) { ok ->
+        if (ok) photo = cameraTarget
     }
 
     Column(Modifier.fillMaxWidth().padding(12.dp)) {
@@ -225,10 +246,39 @@ private fun Composer(app: AppState) {
                 .clip(RoundedCornerShape(28.dp)).background(Ask.ink2).padding(horizontal = 8.dp, vertical = 6.dp),
             verticalAlignment = Alignment.Bottom
         ) {
-            IconButton(
-                onClick = { picker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) },
-                modifier = Modifier.size(40.dp)
-            ) { Icon(Icons.Default.Add, "attach photo", tint = Ask.text, modifier = Modifier.size(24.dp)) }
+            Box {
+                IconButton(onClick = { attachMenu = true }, modifier = Modifier.size(40.dp)) {
+                    Icon(Icons.Default.Add, "attach", tint = Ask.text, modifier = Modifier.size(24.dp))
+                }
+                DropdownMenu(
+                    expanded = attachMenu, onDismissRequest = { attachMenu = false },
+                    containerColor = Ask.ink2
+                ) {
+                    DropdownMenuItem(
+                        leadingIcon = { Icon(Icons.Default.PhotoCamera, null, tint = Ask.text, modifier = Modifier.size(20.dp)) },
+                        text = { Text("Take photo", color = Ask.text) },
+                        onClick = {
+                            attachMenu = false
+                            runCatching {
+                                val dir = java.io.File(ctx.cacheDir, "camera").apply { mkdirs() }
+                                val file = java.io.File(dir, "cap_${System.currentTimeMillis()}.jpg")
+                                val uri = androidx.core.content.FileProvider.getUriForFile(
+                                    ctx, "gg.askai.android.fileprovider", file)
+                                cameraTarget = uri
+                                camera.launch(uri)
+                            }.onFailure { app.toast = "Couldn't open the camera." }
+                        }
+                    )
+                    DropdownMenuItem(
+                        leadingIcon = { Icon(Icons.Default.Image, null, tint = Ask.text, modifier = Modifier.size(20.dp)) },
+                        text = { Text("Photo library", color = Ask.text) },
+                        onClick = {
+                            attachMenu = false
+                            picker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+                        }
+                    )
+                }
+            }
             BasicComposerField(text, { text = it }, Modifier.weight(1f))
             val canSend = (text.isNotBlank() || photo != null) && !app.sending
             IconButton(

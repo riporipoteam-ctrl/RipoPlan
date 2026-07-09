@@ -68,6 +68,16 @@ object Supa {
         get() = prefs.getString("instructions", "") ?: ""
         set(v) { prefs.edit().putString("instructions", v).apply() }
 
+    /** Model choice: "parable" (flagship) or "turbo" (fast). */
+    var brainPref: String
+        get() = prefs.getString("brain", "parable") ?: "parable"
+        set(v) { prefs.edit().putString("brain", v).apply() }
+
+    /** True once the user has seen the welcome/onboarding flow. */
+    var onboardedPref: Boolean
+        get() = prefs.getBoolean("onboarded", false)
+        set(v) { prefs.edit().putBoolean("onboarded", v).apply() }
+
     private fun persist() {
         prefs.edit()
             .putString("access", accessToken).putString("refresh", refreshToken)
@@ -140,6 +150,38 @@ object Supa {
      * is set so the UI can bounce back to sign-in. Network errors leave the
      * current session untouched.
      */
+    /**
+     * Complete an OAuth sign-in (Google): Supabase redirects back to
+     * askai://auth with the session in the URL fragment. Returns true when a
+     * valid session was installed.
+     */
+    suspend fun applyOAuthFragment(fragment: String): Boolean = withContext(Dispatchers.IO) {
+        val params = fragment.split("&").associate {
+            val kv = it.split("=", limit = 2)
+            kv[0] to java.net.URLDecoder.decode(kv.getOrNull(1) ?: "", "UTF-8")
+        }
+        val at = params["access_token"] ?: return@withContext false
+        accessToken = at
+        params["refresh_token"]?.let { if (it.isNotEmpty()) refreshToken = it }
+        expiresAt = params["expires_at"]?.toLongOrNull()
+            ?: (System.currentTimeMillis() / 1000 + (params["expires_in"]?.toLongOrNull() ?: 3600))
+        // Look up who just signed in.
+        val req = Request.Builder().url("$baseURL/auth/v1/user")
+            .addHeader("apikey", anonKey).addHeader("Authorization", "Bearer $at").get().build()
+        runCatching {
+            http.newCall(req).execute().use { r ->
+                val j = JSONObject(r.body?.string() ?: "{}")
+                val id = j.optString("id", "")
+                if (id.isEmpty()) return@withContext false
+                userId = id
+                email = j.optString("email")
+            }
+        }.onFailure { return@withContext false }
+        sessionExpired = false
+        persist()
+        true
+    }
+
     suspend fun refreshIfPossible(): Unit = withContext(Dispatchers.IO) {
         val rt = refreshToken ?: return@withContext
         refreshLock.withLock {

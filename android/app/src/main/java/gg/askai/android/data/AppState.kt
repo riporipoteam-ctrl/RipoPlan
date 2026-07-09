@@ -66,6 +66,7 @@ class AppState : ViewModel() {
 
     var themeMode by mutableStateOf(Supa.themeMode)
     var instructions by mutableStateOf(Supa.instructionsPref)
+    var brain by mutableStateOf(Supa.brainPref)
 
     /** Set when a newer APK is published to the android-latest release. */
     var updateVersion by mutableStateOf<String?>(null)
@@ -76,6 +77,7 @@ class AppState : ViewModel() {
     private val pendingSaves = HashMap<String, JSONObject>()
 
     fun setTheme(mode: String) { themeMode = mode; Supa.themeMode = mode }
+    fun chooseBrain(mode: String) { brain = mode; Supa.brainPref = mode; AgentRunner.brain = mode }
     fun saveInstructions(text: String) {
         instructions = text.trim(); Supa.instructionsPref = instructions
         toast = if (instructions.isEmpty()) "Custom instructions cleared." else "Custom instructions saved."
@@ -105,8 +107,15 @@ class AppState : ViewModel() {
     fun signUp(email: String, password: String, onErr: (String) -> Unit) {
         viewModelScope.launch {
             val err = Supa.signUp(email, password)
-            if (err == null) { authed = true; loadAll() } else onErr(err)
+            if (err == null) { authed = true; screen = "onboarding"; loadAll() } else onErr(err)
         }
+    }
+
+    fun finishOnboarding(name: String, workspace: String) {
+        if (name.trim().isNotEmpty()) updateDisplayName(name)
+        if (workspace.trim().isNotEmpty()) renameWorkspace(workspace)
+        Supa.onboardedPref = true
+        screen = "chat"
     }
 
     fun signOut() {
@@ -123,6 +132,7 @@ class AppState : ViewModel() {
      */
     private suspend fun loadAll() {
         loadError = null
+        AgentRunner.brain = brain
         AgentRunner.loadKeys()
         val uid = Supa.userId ?: return
         userEmail = Supa.email ?: ""
@@ -200,12 +210,31 @@ class AppState : ViewModel() {
                 .put("emoji", "robot").put("avatar_color", "#6e6e80")
                 .put("system_prompt", "You are $n, ${role.trim().ifEmpty { "an AI agent" }}. ${description.trim()}")
                 .put("created_by", uid)
-            if (Supa.insert("agents", row, returning = false) != null) {
+            val created = Supa.insert("agents", row)
+            if (created != null) {
                 toast = "$n joined your team."
                 loadAgentsNow()
+                created.optJSONObject(0)?.optString("id")?.ifEmpty { null }?.let { id ->
+                    agents.firstOrNull { it.id == id }?.let { generateAgentPicture(it) }
+                }
             } else toast = "Couldn't create the agent — try again."
         }
     }
+
+    /** Give an agent an AI-generated profile picture (auto on create, or via ✨). */
+    fun generateAgentPicture(agent: Agent) {
+        if (avatarBusy.contains(agent.id)) return
+        avatarBusy.add(agent.id)
+        viewModelScope.launch {
+            val url = AgentRunner.generateAvatar(agent.name, agent.role)
+            if (url != null && Supa.update("agents?id=eq.${agent.id}", JSONObject().put("avatar_url", url))) {
+                val i = agents.indexOfFirst { it.id == agent.id }
+                if (i >= 0) agents[i] = agents[i].copy(avatarUrl = url)
+            } else toast = "Couldn't generate ${agent.name}'s picture — try again."
+            avatarBusy.remove(agent.id)
+        }
+    }
+    val avatarBusy = mutableStateListOf<String>()
 
     fun archiveAgent(id: String) {
         viewModelScope.launch {
